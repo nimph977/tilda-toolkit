@@ -23,7 +23,10 @@ export const ZERO_TPLID = '396';
 /** Пауза между эталонами — тот же темп, что у чтений цикла (`cycle.mjs`, READ_DELAY_MS). */
 export const CAPTURE_DELAY_MS = 2500;
 
-/** Папка каталога: `<opts.baseDir>/catalog` (тесты) или общая `TILDA_CATALOG_DIR` для всех сайтов. */
+/**
+ * Папка каталога. В работе — общая `TILDA_CATALOG_DIR` (файлы `<tplid>.json` лежат прямо в ней, без подпапки).
+ * `opts.baseDir` — только подмена для тестов: там каталог лежит в подпапке `<baseDir>/catalog`.
+ */
 export function catalogDir(opts = {}) {
   return opts.baseDir ? join(opts.baseDir, 'catalog') : catalogRoot();
 }
