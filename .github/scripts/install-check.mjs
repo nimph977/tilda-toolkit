@@ -74,7 +74,9 @@ function run() {
     const first = json('setup-1', step('setup-1', setupArgs, 0));
     expect('setup-1', first.site?.folder === 'created', `site.folder: ${first.site?.folder}`);
     expect('setup-1', first.site?.env === 'created', `site.env: ${first.site?.env}`);
-    expect('setup-1', first.skills?.length === 2 && first.skills.every((s) => s.action === 'installed'), 'скилл должен быть установлен для двух агентов');
+    // В свежем клоне копии ставятся (`installed`); при повторном запуске в том же клоне они уже есть (`unchanged`).
+    const skillActions = ['installed', 'updated', 'unchanged'];
+    expect('setup-1', first.skills?.length === 2 && first.skills.every((s) => skillActions.includes(s.action)), 'скилл должен быть установлен для двух агентов');
     expect('setup-1', existsSync(join(site, '.env')), 'нет .env в папке сайта');
     for (const file of skillFiles) expect('setup-1', existsSync(file), `нет ${file}`);
 
