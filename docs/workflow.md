@@ -8,22 +8,22 @@
 ## Обычный цикл
 
 0. Если вы не знаете `pageid` нужной страницы, получите перечень страниц проекта. Итог
-   покажет первые пять страниц, полный список ляжет в `site-baseline/pages/<projectid>.json`:
+   покажет первые пять страниц, полный список ляжет в `<папка сайта>/site-baseline/pages/<projectid>.json`:
 
    ```powershell
-   node --env-file=.env scripts/tilda.mjs page list
+   node scripts/tilda.mjs --site <папка сайта> page list
    ```
 
 1. Откройте браузер-держатель и войдите в Tilda:
 
    ```powershell
-   node --env-file=.env scripts/tilda.mjs session --page 200002
+   node scripts/tilda.mjs --site <папка сайта> session --page 200002
    ```
 
 2. Снимите текущее состояние страницы до правки:
 
    ```powershell
-   node --env-file=.env scripts/tilda.mjs snapshot --page 200002
+   node scripts/tilda.mjs --site <папка сайта> snapshot --page 200002
    ```
 
 3. Создайте план операций (JSON). Схема и безопасный синтетический пример — в
@@ -34,14 +34,14 @@
 4. Посмотрите, что будет изменено, без записи:
 
    ```powershell
-   node --env-file=.env scripts/tilda.mjs preview --page 200002 --plan .\my-plan.json
+   node scripts/tilda.mjs --site <папка сайта> preview --page 200002 --plan .\my-plan.json
    ```
 
 5. Примените план и проверьте результат:
 
    ```powershell
-   node --env-file=.env scripts/tilda.mjs apply --page 200002 --plan .\my-plan.json
-   node --env-file=.env scripts/tilda.mjs verify --page 200002 --plan .\my-plan.json
+   node scripts/tilda.mjs --site <папка сайта> apply --page 200002 --plan .\my-plan.json
+   node scripts/tilda.mjs --site <папка сайта> verify --page 200002 --plan .\my-plan.json
    ```
 
    Ожидаемый итог: `verify: 0 расхождений`, код выхода 0. При расхождениях код выхода 1 —
@@ -52,7 +52,7 @@
    явной командой только после этой проверки:
 
    ```powershell
-   node --env-file=.env scripts/tilda.mjs page publish --page 200002 --confirm
+   node scripts/tilda.mjs --site <папка сайта> page publish --page 200002 --confirm
    ```
 
 ## Откат
@@ -62,8 +62,8 @@
 журнала, созданную успешным `apply`:
 
 ```powershell
-node --env-file=.env scripts/tilda.mjs journal --page 200002
-node --env-file=.env scripts/tilda.mjs rollback .\site-baseline\journal\200002\<record>.json
+node scripts/tilda.mjs --site <папка сайта> journal --page 200002
+node scripts/tilda.mjs --site <папка сайта> rollback "<папка сайта>\site-baseline\journal\200002\<record>.json"
 ```
 
 Откат — тот же цикл с обратным планом и той же сверкой; он тоже пишет запись в журнал.
@@ -73,9 +73,9 @@ node --env-file=.env scripts/tilda.mjs rollback .\site-baseline\journal\200002\<
 По локальным снимкам, без браузера:
 
 ```powershell
-node --env-file=.env scripts/tilda.mjs find "старый текст" --page 200002
-node --env-file=.env scripts/tilda.mjs replace "старый текст" "новый текст" --page 200002
-node --env-file=.env scripts/tilda.mjs apply --plan .\scripts\plans\replace-200002.json
+node scripts/tilda.mjs --site <папка сайта> find "старый текст" --page 200002
+node scripts/tilda.mjs --site <папка сайта> replace "старый текст" "новый текст" --page 200002
+node scripts/tilda.mjs --site <папка сайта> apply --plan "<папка сайта>\plans\replace-200002.json"
 ```
 
 Поля форм при поиске и замене пропускаются.
@@ -86,7 +86,7 @@ node --env-file=.env scripts/tilda.mjs apply --plan .\scripts\plans\replace-2000
 сверка бэкапа с копией (расхождение сверх плана — останов) → накат → бэкап остаётся.
 
 ```powershell
-node --env-file=.env scripts/tilda.mjs promote --plan .\my-plan.json --from 200002 --to 200001 --unprotect
+node scripts/tilda.mjs --site <папка сайта> promote --plan .\my-plan.json --from 200002 --to 200001 --unprotect
 ```
 
 Защита живой страницы снимается только флагом `--unprotect` на этот вызов.
@@ -98,29 +98,29 @@ node --env-file=.env scripts/tilda.mjs promote --plan .\my-plan.json --from 2000
 Tilda: тексты, ссылки кнопок, карточки списков и картинки берутся из опубликованного HTML,
 а имена полей редактора — из каталога, снятого с эталонных блоков на черновой странице.
 
-Все команды — из корня репозитория. Для шагов 2–8 нужен `.env` с `TILDA_PROJECT_ID`
-тестового проекта и `TILDA_PROTECTED_PAGES=` (пустой список); черновая страница создаётся
-в этом проекте.
+Все команды — из корня репозитория (или по пути к нему) с `--site <папка сайта>`. Для шагов 2–8 нужна папка
+сайта с `.env`, где задан `TILDA_PROJECT_ID` тестового проекта, `TILDA_PROTECTED_PAGES=` (пустой список)
+и `TILDA_CATALOG_DIR`; черновая страница создаётся в этом проекте.
 
 ```powershell
-# 1. Слепок референса: HTML главной, структура блоков, картинки -> site-reference/demo/
-node scripts/tilda.mjs reference fetch --url https://ref.test/ --slug demo --images
+# 1. Слепок референса: HTML главной, структура блоков, картинки -> <папка сайта>/site-reference/demo/
+node scripts/tilda.mjs --site <папка сайта> reference fetch --url https://ref.test/ --slug demo --images
 # 2. Вход в Tilda в окне держателя (окно развернётся до входа, затем свернётся)
-node --env-file=.env scripts/tilda.mjs session --wait 600
+node scripts/tilda.mjs --site <папка сайта> session --wait 600
 # 3. Черновая страница в тестовом проекте -> запомните pageid из ответа
 #    (забыли — page list покажет все страницы проекта)
-node --env-file=.env scripts/tilda.mjs page create
+node scripts/tilda.mjs --site <папка сайта> page create
 # 4. Каталог полей: по одному блоку каждого шаблона из слепка создать, прочитать, удалить
-node --env-file=.env scripts/tilda.mjs catalog capture --page 200002 --slug demo
-# 5. План сборки: операции newRecord по структуре и каталогу -> scripts/plans/reference-demo-index-200002.json
+node scripts/tilda.mjs --site <папка сайта> catalog capture --page 200002 --slug demo
+# 5. План сборки: операции newRecord по структуре и каталогу -> <папка сайта>/plans/reference-demo-index-200002.json
 #    по умолчанию переносит отступы, фон и типографику; --no-styles отключает
-node --env-file=.env scripts/tilda.mjs reference plan --slug demo --source index --page 200002
+node scripts/tilda.mjs --site <папка сайта> reference plan --slug demo --source index --page 200002
 # 6. Проверка без записи: список блоков и предупреждения о полях
-node --env-file=.env scripts/tilda.mjs apply --plan scripts/plans/reference-demo-index-200002.json --dry-run
+node scripts/tilda.mjs --site <папка сайта> apply --plan <папка сайта>/plans/reference-demo-index-200002.json --dry-run
 # 7. Сборка: картинки на CDN -> блоки -> перечитать -> verify: 0 расхождений
-node --env-file=.env scripts/tilda.mjs apply --plan scripts/plans/reference-demo-index-200002.json
-# 8. Скриншоты для приёмки на 1440 и 320 -> site-baseline/shots/200002/
-node --env-file=.env scripts/tilda.mjs shot --page 200002 --width 1440,320
+node scripts/tilda.mjs --site <папка сайта> apply --plan <папка сайта>/plans/reference-demo-index-200002.json
+# 8. Скриншоты для приёмки на 1440 и 320 -> <папка сайта>/site-baseline/shots/200002/
+node scripts/tilda.mjs --site <папка сайта> shot --page 200002 --width 1440,320
 ```
 
 ### Меню, которое Tilda не даёт добавить
@@ -133,10 +133,10 @@ block`) — их нельзя создать ни одной командой. �
 
 ```powershell
 # 4а. Владелец добавляет в редакторе черновой страницы любой блок из раздела «Меню»
-node --env-file=.env scripts/tilda.mjs inventory --page 200002   # tplid нового блока в _inventory.json
-node --env-file=.env scripts/tilda.mjs catalog capture --page 200002 --tplid 3535
+node scripts/tilda.mjs --site <папка сайта> inventory --page 200002   # tplid нового блока в _inventory.json
+node scripts/tilda.mjs --site <папка сайта> catalog capture --page 200002 --tplid 3535
 # затем блок из редактора удалить: каталог снят, эталон больше не нужен
-node --env-file=.env scripts/tilda.mjs reference plan --slug demo --source index --page 200002 --substitute 770=3535
+node scripts/tilda.mjs --site <папка сайта> reference plan --slug demo --source index --page 200002 --substitute 770=3535
 ```
 
 Пункты меню переносятся в поле `menuitems` шаблона-замены, а если он хранит список — карточками
@@ -176,7 +176,7 @@ node --env-file=.env scripts/tilda.mjs reference plan --slug demo --source index
 обнуляются, чтобы на странице не остались демо-значения шаблона Tilda, — проверьте их на
 скриншотах.
 
-Если сборка оборвалась: журнал `site-baseline/reread/<pageid>/_built.json` показывает, какие
+Если сборка оборвалась: журнал `<папка сайта>/site-baseline/reread/<pageid>/_built.json` показывает, какие
 блоки созданы (`status: ok`) и на каком остановились. Повтор того же плана создаст дубли —
 сначала удалите созданные блоки в редакторе (или урежьте план до несобранных операций и
 укажите `startAfter` = `recordid` последнего собранного блока). `catalog capture` и
@@ -207,24 +207,24 @@ node --env-file=.env scripts/tilda.mjs reference plan --slug demo --source index
 
 ```powershell
 # 1. Структура с признаками разметки (без сети)
-node scripts/tilda.mjs reference structure --slug demo
+node scripts/tilda.mjs --site <папка сайта> reference structure --slug demo
 # 2. Карты влияния для шаблонов слепка — после «делай» владельца: создаёт и удаляет временные
 #    блоки на черновой; повтор той же команды пропускает откалиброванное
-node --env-file=.env scripts/tilda.mjs catalog calibrate --page 200002 --slug demo
-node --env-file=.env scripts/tilda.mjs catalog list          # колонка calibrated
+node scripts/tilda.mjs --site <папка сайта> catalog calibrate --page 200002 --slug demo
+node scripts/tilda.mjs --site <папка сайта> catalog list          # колонка calibrated
 # 3. Оформление проекта: сначала посмотреть, запись — после «делай» (меняет вид всех страниц)
-node --env-file=.env scripts/tilda.mjs reference project --slug demo
-node --env-file=.env scripts/tilda.mjs reference project --slug demo --apply --confirm
+node scripts/tilda.mjs --site <папка сайта> reference project --slug demo
+node scripts/tilda.mjs --site <папка сайта> reference project --slug demo --apply --confirm
 # 4. Новая страница — план по метке; уже собранная — дописывание без пересоздания блоков
-node --env-file=.env scripts/tilda.mjs reference plan --slug demo --source P00 --update
-node --env-file=.env scripts/tilda.mjs apply --plan scripts/plans/reference-demo-P00-update.json --dry-run
-node --env-file=.env scripts/tilda.mjs apply --plan scripts/plans/reference-demo-P00-update.json
+node scripts/tilda.mjs --site <папка сайта> reference plan --slug demo --source P00 --update
+node scripts/tilda.mjs --site <папка сайта> apply --plan <папка сайта>/plans/reference-demo-P00-update.json --dry-run
+node scripts/tilda.mjs --site <папка сайта> apply --plan <папка сайта>/plans/reference-demo-P00-update.json
 # 5. Сверка разметки по блокам и ссылок
-node --env-file=.env scripts/tilda.mjs reference compare --slug demo --source P00
-node --env-file=.env scripts/tilda.mjs reference audit --slug demo --source P00
+node scripts/tilda.mjs --site <папка сайта> reference compare --slug demo --source P00
+node scripts/tilda.mjs --site <папка сайта> reference audit --slug demo --source P00
 # 6. Снимки для приёмки тем же инструментом на тех же ширинах
-node --env-file=.env scripts/tilda.mjs shot --page 200003 --width 1440,320
-node --env-file=.env scripts/tilda.mjs reference shot --slug demo --source P00 --width 1440,320
+node scripts/tilda.mjs --site <папка сайта> shot --page 200003 --width 1440,320
+node scripts/tilda.mjs --site <папка сайта> reference shot --slug demo --source P00 --width 1440,320
 ```
 
 Гейты владельца: «делай» перед калибровкой и перед записью оформления проекта; приёмка по
@@ -268,37 +268,37 @@ node --env-file=.env scripts/tilda.mjs reference shot --slug demo --source P00 -
 
 ```powershell
 # 0. Предпосылки: аккаунт донора — сотрудник тестового проекта (делает владелец);
-#    в .env заданы TILDA_DONOR_PROJECT_ID и TILDA_DONOR_BROWSER_PROFILE;
+#    в .env папки сайта заданы TILDA_DONOR_PROJECT_ID и TILDA_DONOR_BROWSER_PROFILE;
 #    есть слепок demo и карта сайта (reference fetch, reference pages --create)
 # 1. Держатель донора и вход: окно на экране только до входа человека
-node scripts/tilda.mjs browser start --donor
-node scripts/tilda.mjs session --donor
+node scripts/tilda.mjs --site <папка сайта> browser start --donor
+node scripts/tilda.mjs --site <папка сайта> session --donor
 # 2. Перечень страниц донора и карта меток (donorPageid в site.json)
-node scripts/tilda.mjs donor pages
-node scripts/tilda.mjs donor map --slug demo
+node scripts/tilda.mjs --site <папка сайта> donor pages
+node scripts/tilda.mjs --site <папка сайта> donor map --slug demo
 # 3. Оформление и шрифт донора: прочитать, запись — после «делай» (меняет вид всех страниц)
-node scripts/tilda.mjs donor style --slug demo
-node scripts/tilda.mjs donor style --slug demo --apply --confirm
+node scripts/tilda.mjs --site <папка сайта> donor style --slug demo
+node scripts/tilda.mjs --site <папка сайта> donor style --slug demo --apply --confirm
 # 4. Перенос страницы: сначала план, запись под входом донора — после «делай»
-node scripts/tilda.mjs donor copy --slug demo --source HDR --dry-run
-node scripts/tilda.mjs donor copy --slug demo --source HDR --replace
+node scripts/tilda.mjs --site <папка сайта> donor copy --slug demo --source HDR --dry-run
+node scripts/tilda.mjs --site <папка сайта> donor copy --slug demo --source HDR --replace
 # 5. Сверка: состав, разметка, кадры 1440 и 320, доклад reports/P00.transfer.md
-node scripts/tilda.mjs donor verify --slug demo --source P00
+node scripts/tilda.mjs --site <папка сайта> donor verify --slug demo --source P00
 # 6. Шапка и подвал проекта — после «делай»
-node scripts/tilda.mjs page role --header 200002 --footer 200003 --confirm
+node scripts/tilda.mjs --site <папка сайта> page role --header 200002 --footer 200003 --confirm
 # 7. Адреса страниц копии как у страниц донора: вход донора не нужен, запись в тестовый проект
-node scripts/tilda.mjs page list
-node scripts/tilda.mjs donor aliases --slug demo --dry-run
-node scripts/tilda.mjs donor aliases --slug demo
+node scripts/tilda.mjs --site <папка сайта> page list
+node scripts/tilda.mjs --site <папка сайта> donor aliases --slug demo --dry-run
+node scripts/tilda.mjs --site <папка сайта> donor aliases --slug demo
 # 8. Ссылки донора → пути на страницы копии: HDR, FTR, затем метки, которые отмечает проверка
-node scripts/tilda.mjs donor links --slug demo --source HDR --dry-run
-node scripts/tilda.mjs donor links --slug demo --source HDR
+node scripts/tilda.mjs --site <папка сайта> donor links --slug demo --source HDR --dry-run
+node scripts/tilda.mjs --site <папка сайта> donor links --slug demo --source HDR
 # 9. Проверки после переноса по всем меткам: итог — раздел сводки reports/transfer-summary.md
-node scripts/tilda.mjs donor check --slug demo
+node scripts/tilda.mjs --site <папка сайта> donor check --slug demo
 # 10. Главная не та — страница метки главной донора (команду подсказывает donor check), затем повтор
-node scripts/tilda.mjs page role --index 200001 --confirm
-node scripts/tilda.mjs page list
-node scripts/tilda.mjs donor check --slug demo
+node scripts/tilda.mjs --site <папка сайта> page role --index 200001 --confirm
+node scripts/tilda.mjs --site <папка сайта> page list
+node scripts/tilda.mjs --site <папка сайта> donor check --slug demo
 ```
 
 Шаги 4 и 5 повторяются для каждой метки по одной, с паузой не меньше 3 секунд. Сначала

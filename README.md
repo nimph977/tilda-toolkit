@@ -19,9 +19,12 @@ ID проектов, доменов, профилей браузера и клю
 
 ```powershell
 npm ci
-Copy-Item .env.example .env      # затем впишите свои TILDA_PROJECT_ID и TILDA_PROTECTED_PAGES
-node --env-file=.env scripts/tilda.mjs --help
+New-Item -ItemType Directory -Force D:\Sites\example-site, D:\Sites\_shared\catalog   # папка сайта вне репозитория
+Copy-Item .env.example D:\Sites\example-site\.env   # затем впишите свои TILDA_PROJECT_ID и TILDA_PROTECTED_PAGES
+node scripts/tilda.mjs --help
 ```
+
+Сайт выбирается флагом `--site <папка сайта>` (или `TILDA_SITE_DIR`); данные сайта лежат в его папке, а не в репозитории.
 
 ## Возможности
 
@@ -47,10 +50,11 @@ node --env-file=.env scripts/tilda.mjs --help
 ## Пример
 
 ```powershell
-node --env-file=.env scripts/tilda.mjs session  --page 200002                        # вход в Tilda
-node --env-file=.env scripts/tilda.mjs snapshot --page 200002                        # снимок до правки
-node --env-file=.env scripts/tilda.mjs preview  --page 200002 --plan .\my-plan.json  # что изменится
-node --env-file=.env scripts/tilda.mjs apply    --page 200002 --plan .\my-plan.json  # запись + verify
+$site = 'D:\Sites\example-site'
+node scripts/tilda.mjs --site $site session  --page 200002                        # вход в Tilda
+node scripts/tilda.mjs --site $site snapshot --page 200002                        # снимок до правки
+node scripts/tilda.mjs --site $site preview  --page 200002 --plan .\my-plan.json  # что изменится
+node scripts/tilda.mjs --site $site apply    --page 200002 --plan .\my-plan.json  # запись + verify
 ```
 
 Итог `apply`: `записано, verify: 0 расхождений`. Схема плана и синтетический пример —
@@ -62,8 +66,8 @@ node --env-file=.env scripts/tilda.mjs apply    --page 200002 --plan .\my-plan.j
 
 | Раздел | Описание |
 | --- | --- |
-| [Начало работы](docs/getting-started.md) | Установка, `.env`, первый запуск, приёмка на новом сайте |
-| [Настройка](docs/configuration.md) | Переменные `TILDA_*`, `LOG_LEVEL`, что не попадает в Git |
+| [Начало работы](docs/getting-started.md) | Установка, папка сайта, первый запуск, приёмка на новом сайте |
+| [Настройка](docs/configuration.md) | Папка сайта, переменные `TILDA_*`, `LOG_LEVEL`, что не попадает в Git |
 | [Рабочий цикл](docs/workflow.md) | Снимок, план, запись, сверка, откат, `promote`, сборка по референсу, перенос через кабинет донора, правила безопасности |
 | [Команды CLI](docs/cli.md) | Все команды, флаги, коды выхода, файлы результата |
 | [Архитектура](docs/architecture.md) | Слои, структура папок, поток данных |

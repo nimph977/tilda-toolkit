@@ -3,13 +3,13 @@
 # Команды CLI
 
 ```
-node --env-file=.env scripts/tilda.mjs <команда> [--page <pageid>] [--plan <файл>] [--out <путь>] [--json] [--dry-run]
+node scripts/tilda.mjs --site <папка сайта> <команда> [--page <pageid>] [--plan <файл>] [--out <путь>] [--json] [--dry-run]
 ```
 
 Одна команда — один цикл в одном процессе. В stdout — короткий итог (≈20 строк) или JSON
-при `--json`; подробности в файлах `site-baseline/`; логи — в stderr.
+при `--json`; подробности в файлах `<папка сайта>/site-baseline/`; логи — в stderr.
 
-Из любой папки: `node <путь-к-репо>/scripts/tilda.mjs …` — `.env` из корня репозитория подгружается сам, если `TILDA_PROJECT_ID` не задан ([Настройка](configuration.md)).
+Из любой папки: `node <путь-к-репо>/scripts/tilda.mjs --site <папка сайта> …`. `.env` из корня репозитория не читается: настройки сайта берутся из `.env` папки сайта, а команды с данными без выбранного сайта отказывают с кодом `2` ([Настройка](configuration.md)).
 
 ## Команды
 
@@ -28,7 +28,7 @@ node --env-file=.env scripts/tilda.mjs <команда> [--page <pageid>] [--pla
 | `rollback <запись>` | ● | Обратный план из записи журнала тем же циклом с той же сверкой. |
 | `journal` | | Список записей журнала страницы. |
 | `find <строка>` | | Адреса вхождений по локальным снимкам живых блоков страницы (по инвентарю). Снимки удалённых блоков пропускаются (`skippedStale`); без инвентаря — все снимки и предупреждение. |
-| `replace <что> <на что>` | | План замены по всем адресам → `--out` (по умолчанию `scripts/plans/replace-<pageid>.json`). |
+| `replace <что> <на что>` | | План замены по всем адресам → `--out` (по умолчанию `<папка сайта>/plans/replace-<pageid>.json`). |
 | `upload <файл>` | ● | Картинка с диска на CDN Tilda; в ответе готовый `set.image`. В плане можно писать `"image": {"file": "путь"}`. |
 | `preview` | ● | Предпросмотр правки без записи и скриншот затронутых блоков. Требует `--plan`. |
 | `shot` | ● | Скриншоты вида страницы (`--width`), при `--links` — заодно проверка ссылок. |
@@ -55,7 +55,7 @@ node --env-file=.env scripts/tilda.mjs <команда> [--page <pageid>] [--pla
 | `donor style` | ● | Оформление и свой шрифт донора из его настроек → `<slug>/donor-style.json`; с `--apply --confirm` — в тестовый проект: шрифт ссылками на файлы донора, цвета и веса через форму настроек. Запись для отката — цвета, веса и размер текста; загруженный шрифт и его назначение при загрузке не откатываются (шрифт остаётся в проекте — это безвредно). |
 | `donor verify` | ● | Сверка перенесённой страницы (`--slug --source`, `--width`): состав видимых блоков против слепка, сверка разметки, кадры сборки и референса, перечень HTML-блоков (пустые заглушки, внешние хосты), доклад `reports/<метка>.transfer.md`. Повторный запуск переносит заполненный «Вердикт агента» с пометкой о дате прежнего доклада. |
 | `donor aliases` | ● | Адреса страниц копии как у их страниц донора (`--slug`, `--dry-run`) по файлам `donor pages` и `page list`. Шапка, подвал и главная пропускаются, адрес другой страницы не отбирается, у каждого пропуска причина. Вход донора не нужен. |
-| `donor links` | ● | Ссылки донора в живых блоках метки → пути на страницы копии (`--slug --source`, `--dry-run`): адреса на домене донора и ссылки `/page<ID донора>.html` (относительные, на домене донора и на его поддомене `*.tilda.ws`) — по парам карты сайта. Меняется только адрес ссылки. Путь без страницы в копии и поля форм (`formmsgurl`) остаются с причиной. Снимок до записи, `verify` после, план — `scripts/plans/donor-links-<slug>-<метка>.json`. |
+| `donor links` | ● | Ссылки донора в живых блоках метки → пути на страницы копии (`--slug --source`, `--dry-run`): адреса на домене донора и ссылки `/page<ID донора>.html` (относительные, на домене донора и на его поддомене `*.tilda.ws`) — по парам карты сайта. Меняется только адрес ссылки. Путь без страницы в копии и поля форм (`formmsgurl`) остаются с причиной. Снимок до записи, `verify` после, план — `<папка сайта>/plans/donor-links-<slug>-<метка>.json`. |
 | `donor check` | ● | Проверки после переноса по меткам слепка (`--slug`, `--source P01,P02`; по умолчанию — все перенесённые метки, дубли страниц донора пропускаются с причиной): ссылки вида страницы (домен донора, относительные адреса, страницы донора по ID), HTML-блоки, `formmsgurl` на домене донора, полнота карты, главная страница проекта. Только чтение, пауза 3 с между метками. Итог — `reports/checks.json` и раздел между маркерами в `reports/transfer-summary.md` с ручными пунктами. Код 1 — нарушения ссылок, сбои меток, неполная карта или не та главная; при «главная не та» — готовая команда `page role --index <pageid> --confirm` в разделе сводки и в `next`. |
 
 ## Флаги
@@ -65,6 +65,7 @@ node --env-file=.env scripts/tilda.mjs <команда> [--page <pageid>] [--pla
 | `--page <pageid>` | большинство | Страница; иначе `TILDA_DEFAULT_PAGE`. Для `apply`/`rollback` должен совпадать со страницей плана/записи. |
 | `--plan <файл>` | `apply`, `verify`, `preview`, `snapshot`, `stage`, `promote` | План операций JSON. |
 | `--out <путь>` | `replace`, `page list` и др. | Куда положить результат. |
+| `--site <папка>` | все, кроме справки | Папка сайта вне репозитория: `.env`, `site-baseline`, `site-reference`, `.browser-profile`, `plans` (или переменная `TILDA_SITE_DIR`). Относительный путь считается от текущей папки. Без сайта команды с данными отказывают с кодом `2`. |
 | `--json` | все | Итог в stdout как JSON; у `page list` — вместе с полным массивом `list`. |
 | `--dry-run` | `apply`, `rollback`, `donor copy`, `donor aliases`, `donor links` | Ничего не писать в Tilda; у `donor copy` — показать план переноса: блоки донора, приёмник, будет ли очистка. |
 | `--wait <сек>` | `session` | Сколько ждать входа человека (по умолчанию 600). |
@@ -84,7 +85,7 @@ node --env-file=.env scripts/tilda.mjs <команда> [--page <pageid>] [--pla
 | `--source <имя\|метка>` | `reference plan`, `shot`, `audit`, `compare`, `donor copy`, `donor verify`, `donor links`, `donor check` | Имя страницы из слепка (`index` для главной) или метка карты сайта (`P07`, `HDR`, `FTR` — страница, зона и замены из `site.json`). У `donor copy` — только метка с `donorPageid`; у `donor check` — метки через запятую. |
 | `--zone all\|content\|header\|footer` | `reference plan` | По имени страницы — собрать только зону (по метке зона берётся из `site.json`). |
 | `--no-styles` | `reference plan` | Не переносить оформление блоков: отступы, цвет фона, типографику. По умолчанию оформление переносится. |
-| `--update` | `reference plan` | Дописать уже собранную страницу метки операциями `field`/`listSet` (без пересоздания блоков) → `scripts/plans/reference-<slug>-<метка>-update.json`. |
+| `--update` | `reference plan` | Дописать уже собранную страницу метки операциями `field`/`listSet` (без пересоздания блоков) → `<папка сайта>/plans/reference-<slug>-<метка>-update.json`. |
 | `--apply` | `reference project`, `donor style` | Записать оформление в настройки тестового проекта (нужен `--confirm`). |
 | `--published` | `reference compare` | Сверять опубликованную страницу по `--url` (адрес даёт владелец). |
 | `--sitemap` | `reference fetch` | Добавить в очередь страницы из `sitemap.xml` того же сайта. |
@@ -112,21 +113,21 @@ node --env-file=.env scripts/tilda.mjs <команда> [--page <pageid>] [--pla
 
 ## Файлы результата
 
-| Путь (внутри `TILDA_BASELINE_DIR`) | Содержимое |
+| Путь (внутри `TILDA_BASELINE_DIR`, по умолчанию `<папка сайта>/site-baseline`) | Содержимое |
 | --- | --- |
 | `records/<pageid>/_inventory.json` | инвентарь блоков |
 | `records/<pageid>/<recordid>.json`, `zero/<pageid>/<recordid>.json` | снимки стандартных и Zero-блоков |
 | `snapshots-index.json` | журнал снимков: что, когда, откуда |
 | `journal/<pageid>/*.json` | записи журнала для `rollback` |
-| `catalog/<tplid>.json` | эталонные поля шаблона (`catalog capture`): вкладки, значения по умолчанию, ключи карточек |
-| `catalog/<tplid>.settings.json` | карта влияния настроек шаблона (`catalog calibrate`): правило на поле — вариант, слот значения или текст |
 | `project-settings/<projectid>/<ISO>.json` | запись для отката `page role`: роли до, запрошенные, после, `otherChanged`; команда отката — в итоге `page role` |
 | `project-settings/<projectid>/<ISO>-style.json` | запись для отката `reference project --apply` и `donor style --apply`: значения до, желаемые, после, `otherChanged` |
 | `shots/<pageid>/` | скриншоты `shot` |
 | `pages/<projectid>.json` | перечень страниц проекта (`page list`, `donor pages` — для проекта донора): `pages[]` и счётчики пропусков `skipped` |
 | `transfer/<pageid>/<ISO>.json` | запись переноса `donor copy`: блоки донора, приёмник, снятые при `--replace` блоки, сверка `orderMatches` и `donorUnchanged` |
-| `scripts/plans/` (в репозитории) | планы `replace`, `stage` и `reference plan` (`reference-<slug>-<source>-<page>.json`) |
-| `TILDA_REFERENCE_DIR/<slug>/` (по умолчанию `site-reference/`) | слепок референса: `reference.json` (манифест), `pages/*.html`, `structure/*.json`, `images/`, `site.json` (карта сайта), `project.css` и `project-style.json` (оформление проекта), `compare/` и `reports/` (сверка). В структуре у каждого поля есть `text` (видимый текст) и `html` (он же с `<br>` на переносах), у блока — `styles` (отступы, фон, типографика), `soclinks` и `linkhook` |
+| `TILDA_CATALOG_DIR/<tplid>.json` (общая для всех сайтов) | эталонные поля шаблона (`catalog capture`): вкладки, значения по умолчанию, ключи карточек |
+| `TILDA_CATALOG_DIR/<tplid>.settings.json` | карта влияния настроек шаблона (`catalog calibrate`): правило на поле — вариант, слот значения или текст |
+| `<папка сайта>/plans/` | планы `replace`, `stage` и `reference plan` (`reference-<slug>-<source>-<page>.json`) |
+| `TILDA_REFERENCE_DIR/<slug>/` (по умолчанию `<папка сайта>/site-reference/`) | слепок референса: `reference.json` (манифест; пути файлов — от папки слепка), `pages/*.html`, `structure/*.json`, `images/`, `site.json` (карта сайта), `project.css` и `project-style.json` (оформление проекта), `compare/` и `reports/` (сверка). В структуре у каждого поля есть `text` (видимый текст) и `html` (он же с `<br>` на переносах), у блока — `styles` (отступы, фон, типографика), `soclinks` и `linkhook` |
 | `TILDA_REFERENCE_DIR/<slug>/donor-style.json` | оформление и шрифты донора (`donor style`), ключи, которые форма не пишет (`skipped`) |
 | `TILDA_REFERENCE_DIR/<slug>/transfer/<метка>.json`, `reports/<метка>.transfer.md` | данные и доклад сверки `donor verify` с разделом «Вердикт агента» |
 | `TILDA_REFERENCE_DIR/<slug>/reports/transfer-summary.md` | сводка переноса сайта: таблица меток, итоговые числа, ложные отличия предпросмотра; составляет агент по докладам. Раздел между `<!-- donor-check:start -->` и `<!-- donor-check:end -->` пишет `donor check` |

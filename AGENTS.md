@@ -15,8 +15,8 @@ of a particular site.
 - `npm ci` — install the single dependency.
 - `npm test` — run the test suite (`node --test scripts/test/*.test.mjs`), no network.
 - `node scripts/tilda.mjs --help` — list commands, flags and exit codes.
-- `node --env-file=.env scripts/tilda.mjs <command>` — run a command with your settings;
-  `.env` in the repository root is also loaded automatically.
+- `node scripts/tilda.mjs --site <site folder> <command>` — run a command against one site;
+  its settings come from `<site folder>/.env`. The `.env` in the repository root is not read.
 
 Run shell commands one at a time: Windows PowerShell 5.1 has no `&&`.
 
@@ -29,13 +29,19 @@ Run shell commands one at a time: Windows PowerShell 5.1 has no `&&`.
 
 ## Configuration
 
-All settings are environment variables; the template is `.env.example`.
+All settings are environment variables; the template is `.env.example`, copied to the `.env`
+of a site folder outside the repository.
 
+- `--site <folder>` or `TILDA_SITE_DIR` — the site folder; without it, commands that use site
+  data refuse with exit code `2`.
+- `TILDA_CATALOG_DIR` — template catalog shared by all sites; required for catalog commands and
+  `reference plan`.
 - `TILDA_PROJECT_ID` — Tilda project ID, required for online commands.
 - `TILDA_PROTECTED_PAGES` — comma-separated page IDs protected from writes; must be set
   explicitly, `TILDA_PROTECTED_PAGES=` means an empty list.
-- `TILDA_DEFAULT_PAGE`, `TILDA_BASELINE_DIR`, `TILDA_BROWSER_PROFILE`,
-  `TILDA_REFERENCE_DIR` — optional.
+- `TILDA_DEFAULT_PAGE` — optional. `TILDA_BASELINE_DIR`, `TILDA_BROWSER_PROFILE`,
+  `TILDA_REFERENCE_DIR` — optional, default inside the site folder; a path inside the
+  repository is refused.
 - `TILDA_DONOR_PROJECT_ID`, `TILDA_DONOR_BROWSER_PROFILE` — for donor commands
   (`browser --donor`, `session --donor`, `donor …`); both differ from the test project ones.
 - `LOG_LEVEL` — `DEBUG`, `INFO` (default), `WARN`, `ERROR`.
@@ -61,8 +67,9 @@ docs/                # user documentation
 - Do not add page or project IDs, domains, client data, work history, browser profiles,
   snapshots, journals, cookies or keys to the repository.
 - Take a `snapshot` before any write; finish every write with `verify` and no differences.
-- Reference captures live in `TILDA_REFERENCE_DIR` (default `site-reference/`, outside git);
-  the field catalog lives in `TILDA_BASELINE_DIR/catalog/`.
+- Site data (`.env`, `site-baseline`, `site-reference`, browser profiles, generated plans) lives
+  in a site folder outside the repository; the template catalog lives in `TILDA_CATALOG_DIR`,
+  shared by all sites.
 - A reference without account access is read as a published site through the browser holder.
   A donor account is used only with the owner's explicit access, in a second holder: read and
   copy to the account buffer only. The donor project is never changed; `donor copy` runs only

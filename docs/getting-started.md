@@ -22,11 +22,13 @@ node scripts/tilda.mjs --help
 
 ## Первичная настройка
 
-Создайте локальный `.env` из примера и замените синтетические числа своими:
+Данные сайта хранятся в отдельной **папке сайта** вне репозитория. Создайте её и общую папку
+каталога шаблонов, скопируйте в неё `.env` из примера и замените синтетические числа своими:
 
 ```powershell
-Copy-Item .env.example .env
-notepad .env
+New-Item -ItemType Directory -Force D:\Sites\example-site, D:\Sites\_shared\catalog
+Copy-Item .env.example D:\Sites\example-site\.env
+notepad D:\Sites\example-site\.env
 ```
 
 Минимум для онлайн-команд — две переменные:
@@ -36,14 +38,18 @@ TILDA_PROJECT_ID=100001
 TILDA_PROTECTED_PAGES=200001
 ```
 
-Полный список — в [Настройке](configuration.md). Файл `.env` не попадает в Git.
+Полный список — в [Настройке](configuration.md). `.env` из корня репозитория не читается, а папка сайта
+не должна лежать внутри репозитория.
+
+Каждой команде сайт задаётся флагом `--site <папка сайта>`. Для постоянной работы с одним сайтом в сессии
+PowerShell один раз задайте `$env:TILDA_SITE_DIR = 'D:\Sites\example-site'` — тогда флаг можно не писать.
 
 ## Первый запуск
 
 1. Откройте браузер-держатель и войдите в Tilda в появившемся окне:
 
    ```powershell
-   node --env-file=.env scripts/tilda.mjs session --page 200002
+   node scripts/tilda.mjs --site D:\Sites\example-site session --page 200002
    ```
 
    Окно разворачивается только на время входа, затем сворачивается. Не закрывайте
@@ -51,15 +57,15 @@ TILDA_PROTECTED_PAGES=200001
    можно командой `browser show`, свернуть обратно — `browser hide`.
 
    Не знаете `pageid` нужной страницы? Когда сессия уже есть, перечень страниц проекта
-   покажет `node --env-file=.env scripts/tilda.mjs page list`.
+   покажет `node scripts/tilda.mjs --site D:\Sites\example-site page list`.
 
 2. Снимите текущее состояние страницы:
 
    ```powershell
-   node --env-file=.env scripts/tilda.mjs snapshot --page 200002
+   node scripts/tilda.mjs --site D:\Sites\example-site snapshot --page 200002
    ```
 
-   Ожидаемый результат: `status: снимки сняты`, файлы в `site-baseline/`.
+   Ожидаемый результат: `status: снимки сняты`, файлы в `D:\Sites\example-site\site-baseline\`.
 
 Дальше — [Рабочий цикл](workflow.md): план → `preview` → `apply` → `verify`.
 
@@ -68,7 +74,8 @@ TILDA_PROTECTED_PAGES=200001
 Донор — аккаунт Tilda с сайтом-образцом. Если владелец добавил аккаунт донора сотрудником
 в тестовый проект, сайт переносится через буфер аккаунта, без сборки по разметке.
 
-1. Добавьте в `.env` ID проекта донора и отдельный профиль его держателя:
+1. Добавьте в `.env` папки сайта ID проекта донора и отдельный профиль его держателя
+   (относительный путь считается от папки сайта):
 
    ```
    TILDA_DONOR_PROJECT_ID=100002
@@ -78,8 +85,8 @@ TILDA_PROTECTED_PAGES=200001
 2. Поднимите держатель донора и войдите в аккаунт донора в появившемся окне:
 
    ```powershell
-   node scripts/tilda.mjs browser start --donor
-   node scripts/tilda.mjs session --donor
+   node scripts/tilda.mjs --site D:\Sites\example-site browser start --donor
+   node scripts/tilda.mjs --site D:\Sites\example-site session --donor
    ```
 
    Держатель донора работает рядом с тестовым, у каждого свой профиль. Проект донора
@@ -112,6 +119,6 @@ TILDA_PROTECTED_PAGES=200001
 
 ## См. также
 
-- [Настройка](configuration.md) — все переменные `TILDA_*` и `LOG_LEVEL`
+- [Настройка](configuration.md) — папка сайта, все переменные `TILDA_*` и `LOG_LEVEL`
 - [Рабочий цикл](workflow.md) — снимок, план, запись, сверка, откат, перенос через кабинет донора
 - [Команды CLI](cli.md) — справочник команд, флагов и кодов выхода

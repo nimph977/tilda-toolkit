@@ -78,8 +78,8 @@
     ],
     "cards": [{ "li_title": "Карточка", "li_descr": "Текст", "li_img": "", "li_link": "https://example.test/card" }],
     "images": [
-      { "field": "img", "file": "site-reference/demo/images/ab12cd34ef56.jpg" },
-      { "card": 0, "field": "li_img", "file": "site-reference/demo/images/cd34ef56ab12.jpg" }
+      { "field": "img", "file": "<папка сайта>/site-reference/demo/images/ab12cd34ef56.jpg" },
+      { "card": 0, "field": "li_img", "file": "<папка сайта>/site-reference/demo/images/cd34ef56ab12.jpg" }
     ]
   },
   "hidden": "n",
@@ -103,7 +103,7 @@
 `cards` собираются в поле `list` вместе с `btitle`
 и `bdescr`; `lid` карточкам присваивается автоматически. Карточка может содержать `li_link`,
 если шаблон хранит его (`cardKeys` каталога). `images` до записи загружаются
-на CDN Tilda из файлов относительно корня репозитория: `field` без `card` — картинка поля
+на CDN Tilda из файлов по абсолютному пути (`reference plan` подставляет абсолютные пути из слепка): `field` без `card` — картинка поля
 блока, с `card` — картинка карточки. Сверка после записи сравнивает значения полей и
 карточки с планом; шаблон, отмеченный в каталоге `available: false`, отклоняется до сети.
 Такие операции строит `reference plan`, но их можно писать и вручную. У него два флага,
