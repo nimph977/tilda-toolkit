@@ -34,6 +34,11 @@ export const SITE_IDENTITY_VARS = ['TILDA_PROJECT_ID', 'TILDA_PROTECTED_PAGES', 
 /** Переменные процесса, не зависящие от сайта: из окружения допустимы без предупреждения. */
 export const SITE_NEUTRAL_VARS = ['TILDA_SITE_DIR', 'TILDA_BROWSER_DAEMON', 'TILDA_BROWSER_VISIBLE'];
 
+/** Ключи `.env` сайта, которые применяются: настройки инструмента `TILDA_*` и порог логов. */
+export function isSiteVar(key) {
+  return key.startsWith('TILDA_') || key === 'LOG_LEVEL';
+}
+
 /** Папка сайта из флага или `TILDA_SITE_DIR`; null, если сайт не выбран. Проверяет папку. */
 export function resolveSiteDir({
   flag,
@@ -58,7 +63,8 @@ export function resolveSiteDir({
 
 /**
  * Что `.env` сайта добавляет к окружению. Чистая функция: `set` — переменные к установке,
- * `kept` — не-`TILDA_*` переменные, где остаётся значение окружения, `inherited` — прочие `TILDA_*`,
+ * `ignored` — ключи `.env` вне `TILDA_*` и `LOG_LEVEL` (не применяются), `kept` — `LOG_LEVEL`, где остаётся
+ * значение окружения, `inherited` — прочие `TILDA_*`,
  * заданные только в окружении (предупреждение). `TILDA_PROJECT_ID`, `TILDA_PROTECTED_PAGES` и
  * `TILDA_DONOR_PROJECT_ID` только в окружении — отказ: их значения принадлежат другому сайту.
  */
@@ -67,8 +73,14 @@ export function siteEnvChanges({ siteDir, text, env = process.env }) {
   if ('TILDA_SITE_DIR' in parsed) throw new ConfigError('TILDA_SITE_DIR нельзя задавать в .env папки сайта', 'TILDA_SITE_DIR');
   const set = {};
   const kept = [];
+  const ignored = [];
   const conflicts = [];
   for (const [key, raw] of Object.entries(parsed)) {
+    // Процесс и держатель получают только настройки инструмента; `NODE_OPTIONS`, `PATH` и подобное из `.env` не применяются.
+    if (!isSiteVar(key)) {
+      ignored.push(key);
+      continue;
+    }
     const value = SITE_PATH_VARS.includes(key) && raw.trim() && !isAbsolute(raw.trim()) ? resolve(siteDir, raw.trim()) : raw;
     if (env[key] === undefined) set[key] = value;
     else if (env[key] === value) continue;
@@ -91,7 +103,7 @@ export function siteEnvChanges({ siteDir, text, env = process.env }) {
       identityOrphans[0],
     );
   }
-  return { set, kept, inherited: orphans };
+  return { set, kept, inherited: orphans, ignored };
 }
 
 /**
@@ -104,13 +116,14 @@ export function applySite({ flag, env = process.env, cwd, root, read = (p) => re
     log.debug('applySite', 'папка сайта не выбрана — пути только из явных переменных');
     return null;
   }
-  const { set, kept, inherited } = siteEnvChanges({ siteDir: dir, text: read(join(dir, '.env')), env });
+  const { set, kept, inherited, ignored } = siteEnvChanges({ siteDir: dir, text: read(join(dir, '.env')), env });
   Object.assign(env, set);
   env.TILDA_SITE_DIR = dir;
   log.info('applySite', 'папка сайта выбрана', { site: dir.replace(/\\/g, '/'), set: Object.keys(set).length });
   log.debug('applySite', 'переменные из .env сайта', { set: Object.keys(set), kept });
   if (inherited.length) log.warn('applySite', 'TILDA_* взяты из окружения — в .env сайта их нет', { names: inherited });
-  return { siteDir: dir, set: Object.keys(set), kept, inherited };
+  if (ignored.length) log.warn('applySite', '[FIX] ключи .env сайта вне TILDA_* и LOG_LEVEL не применяются', { names: ignored });
+  return { siteDir: dir, set: Object.keys(set), kept, inherited, ignored };
 }
 
 /** Готовая команда для подсказки пользователю: с `--site`, если сайт выбран. Кавычки — только двойные. */

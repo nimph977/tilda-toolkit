@@ -167,3 +167,24 @@ test('applySite: чужой TILDA_PROJECT_ID из оболочки не подх
     assert.equal(env.TILDA_SITE_DIR, undefined, 'окружение не меняется при отказе');
   });
 });
+
+test('siteEnvChanges: из .env сайта применяются только TILDA_* и LOG_LEVEL, прочие имена уходят в ignored', () => {
+  const { set, ignored } = siteEnvChanges({
+    siteDir: '/s',
+    text: 'NODE_OPTIONS=--require x\nPATH=/evil\nLOG_LEVEL=DEBUG\nTILDA_PROJECT_ID=100001\nTILDA_PROTECTED_PAGES=\n',
+    env: {},
+  });
+  assert.deepEqual(Object.keys(set).sort(), ['LOG_LEVEL', 'TILDA_PROJECT_ID', 'TILDA_PROTECTED_PAGES']);
+  assert.deepEqual(ignored.sort(), ['NODE_OPTIONS', 'PATH']);
+});
+
+test('applySite: NODE_OPTIONS из .env сайта не попадает в окружение (и значит в держатель)', () => {
+  withTmp((tmp, site) => {
+    writeFileSync(join(site, '.env'), 'TILDA_PROJECT_ID=100001\nNODE_OPTIONS=--inspect\n');
+    const env = {};
+    const result = applySite({ flag: site, env, cwd: tmp, root: '/nowhere' });
+    assert.equal(env.NODE_OPTIONS, undefined);
+    assert.equal(env.TILDA_PROJECT_ID, '100001');
+    assert.deepEqual(result.ignored, ['NODE_OPTIONS']);
+  });
+});
