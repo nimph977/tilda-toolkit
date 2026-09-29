@@ -18,13 +18,42 @@ ID проектов, доменов, профилей браузера и клю
 Требования: Node.js 24+, установленный Google Chrome, доступ к проекту Tilda в Chrome.
 
 ```powershell
+git clone https://github.com/nimph977/tilda-toolkit.git
+cd tilda-toolkit
 npm ci
-New-Item -ItemType Directory -Force D:\Sites\example-site, D:\Sites\_shared\catalog   # папка сайта вне репозитория
-Copy-Item .env.example D:\Sites\example-site\.env   # затем впишите свои TILDA_PROJECT_ID и TILDA_PROTECTED_PAGES
-node scripts/tilda.mjs --help
+node scripts/tilda.mjs setup --site D:\Sites\example-site --project <ID проекта> --agent claude
+node scripts/tilda.mjs --site D:\Sites\example-site doctor
 ```
 
+`setup` создаёт папку сайта вне репозитория, кладёт в неё `.env` и ставит скилл для агента
+(`--agent codex` — для Codex, `--agent all` — для обоих). `doctor` только проверяет и печатает
+команды установки недостающего; сам ничего не ставит.
+
 Сайт выбирается флагом `--site <папка сайта>` (или `TILDA_SITE_DIR`); данные сайта лежат в его папке, а не в репозитории.
+
+## Install with an AI agent
+
+Откройте Claude Code или Codex в пустой папке и вставьте запрос:
+
+```text
+Установи tilda-toolkit из https://github.com/nimph977/tilda-toolkit.
+1. Склонируй репозиторий и выполни в нём npm ci.
+2. Выполни node scripts/tilda.mjs setup --site <папка сайта вне репозитория> --project <ID проекта Tilda> --agent claude
+   (для Codex — --agent codex). Папку сайта и ID спроси у меня.
+3. Выполни node scripts/tilda.mjs --site <папка сайта> doctor и покажи мне итог.
+4. Если doctor пишет FAIL — покажи мне его команду исправления и спроси, прежде чем
+   что-то устанавливать. Системные программы без моего согласия не ставь.
+```
+
+ID проекта — число `projectid` в адресе списка страниц проекта в кабинете Tilda:
+`https://tilda.ru/projects/?projectid=<ID>`.
+
+`setup` ставит скилл `tilda-manager` в папку агента внутри репозитория
+(`.claude/skills/tilda-manager` или `.agents/skills/tilda-manager`). После установки
+перезапустите сессию агента в папке репозитория. Повторный `setup` обновляет копию, а `doctor`
+сообщает, если она устарела.
+
+Другие агенты: пусть прочитают [AGENTS.md](AGENTS.md) и [skills/tilda-manager/SKILL.md](skills/tilda-manager/SKILL.md).
 
 ## Возможности
 
@@ -45,7 +74,9 @@ node scripts/tilda.mjs --help
   адреса страниц и ссылки как у донора, но на страницы копии (`donor aliases`, `donor links`),
   проверки после переноса одной командой (`donor check`), главная страница проекта — `page role --index`.
 - **Скилл для агента** — [skills/tilda-manager/SKILL.md](skills/tilda-manager/SKILL.md): правка
-  страницы, сборка по референсу, перенос через кабинет донора, гейты человека.
+  страницы, сборка по референсу, перенос через кабинет донора, гейты человека. Ставится командой
+  `setup`, см. [Install with an AI agent](#install-with-an-ai-agent).
+- **Проверка установки** — `doctor`: Node.js, зависимости, Chrome, git, папка сайта и скилл; только читает.
 
 ## Пример
 

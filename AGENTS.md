@@ -17,6 +17,10 @@ of a particular site.
 - `node scripts/tilda.mjs --help` — list commands, flags and exit codes.
 - `node scripts/tilda.mjs --site <site folder> <command>` — run a command against one site;
   its settings come from `<site folder>/.env`. The `.env` in the repository root is not read.
+- `node scripts/tilda.mjs setup --site <site folder> --project <id> --agent claude|codex|all` — create the
+  site folder and its `.env`, install the skill into the agent folder of this repository.
+- `node scripts/tilda.mjs [--site <site folder>] doctor` — check Node.js, dependencies, Chrome, git,
+  the site folder, its `.env` and the skill; prints fix commands, installs nothing.
 
 Run shell commands one at a time: Windows PowerShell 5.1 has no `&&`.
 
@@ -53,7 +57,7 @@ Details: [docs/configuration.md](docs/configuration.md).
 ```
 scripts/
   tilda.mjs          # CLI entry point: command routing, exit codes
-  <command>.mjs      # one command per file (snapshot, apply-plan, promote, reference-plan, donor-copy, …)
+  <command>.mjs      # one command per file (snapshot, apply-plan, promote, reference-plan, donor-copy, doctor, setup, …)
   lib/               # core without CLI: config, paths, log, browser, browser-daemon, html-blocks, …
   browser/           # code evaluated inside the Tilda editor (tilda-*.js)
   test/              # node --test, synthetic identifiers only
@@ -107,6 +111,8 @@ docs/                # user documentation
 - Comments, JSDoc and CLI messages are in Russian for now; identifiers are in English.
 
 ## When a tool is missing
+
+Run `doctor` first; show the user its fix command and ask before installing anything.
 
 If a required program is missing (Node.js, Google Chrome, git), ask the user and work it out
 from that program's official documentation. Do not install system programs silently.
