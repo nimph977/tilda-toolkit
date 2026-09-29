@@ -434,3 +434,45 @@ test('doctor с несуществующей папкой сайта отвеч�
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('parseCli validates setup flags', () => {
+  assert.throws(() => parseCli(['setup']), UsageError);
+  assert.throws(() => parseCli(['setup', '--agent', 'vim']), UsageError);
+  assert.throws(() => parseCli(['setup', '--agent', 'claude', '--project', '1000000000001']), UsageError);
+  assert.throws(() => parseCli(['setup', '--site=']), UsageError);
+  assert.throws(() => parseCli(['setup', '--site', 'x', 'extra']), UsageError);
+  assert.throws(() => parseCli(['doctor', '--agent', 'claude']), UsageError);
+  assert.throws(() => parseCli(['journal', '--project', '1000000000001']), UsageError);
+  assert.equal(parseCli(['setup', '--agent', 'all']).cmd, 'setup');
+  assert.equal(parseCli(['setup', '--site', 'x', '--project', '1000000000001']).values.project, '1000000000001');
+  assert.match(usage(), /setup/);
+  assert.match(usage(), /--agent/);
+});
+
+test('setup создаёт папку сайта и .env вне репозитория и не трогает папки агентов', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tilda-cli-setup-'));
+  try {
+    const site = join(root, 'site');
+    const guarded = ['.claude', '.agents'].map((name) => join(repoDir, name, 'skills', 'tilda-manager'));
+    const before = guarded.map((path) => existsSync(path));
+    const result = runCli(['setup', '--site', site, '--project', '1000000000001', '--json'], bareEnv());
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.site.env, 'created');
+    assert.equal(existsSync(join(site, '.env')), true);
+    assert.deepEqual(guarded.map((path) => existsSync(path)), before, 'без --agent копии скилла не создаются');
+
+    const doctor = runCli(['--site', site, 'doctor', '--json'], bareEnv());
+    const check = JSON.parse(doctor.stdout).checks.find((item) => item.id === 'site');
+    assert.ok(['ok', 'warn'].includes(check.status), `site: ${check.status} ${check.message}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('setup с папкой сайта внутри репозитория — отказ кодом 2 и ничего не создаёт', () => {
+  const target = join(repoDir, 'docs', 'setup-should-not-exist');
+  const result = runCli(['setup', '--site', target], bareEnv());
+  assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
+  assert.equal(existsSync(target), false);
+});

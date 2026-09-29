@@ -50,6 +50,9 @@
  *               calibrate — карта «значение настройки → разметка» по предпросмотру (временный блок на черновой)
  *   doctor      [--site <папка>] [--json] — проверить Node.js, зависимости, Chrome, git, папку сайта, .env и скилл;
  *               только читает и печатает готовые команды исправления; доступен и как node scripts/doctor.mjs
+ *   setup       [--site <папка>] [--project <ID>] [--agent claude|codex|all] — создать папку сайта и .env из
+ *               .env.example (существующий .env не перезаписывается), поставить скилл tilda-manager в папку
+ *               агента внутри репозитория; только флаги, без вопросов; все проверки до первой записи
  *
  * В stdout — короткий итог (не длиннее ~20 строк), подробности уходят в файлы. Логи — в stderr
  * через lib/log.mjs (LOG_LEVEL=DEBUG печатает тела запросов к Тильде без кук).
@@ -65,11 +68,12 @@ import { protectedPages, plansDir, repoRoot } from './lib/paths.mjs';
 import { applySite, cliHint } from './lib/site.mjs';
 import { getDefaultPage, requireOnlineConfig } from './lib/config.mjs';
 import { isLabel } from './lib/reference-store.mjs';
+import { SETUP_AGENTS, runSetup } from './setup.mjs';
 
 const log = createLogger('tilda');
 
 export const EXIT = { OK: 0, REFUSED: 1, USAGE: 2, SESSION_LOST: 3 };
-export const COMMANDS = ['browser', 'session', 'inventory', 'snapshot', 'apply', 'verify', 'rollback', 'journal', 'find', 'replace', 'upload', 'preview', 'shot', 'links', 'map', 'page', 'promote', 'stage', 'reference', 'catalog', 'donor', 'doctor'];
+export const COMMANDS = ['browser', 'session', 'inventory', 'snapshot', 'apply', 'verify', 'rollback', 'journal', 'find', 'replace', 'upload', 'preview', 'shot', 'links', 'map', 'page', 'promote', 'stage', 'reference', 'catalog', 'donor', 'doctor', 'setup'];
 /** Действия переноса через кабинет донора. */
 export const DONOR_ACTIONS = ['pages', 'map', 'copy', 'style', 'verify', 'aliases', 'links', 'check'];
 export const BROWSER_ACTIONS = ['start', 'stop', 'status', 'show', 'hide'];
@@ -123,6 +127,8 @@ export const OPTIONS = {
   donor: { type: 'boolean', default: false },
   replace: { type: 'boolean', default: false },
   title: { type: 'string' },
+  agent: { type: 'string' },
+  project: { type: 'string' },
   help: { type: 'boolean', short: 'h', default: false },
 };
 
@@ -167,6 +173,7 @@ export function usage() {
     '  donor verify --slug <слепок> --source <метка> [--width 1440,320]  состав блоков против слепка, сверка разметки, кадры сборки и референса, доклад reports/<метка>.transfer.md',
     '  catalog calibrate --page <черновая> --slug|--tplid [--force] [--delay мс] [--batch n] [--pause с]  карта «значение настройки → разметка» по предпросмотру (временный блок создаётся и удаляется)',
     '  doctor [--site <папка>] [--json] — проверить Node.js, зависимости, Chrome, git, папку сайта, .env и скилл; только проверяет и печатает команды исправления',
+    '  setup [--site <папка>] [--project <ID>] [--agent claude|codex|all] — создать папку сайта и .env из .env.example (существующий .env не перезаписывается), поставить скилл tilda-manager в папку агента внутри репозитория',
     '',
     'Флаги:',
     '  --site <папка>    папка сайта вне репозитория: .env, site-baseline, site-reference, .browser-profile, plans (или TILDA_SITE_DIR); без неё команды с данными сайта отказывают с кодом 2',
@@ -176,6 +183,8 @@ export function usage() {
     '  --json            итог в stdout как JSON',
     '  --dry-run         ничего не писать в Тильду',
     '  --wait <сек>      session: сколько ждать входа человека (по умолчанию 600)',
+    '  --agent <имя>     setup: claude, codex или all',
+    '  --project <ID>    setup: ID проекта Tilda для нового .env',
     '  --donor           browser/session: держатель и вход аккаунта донора (TILDA_DONOR_PROJECT_ID, TILDA_DONOR_BROWSER_PROFILE)',
     '  --replace         donor copy: удалить блоки приёмника после снимков и перенести заново',
     '  --emit-calls      apply: дополнительно писать отладочные *.call.js для browser_evaluate',
@@ -302,6 +311,14 @@ export function parseCli(argv) {
     }
   }
   if (cmd === 'doctor' && rest.length) throw new UsageError('doctor: лишние аргументы');
+  if (cmd !== 'setup' && (values.agent !== undefined || values.project !== undefined)) throw new UsageError('--agent и --project — только для setup');
+  if (cmd === 'setup') {
+    if (rest.length) throw new UsageError('setup: лишние аргументы');
+    if (values.site !== undefined && !values.site.trim()) throw new UsageError('--site: пустое значение');
+    if (values.site === undefined && values.agent === undefined) throw new UsageError('setup: нужен --site <папка сайта> и/или --agent claude|codex|all');
+    if (values.agent !== undefined && !SETUP_AGENTS.includes(values.agent)) throw new UsageError('--agent: claude, codex или all');
+    if (values.project !== undefined && values.site === undefined) throw new UsageError('--project нужен вместе с --site');
+  }
   if (cmd === 'rollback' && !rest[0]) throw new UsageError('rollback: нужен путь к записи журнала (<папка сайта>/site-baseline/journal/<pageid>/<файл>.json)');
   if (cmd === 'find' && !rest[0]) throw new UsageError('find: нужна строка для поиска');
   if (cmd === 'upload' && !rest[0]) throw new UsageError('upload: нужен путь к файлу');
@@ -1675,6 +1692,12 @@ export async function run(argv) {
     const report = await runDoctor({ site: values.site });
     console.log(values.json ? JSON.stringify(report, null, 2) : formatReport(report));
     return report.status === 'fail' ? EXIT.REFUSED : EXIT.OK;
+  }
+  // setup тоже до applySite: папки сайта ещё может не быть, а окружение он не использует.
+  if (cmd === 'setup') {
+    const summary = await runSetup({ site: values.site, project: values.project, agent: values.agent });
+    console.log(formatSummary(summary, values.json));
+    return EXIT.OK;
   }
   const site = applySite({ flag: values.site });
   warnRepoEnv();
