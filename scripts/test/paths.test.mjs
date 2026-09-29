@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { assertOutsideRepo, baselineDir, catalogRoot, isInside, plansDir, referenceDir, repoRoot, testProfileDir } from '../lib/paths.mjs';
@@ -73,4 +73,32 @@ test('isInside: вложенность, равенство, регистр Windo
   assert.equal(isInside('C:\\AB', 'C:\\A', 'win32'), false);
   assert.equal(isInside('/a/b', '/a', 'linux'), true);
   assert.equal(isInside('/a', '/a/b', 'linux'), false);
+});
+
+test('isInside: каталог, имя которого начинается с двух точек, лежит внутри, а не выше', () => {
+  assert.equal(isInside('/r/..data', '/r', 'linux'), true);
+  assert.equal(isInside('C:\\r\\..data\\x', 'C:\\r', 'win32'), true);
+  assert.equal(isInside('/r/..', '/r', 'linux'), false);
+  assert.equal(isInside('/r/../x', '/r', 'linux'), false);
+  assert.equal(isInside('C:\\r\\..\\x', 'C:\\r', 'win32'), false);
+});
+
+test('assertOutsideRepo: ярлык (junction/symlink) внутрь репозитория не обходит проверку', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'tilda-link-'));
+  try {
+    const repo = join(tmp, 'repo');
+    const inner = join(repo, 'inner');
+    const outside = join(tmp, 'outside');
+    mkdirSync(inner, { recursive: true });
+    mkdirSync(outside);
+    const link = join(outside, 'link');
+    symlinkSync(inner, link, 'junction');
+    assert.throws(() => assertOutsideRepo(link, 'V', { root: repo }), isConfigError('V', /внутри репозитория/));
+    // ещё не созданная подпапка за ярлыком тоже считается внутри
+    assert.throws(() => assertOutsideRepo(join(link, 'site-baseline'), 'V', { root: repo }), isConfigError('V'));
+    // обычная папка вне репозитория проходит
+    assert.equal(assertOutsideRepo(outside, 'V', { root: repo }), outside);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

@@ -8,7 +8,8 @@
  * а папка данных внутри репозитория — отказ.
  */
 import { fileURLToPath } from 'node:url';
-import { dirname, isAbsolute, join, posix, resolve, win32 } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
 import { ConfigError, getProtectedPages } from './config.mjs';
 
 export function repoRoot() {
@@ -23,12 +24,35 @@ export function isInside(child, parent, platform = process.platform) {
   const p = platform === 'win32' ? win32 : posix;
   const norm = (s) => (platform === 'win32' ? p.resolve(s).toLowerCase() : p.resolve(s));
   const rel = p.relative(norm(parent), norm(child));
-  return rel === '' || (!rel.startsWith('..') && !p.isAbsolute(rel));
+  // Выход вверх — сегмент `..`, а не имя, начинающееся с двух точек (`..data` лежит внутри).
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel));
 }
 
-/** Вернуть `path`, если он вне репозитория продукта; иначе `ConfigError` с именем переменной. */
+/** Путь с раскрытыми ярлыками: ближайший существующий предок через realpath, остаток дописывается как есть. */
+function realPathDeep(path) {
+  const rest = [];
+  let current = path;
+  for (;;) {
+    try {
+      return join(realpathSync(current), ...rest.reverse());
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return path;
+      rest.push(basename(current));
+      current = parent;
+    }
+  }
+}
+
+/**
+ * Вернуть `path`, если он вне репозитория продукта; иначе `ConfigError` с именем переменной.
+ * Ярлыки (junction/symlink) раскрываются: путь, ведущий за ярлыком внутрь репозитория, тоже отказ.
+ * Раскрытие — только для платформы процесса (тесты чистой логики с чужой платформой его не делают).
+ */
 export function assertOutsideRepo(path, variable, { root = repoRoot(), platform = process.platform } = {}) {
-  if (isInside(path, root, platform)) {
+  const real = platform === process.platform;
+  const inside = isInside(path, root, platform) || (real && isInside(realPathDeep(path), realPathDeep(root), platform));
+  if (inside) {
     throw new ConfigError(
       `${variable}: папка данных внутри репозитория продукта (${path}) — вынесите данные в папку сайта вне репозитория`,
       variable,
