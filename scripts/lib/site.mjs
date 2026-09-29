@@ -28,6 +28,12 @@ export const SITE_PATH_VARS = [
   'TILDA_DONOR_BROWSER_PROFILE',
 ];
 
+/** Переменные, определяющие проект и защиту: у выбранного сайта они берутся только из его `.env`. */
+export const SITE_IDENTITY_VARS = ['TILDA_PROJECT_ID', 'TILDA_PROTECTED_PAGES', 'TILDA_DONOR_PROJECT_ID'];
+
+/** Переменные процесса, не зависящие от сайта: из окружения допустимы без предупреждения. */
+export const SITE_NEUTRAL_VARS = ['TILDA_SITE_DIR', 'TILDA_BROWSER_DAEMON', 'TILDA_BROWSER_VISIBLE'];
+
 /** Папка сайта из флага или `TILDA_SITE_DIR`; null, если сайт не выбран. Проверяет папку. */
 export function resolveSiteDir({
   flag,
@@ -52,7 +58,9 @@ export function resolveSiteDir({
 
 /**
  * Что `.env` сайта добавляет к окружению. Чистая функция: `set` — переменные к установке,
- * `kept` — не-`TILDA_*` переменные, где остаётся значение окружения.
+ * `kept` — не-`TILDA_*` переменные, где остаётся значение окружения, `inherited` — прочие `TILDA_*`,
+ * заданные только в окружении (предупреждение). `TILDA_PROJECT_ID`, `TILDA_PROTECTED_PAGES` и
+ * `TILDA_DONOR_PROJECT_ID` только в окружении — отказ: их значения принадлежат другому сайту.
  */
 export function siteEnvChanges({ siteDir, text, env = process.env }) {
   const parsed = parseEnv(text);
@@ -73,7 +81,17 @@ export function siteEnvChanges({ siteDir, text, env = process.env }) {
       conflicts[0],
     );
   }
-  return { set, kept };
+  // TILDA_*, которых нет в .env сайта, но есть в окружении оболочки, могли остаться от другого сайта.
+  const orphans = Object.keys(env).filter((k) => k.startsWith('TILDA_') && !(k in parsed) && !SITE_NEUTRAL_VARS.includes(k));
+  const identityOrphans = orphans.filter((k) => SITE_IDENTITY_VARS.includes(k));
+  if (identityOrphans.length) {
+    log.error('siteEnvChanges', '[FIX] переменные сайта заданы только в окружении', { names: identityOrphans });
+    throw new ConfigError(
+      `переменные заданы только в окружении, а в .env папки сайта их нет: ${identityOrphans.join(', ')} — впишите их в .env сайта или уберите из окружения`,
+      identityOrphans[0],
+    );
+  }
+  return { set, kept, inherited: orphans };
 }
 
 /**
@@ -86,12 +104,13 @@ export function applySite({ flag, env = process.env, cwd, root, read = (p) => re
     log.debug('applySite', 'папка сайта не выбрана — пути только из явных переменных');
     return null;
   }
-  const { set, kept } = siteEnvChanges({ siteDir: dir, text: read(join(dir, '.env')), env });
+  const { set, kept, inherited } = siteEnvChanges({ siteDir: dir, text: read(join(dir, '.env')), env });
   Object.assign(env, set);
   env.TILDA_SITE_DIR = dir;
   log.info('applySite', 'папка сайта выбрана', { site: dir.replace(/\\/g, '/'), set: Object.keys(set).length });
   log.debug('applySite', 'переменные из .env сайта', { set: Object.keys(set), kept });
-  return { siteDir: dir, set: Object.keys(set), kept };
+  if (inherited.length) log.warn('applySite', 'TILDA_* взяты из окружения — в .env сайта их нет', { names: inherited });
+  return { siteDir: dir, set: Object.keys(set), kept, inherited };
 }
 
 /** Готовая команда для подсказки пользователю: с `--site`, если сайт выбран. Кавычки — только двойные. */

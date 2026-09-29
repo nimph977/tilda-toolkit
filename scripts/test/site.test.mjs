@@ -123,3 +123,47 @@ test('resolve используется для сравнения путей од
     assert.equal(resolveSiteDir({ flag: `${site}${process.platform === 'win32' ? '\\' : '/'}.`, env: {}, cwd: tmp, root: '/nowhere' }), resolve(site));
   });
 });
+
+test('siteEnvChanges: идентифицирующая переменная только в окружении, а в .env сайта её нет — отказ без значения', () => {
+  for (const key of ['TILDA_PROJECT_ID', 'TILDA_PROTECTED_PAGES', 'TILDA_DONOR_PROJECT_ID']) {
+    assert.throws(
+      () => siteEnvChanges({ siteDir: '/s', text: 'TILDA_CATALOG_DIR=/c\n', env: { [key]: '100001' } }),
+      (e) => isConfigError(key, /только в окружении/)(e) && !/100001/.test(e.message),
+      key,
+    );
+  }
+});
+
+test('siteEnvChanges: пустое значение в окружении тоже считается заданным', () => {
+  assert.throws(
+    () => siteEnvChanges({ siteDir: '/s', text: 'TILDA_PROJECT_ID=100001\n', env: { TILDA_PROTECTED_PAGES: '' } }),
+    isConfigError('TILDA_PROTECTED_PAGES'),
+  );
+});
+
+test('siteEnvChanges: те же идентификаторы и в окружении, и в .env с равными значениями — не отказ', () => {
+  const { inherited } = siteEnvChanges({
+    siteDir: '/s',
+    text: 'TILDA_PROJECT_ID=100001\nTILDA_PROTECTED_PAGES=200001\n',
+    env: { TILDA_PROJECT_ID: '100001', TILDA_PROTECTED_PAGES: '200001' },
+  });
+  assert.deepEqual(inherited, []);
+});
+
+test('siteEnvChanges: прочие TILDA_* из окружения, которых нет в .env, — в inherited; отладочные и сайт не считаются', () => {
+  const { inherited } = siteEnvChanges({
+    siteDir: '/s',
+    text: 'TILDA_PROJECT_ID=100001\nTILDA_PROTECTED_PAGES=\n',
+    env: { TILDA_DEFAULT_PAGE: '200002', TILDA_BROWSER_DAEMON: '0', TILDA_BROWSER_VISIBLE: '1', TILDA_SITE_DIR: '/s', LOG_LEVEL: 'DEBUG', PATH: 'x' },
+  });
+  assert.deepEqual(inherited, ['TILDA_DEFAULT_PAGE']);
+});
+
+test('applySite: чужой TILDA_PROJECT_ID из оболочки не подхватывается сайтом без этой строки', () => {
+  withTmp((tmp, site) => {
+    writeFileSync(join(site, '.env'), 'TILDA_CATALOG_DIR=/c\n');
+    const env = { TILDA_PROJECT_ID: '100002' };
+    assert.throws(() => applySite({ flag: site, env, cwd: tmp, root: '/nowhere' }), isConfigError('TILDA_PROJECT_ID'));
+    assert.equal(env.TILDA_SITE_DIR, undefined, 'окружение не меняется при отказе');
+  });
+});

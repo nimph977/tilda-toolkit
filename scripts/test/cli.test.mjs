@@ -317,7 +317,7 @@ test('donor aliases, links and check need the donor project id but not the donor
 /** Окружение для запуска CLI без данных сайта: ни сайта, ни явных папок данных. */
 function bareEnv(extra = {}) {
   const env = { ...process.env, LOG_LEVEL: 'ERROR', ...extra };
-  for (const k of ['TILDA_SITE_DIR', 'TILDA_BASELINE_DIR', 'TILDA_REFERENCE_DIR', 'TILDA_BROWSER_PROFILE', 'TILDA_CATALOG_DIR', 'TILDA_DEFAULT_PAGE', 'TILDA_DONOR_PROJECT_ID', 'TILDA_DONOR_BROWSER_PROFILE']) {
+  for (const k of ['TILDA_SITE_DIR', 'TILDA_BASELINE_DIR', 'TILDA_REFERENCE_DIR', 'TILDA_BROWSER_PROFILE', 'TILDA_CATALOG_DIR', 'TILDA_DEFAULT_PAGE', 'TILDA_PROJECT_ID', 'TILDA_PROTECTED_PAGES', 'TILDA_DONOR_PROJECT_ID', 'TILDA_DONOR_BROWSER_PROFILE']) {
     if (!(k in extra)) delete env[k];
   }
   return env;
@@ -382,5 +382,20 @@ test('--site и TILDA_SITE_DIR на разные папки — отказ ко�
     assert.match(result.stdout + result.stderr, /разные папки/);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ID проекта только в окружении, а в .env сайта его нет — отказ кодом 2 без значения в выводе', () => {
+  const site = mkdtempSync(join(tmpdir(), 'tilda-cli-orphan-'));
+  try {
+    writeFileSync(join(site, '.env'), 'TILDA_PROTECTED_PAGES=\n');
+    const result = runCli(['--site', site, 'catalog', 'list'], bareEnv({ TILDA_PROJECT_ID: '100002' }));
+    assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
+    const out = result.stdout + result.stderr;
+    assert.match(out, /TILDA_PROJECT_ID/);
+    assert.match(out, /только в окружении/);
+    assert.doesNotMatch(out, /100002/);
+  } finally {
+    rmSync(site, { recursive: true, force: true });
   }
 });
