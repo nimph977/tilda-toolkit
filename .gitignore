@@ -11,3 +11,5 @@ scripts/plans/
 *.tgz
 .session-jar.json
 recovery.jsonlz4
+/.claude/skills/tilda-manager/
+/.agents/skills/tilda-manager/
