@@ -20,7 +20,7 @@
  * plan-copy: по инвентарю источника строит план сборки его копии — операция на блок,
  *          порядок исходный, скрытые блоки помечены hidden.
  *
- * Формат плана — scripts/plans/README.md.
+ * Формат плана — skills/tilda-manager/references/plan-schema.md.
  * По умолчанию out = <baseline>/payload, reread = <baseline>/reread.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, statSync } from 'node:fs';

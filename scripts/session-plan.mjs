@@ -21,7 +21,7 @@ import { prepare } from './apply-plan.mjs';
 const log = createLogger('session-plan');
 
 export const SESSION_PREFIX = 'session-';
-/** Виды операций плана — ровно один на операцию (scripts/plans/README.md). */
+/** Виды операций плана — ровно один на операцию (skills/tilda-manager/references/plan-schema.md). */
 export const OP_KINDS = ['set', 'field', 'listSet', 'blockSet', 'blockHidden', 'duplicateElement', 'removeElement', 'gallerySet', 'moveBlock', 'setOrder', 'addZero', 'addRecord', 'newRecord'];
 
 export class StageError extends Error {

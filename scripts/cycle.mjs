@@ -237,7 +237,7 @@ export function touchesLayout(plan) {
  * { pageid, ops, payloads, written, created: [{id, recordid, zeroIndex, tplid}], verify: problems, dryRun, layout }.
  *
  * @param {object} driver   { call, reload }
- * @param {object} plan     план операций (scripts/plans/README.md)
+ * @param {object} plan     план операций (skills/tilda-manager/references/plan-schema.md)
  * @param {object} opts     { baseDir, out, reread, dryRun, emitCalls, skipInventory }
  */
 export async function apply(driver, plan, opts = {}) {
