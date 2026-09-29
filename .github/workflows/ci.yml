@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: node --version
+      - run: npm --version
+      - run: npm ci
+      - run: npm test
+
+  clean-linux:
+    name: test (clean Linux container)
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install base tools
+        run: |
+          set -euxo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl xz-utils git
+      - name: Install Node.js 24 from nodejs.org
+        run: |
+          set -euxo pipefail
+          cd /tmp
+          curl -fsSLO https://nodejs.org/dist/latest-v24.x/SHASUMS256.txt
+          FILE=$(grep -oE 'node-v24\.[0-9]+\.[0-9]+-linux-x64\.tar\.xz' SHASUMS256.txt | head -n 1)
+          curl -fsSLO "https://nodejs.org/dist/latest-v24.x/${FILE}"
+          grep " ${FILE}\$" SHASUMS256.txt | sha256sum -c -
+          tar -xJf "${FILE}" -C /usr/local --strip-components=1
+          node --version
+          npm --version
+      - uses: actions/checkout@v7
+      - run: npm ci
+      - run: npm test
+
+  hygiene:
+    name: repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: No workspace files are tracked
+        run: |
+          set -euo pipefail
+          BAD=$(git ls-files | grep -E '^(\.ai-factory|\.claude|\.agents|\.codex)/|^(\.ai-factory\.json|\.mcp\.json|backlog\.md|CLAUDE\.local\.md)$' || true)
+          echo "tracked files: $(git ls-files | wc -l)"
+          if [ -n "$BAD" ]; then echo "::error::workspace files are tracked:"; echo "$BAD"; exit 1; fi
+      - name: Install gitleaks 8.30.1
+        run: |
+          set -euxo pipefail
+          curl -fsSL -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks version
+      - name: gitleaks (full history)
+        run: /tmp/gitleaks git --redact --verbose --exit-code 1 .

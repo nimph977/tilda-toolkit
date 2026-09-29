@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.browser-profile*/
+.playwright-mcp/
+site-baseline/
+site-reference/
+scripts/plans/
+*.log
+*.tgz
+.session-jar.json
+recovery.jsonlz4

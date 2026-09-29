@@ -1,0 +1,79 @@
+{
+  "name": "example: new record from fields",
+  "page": "200002",
+  "ops": [
+    {
+      "id": "b1",
+      "newRecord": {
+        "tplid": "796",
+        "fields": [
+          {
+            "name": "title",
+            "value": "Заголовок блока"
+          },
+          {
+            "name": "descr",
+            "value": "Короткое описание"
+          }
+        ],
+        "images": [
+          {
+            "field": "img",
+            "file": "examples/assets/placeholder.png"
+          }
+        ]
+      },
+      "hidden": "n"
+    },
+    {
+      "id": "b2",
+      "newRecord": {
+        "tplid": "580",
+        "fields": [
+          {
+            "name": "title",
+            "value": "Заголовок с оформлением"
+          },
+          {
+            "name": "descr",
+            "value": "Первая строка<br>Вторая строка<br><br>Абзац после пустой строки"
+          },
+          {
+            "name": "margintop",
+            "value": "45px"
+          },
+          {
+            "name": "marginbottom",
+            "value": "120px"
+          },
+          {
+            "name": "blockbackground",
+            "value": "#ededed"
+          },
+          {
+            "name": "title_typo",
+            "value": "{\"color\":\"#ffffff\",\"fontsize\":\"36px\",\"uppercase\":\"uppercase\"}"
+          }
+        ]
+      },
+      "hidden": "n"
+    },
+    {
+      "id": "b3",
+      "newRecord": {
+        "tplid": "212",
+        "fields": [
+          {
+            "name": "soclinks",
+            "value": "[{\"service\":\"telegram\",\"link\":\"https://example.test/tg\"},{\"service\":\"youtube\",\"link\":\"https://example.test/yt\"}]"
+          },
+          {
+            "name": "margintop",
+            "value": "15px"
+          }
+        ]
+      },
+      "hidden": "n"
+    }
+  ]
+}

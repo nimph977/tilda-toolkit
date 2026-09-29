@@ -1,0 +1,208 @@
+/**
+ * Хранилище слепка референс-сайта: имена страниц, пути, манифест, имена файлов картинок.
+ *
+ * Раскладка: `<TILDA_REFERENCE_DIR>/<slug>/{reference.json, site.json, pages/, structure/, images/}`.
+ * `site.json` — карта сайта: метка страницы (`P00`…, `HDR`, `FTR`) ↔ страница слепка ↔ новый `pageid`
+ * (в отчётах и планах страница называется меткой, а не именем слепка).
+ * Слепок живёт вне git: домен и содержимое референса в репозиторий не попадают,
+ * `slug` выбирает пользователь, домен в путях не участвует.
+ */
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { extname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { createLogger } from './log.mjs';
+import { referenceDir } from './paths.mjs';
+
+const log = createLogger('reference-store');
+
+/** Допустимое имя слепка: латиница, цифры, дефис; до 40 символов. */
+export const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+/** Расширения картинок, которые потом примет `upload` (см. `scripts/upload.mjs`, ALLOWED_TYPES). */
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
+
+/** Проверяет имя слепка; ошибка → код выхода 2. */
+export function assertSlug(slug) {
+  if (typeof slug === 'string' && SLUG_RE.test(slug)) return slug;
+  const err = new Error(`недопустимое имя слепка: ${JSON.stringify(slug)} (ожидается ${SLUG_RE})`);
+  err.code = 'BAD_SLUG';
+  err.exitCode = 2;
+  throw err;
+}
+
+/**
+ * Имя страницы по URL: сегменты пути через `--`, только `[a-z0-9-]`, до 80 символов.
+ * `https://example.test/` → `index`; `https://example.test/about/team?x=1#top` → `about--team`.
+ */
+export function pageNameFromUrl(url) {
+  const { pathname } = new URL(url);
+  let decoded = pathname;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    // битые проценты — оставляем как есть
+  }
+  const trimmed = decoded.replace(/^\/+|\/+$/g, '');
+  if (!trimmed) return 'index';
+  const name = trimmed
+    .toLowerCase()
+    .split('/')
+    .map((segment) => segment.replace(/[^a-z0-9-]/g, '-').replace(/-{2,}/g, '-'))
+    .join('--');
+  return name.slice(0, 80);
+}
+
+/** Пути слепка; `opts.baseDir` подменяет `referenceDir()` (нужно тестам). */
+export function refPaths(slug, opts = {}) {
+  const root = join(opts.baseDir || referenceDir(), slug);
+  return {
+    root,
+    pages: join(root, 'pages'),
+    images: join(root, 'images'),
+    structure: join(root, 'structure'),
+    manifest: join(root, 'reference.json'),
+    site: join(root, 'site.json'),
+  };
+}
+
+/** Создаёт каталоги слепка. */
+export function ensureDirs(slug, opts) {
+  const paths = refPaths(slug, opts);
+  for (const dir of [paths.pages, paths.images, paths.structure]) mkdirSync(dir, { recursive: true });
+  log.debug('ensureDirs', 'каталоги готовы', { root: paths.root });
+  return paths;
+}
+
+/** Читает манифест; нет файла → null; битый JSON → ошибка. */
+export function readManifest(slug, opts) {
+  const { manifest } = refPaths(slug, opts);
+  if (!existsSync(manifest)) return null;
+  try {
+    return JSON.parse(readFileSync(manifest, 'utf8'));
+  } catch (e) {
+    log.error('readManifest', 'манифест не разобрался', { path: manifest, error: e.message });
+    throw e;
+  }
+}
+
+/** Пишет манифест; возвращает путь. */
+export function writeManifest(slug, manifest, opts) {
+  const { manifest: path } = refPaths(slug, opts);
+  writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+  log.debug('writeManifest', 'манифест записан', { path, pages: manifest.pages?.length ?? 0 });
+  return path;
+}
+
+/**
+ * Новый манифест. Элемент `pages[]`: `{ name, url, file, status, title, blocks, fetchedAt, error }`;
+ * `images` — объект `src → путь файла относительно корня репо`.
+ */
+export function newManifest({ slug, url }) {
+  return { slug, url, createdAt: new Date().toISOString(), fetchedAt: null, pages: [], images: {} };
+}
+
+/** Имя файла картинки: 12 hex-символов sha1(src) + расширение из пути (или `.bin`). */
+export function imageFileName(src) {
+  const hash = createHash('sha1').update(String(src)).digest('hex').slice(0, 12);
+  let ext = '.bin';
+  try {
+    const candidate = extname(new URL(src).pathname).toLowerCase();
+    if (IMAGE_EXTENSIONS.has(candidate)) ext = candidate;
+  } catch {
+    // не URL — остаётся .bin
+  }
+  return hash + ext;
+}
+
+/** Заменяет запись страницы с тем же `name` или добавляет новую. */
+export function upsertPage(manifest, entry) {
+  const index = manifest.pages.findIndex((p) => p.name === entry.name);
+  if (index === -1) manifest.pages.push(entry);
+  else manifest.pages[index] = entry;
+  return manifest;
+}
+
+/** Метка страницы карты сайта: `P00`…`P99`, `P100`…, `HDR` (шапка), `FTR` (подвал). */
+export const LABEL_RE = /^(P\d{2,}|HDR|FTR)$/;
+
+export function isLabel(s) {
+  return LABEL_RE.test(String(s ?? ''));
+}
+
+/** Пустая карта сайта. `substitutes` — замены шаблонов `{ "770": "794" }`, пишутся руками. */
+export function newSite(slug) {
+  const createdAt = new Date().toISOString();
+  return { slug, projectid: null, createdAt, updatedAt: createdAt, substitutes: {}, pages: [] };
+}
+
+/** Читает карту сайта; нет файла → null; битый JSON → ошибка. */
+export function readSite(slug, opts) {
+  const { site } = refPaths(slug, opts);
+  if (!existsSync(site)) return null;
+  try {
+    return JSON.parse(readFileSync(site, 'utf8'));
+  } catch (e) {
+    log.error('readSite', 'карта сайта не разобралась', { path: site, error: e.message });
+    throw e;
+  }
+}
+
+/** Пишет карту сайта (`updatedAt` = сейчас); возвращает путь. */
+export function writeSite(slug, site, opts) {
+  const paths = refPaths(slug, opts);
+  mkdirSync(paths.root, { recursive: true });
+  site.updatedAt = new Date().toISOString();
+  writeFileSync(paths.site, JSON.stringify(site, null, 2) + '\n', 'utf8');
+  log.debug('writeSite', 'карта сайта записана', { path: paths.site, pages: site.pages.length });
+  return paths.site;
+}
+
+const labelNumber = (label) => (/^P\d+$/.test(label) ? Number(label.slice(1)) : -1);
+const formatLabel = (n) => 'P' + String(n).padStart(2, '0');
+
+/**
+ * Метки страниц карты сайта по манифесту слепка (чистая, меняет и возвращает `site`).
+ * Страница `ok` без метки получает следующую `P<n>`; метки стабильны и не переиспользуются:
+ * исчезнувшая из слепка страница остаётся с `missing: true`. `HDR`/`FTR` добавляются по флагам.
+ * Порядок: `HDR`, `FTR`, затем `P` по номеру.
+ * @returns {{ site: object, added: string[], missing: string[] }}
+ */
+export function assignLabels(site, manifest, { header = false, footer = false } = {}) {
+  const okPages = (manifest?.pages ?? []).filter((p) => p.status === 'ok');
+  const okNames = new Set(okPages.map((p) => p.name));
+  const added = [];
+  let next = Math.max(-1, ...site.pages.map((p) => labelNumber(p.label))) + 1;
+  for (const p of okPages) {
+    const known = site.pages.find((e) => e.role === 'content' && e.name === p.name);
+    if (known) {
+      if (known.missing) delete known.missing;
+      known.url = p.url;
+      continue;
+    }
+    const label = formatLabel(next);
+    next += 1;
+    site.pages.push({ label, role: 'content', name: p.name, url: p.url, pageid: null });
+    added.push(label);
+  }
+  const missing = [];
+  for (const e of site.pages) {
+    if (e.role !== 'content' || okNames.has(e.name)) continue;
+    e.missing = true;
+    missing.push(e.label);
+  }
+  for (const [flag, label, role] of [[header, 'HDR', 'header'], [footer, 'FTR', 'footer']]) {
+    if (flag && !site.pages.some((e) => e.label === label)) {
+      site.pages.push({ label, role, pageid: null });
+      added.push(label);
+    }
+  }
+  const rank = (e) => (e.label === 'HDR' ? -2 : e.label === 'FTR' ? -1 : labelNumber(e.label));
+  site.pages.sort((a, b) => rank(a) - rank(b));
+  log.debug('assignLabels', 'метки назначены', { total: site.pages.length, added: added.length, missing: missing.length });
+  return { site, added, missing };
+}
+
+/** Запись карты сайта по метке или null. */
+export function resolveSource(site, label) {
+  return site?.pages?.find((e) => e.label === label) ?? null;
+}
