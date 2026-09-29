@@ -4,7 +4,6 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setLogLevel } from '../lib/log.mjs';
-import { repoRoot } from '../lib/paths.mjs';
 import { refPaths } from '../lib/reference-store.mjs';
 import { fetchReference, shotReference, structureReference } from '../reference.mjs';
 
@@ -87,7 +86,9 @@ test('fetchReference follows internal links and resumes without refetching', () 
     assert.deepEqual(manifest.pages.map((p) => [p.name, p.status, p.blocks]), [['index', 'ok', 1], ['about', 'ok', 1]]);
     assert.ok(existsSync(join(paths.pages, 'index.html')));
     assert.ok(existsSync(join(paths.structure, 'about.json')));
-    assert.equal(resolve(repoRoot(), manifest.pages[0].file), join(paths.pages, 'index.html'));
+    assert.equal(manifest.pathBase, 'snapshot');
+    assert.equal(manifest.pages[0].file, 'pages/index.html');
+    assert.equal(resolve(paths.root, manifest.pages[0].file), join(paths.pages, 'index.html'));
 
     const again = makeFake();
     const r2 = await fetchReference({ url: BASE, slug: 'demo', follow: true, max: 5, baseDir, ...QUIET }, { browser: again.browser });
@@ -185,8 +186,8 @@ test('fetchReference downloads images with known extensions only', () =>
     assert.equal(r.imagesFailed, 1);
     const manifest = JSON.parse(readFileSync(refPaths('demo', { baseDir }).manifest, 'utf8'));
     const rel = manifest.images['https://cdn.test/a.png'];
-    assert.match(rel, /[0-9a-f]{12}\.png$/);
-    assert.ok(existsSync(resolve(repoRoot(), rel)));
+    assert.match(rel, /^images\/[0-9a-f]{12}\.png$/);
+    assert.ok(existsSync(resolve(refPaths('demo', { baseDir }).root, rel)));
     assert.equal(manifest.images['https://cdn.test/noext'], undefined);
   }));
 
@@ -195,7 +196,7 @@ test('fetchReference falls back to goto when request.get is refused', () =>
     const r = await fetchReference({ url: BASE, slug: 'demo', images: true, baseDir, ...QUIET }, { browser: makeFake({ imageOk: false }).browser });
     assert.equal(r.images, 1);
     const manifest = JSON.parse(readFileSync(refPaths('demo', { baseDir }).manifest, 'utf8'));
-    assert.equal(readFileSync(resolve(repoRoot(), manifest.images['https://cdn.test/a.png']), 'utf8'), 'img');
+    assert.equal(readFileSync(resolve(refPaths('demo', { baseDir }).root, manifest.images['https://cdn.test/a.png']), 'utf8'), 'img');
   }));
 
 test('structureReference rebuilds structure from saved HTML', () =>

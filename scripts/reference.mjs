@@ -11,13 +11,12 @@
  * не нужны, держатель открывается с `protectedPages: []`.
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { join, relative } from 'node:path';
 import { createLogger } from './lib/log.mjs';
-import { repoRoot } from './lib/paths.mjs';
 import { splitRecords } from './lib/html-blocks.mjs';
 import {
   assertSlug, ensureDirs, imageFileName, isLabel, newManifest, pageNameFromUrl,
-  readManifest, readSite, refPaths, resolveSource, upsertPage, writeManifest,
+  readManifest, readSite, refPaths, resolveSource, snapshotFile, upsertPage, writeManifest,
 } from './lib/reference-store.mjs';
 import { collectInternalLinks, extractStructure, parseSitemap, structureFromFile } from './lib/reference-structure.mjs';
 
@@ -107,10 +106,9 @@ export async function downloadImage(page, src, dest, { gotoTimeoutMs = DEFAULTS.
 }
 
 async function fetchImages(page, manifest, paths, { slug, baseDir, imageDelayMs, gotoTimeoutMs }) {
-  const root = repoRoot();
   const pending = collectImageSources(paths).filter((src) => {
     const known = manifest.images[src];
-    return !(known && existsSync(resolve(root, known)));
+    return !(known && existsSync(snapshotFile(paths, known)));
   });
   log.info('fetchImages', 'картинки к скачиванию', { pending: pending.length, known: Object.keys(manifest.images).length });
   let downloaded = 0;
@@ -126,7 +124,7 @@ async function fetchImages(page, manifest, paths, { slug, baseDir, imageDelayMs,
     const dest = join(paths.images, fileName);
     const via = await downloadImage(page, src, dest, { gotoTimeoutMs });
     if (via) {
-      manifest.images[src] = relative(root, dest);
+      manifest.images[src] = relative(paths.root, dest).replace(/\\/g, '/');
       downloaded += 1;
       sinceWrite += 1;
       log.debug('fetchImages', 'картинка сохранена', { fileName, via });
@@ -230,7 +228,6 @@ export async function fetchReference(
   const browser = deps.browser || (await import('./lib/browser.mjs'));
   const paths = ensureDirs(slug, { baseDir });
   const manifest = readManifest(slug, { baseDir }) || newManifest({ slug, url: startUrl });
-  const root = repoRoot();
 
   const queue = [startUrl];
   const seen = new Set(queue);
@@ -308,7 +305,7 @@ export async function fetchReference(
       await sleep(settleMs);
       const html = await page.content();
       writeFileSync(file, html, 'utf8');
-      const relFile = relative(root, file);
+      const relFile = relative(paths.root, file).replace(/\\/g, '/');
       if (splitRecords(html).length === 0) {
         log.warn('fetchReference', 'страница без блоков Tilda', { name });
         upsertPage(manifest, { name, url: u, file: relFile, status: 'empty', error: 'нет блоков Tilda в HTML (заглушка?)', fetchedAt });
@@ -408,12 +405,11 @@ export async function structureReference({ slug, baseDir }) {
     throw err;
   }
   const paths = refPaths(slug, { baseDir });
-  const root = repoRoot();
   const tplids = new Set();
   let pages = 0;
   for (const p of manifest.pages) {
     if (p.status !== 'ok' || !p.file) continue;
-    const file = resolve(root, p.file);
+    const file = snapshotFile(paths, p.file);
     if (!existsSync(file)) {
       log.warn('structureReference', 'HTML страницы отсутствует, пропуск', { name: p.name });
       continue;

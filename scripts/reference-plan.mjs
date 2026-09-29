@@ -12,7 +12,7 @@
  * (`forminputs`, сообщение об успехе, `formmsgurl` с флагом `formContent`), код HTML-блока.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createLogger } from './lib/log.mjs';
 import { plansDir } from './lib/paths.mjs';
 import { isLabel, readManifest, readSite, refPaths, resolveSource } from './lib/reference-store.mjs';
@@ -1043,6 +1043,11 @@ export function generateReferencePlan(params) {
   return result;
 }
 
+/** src → абсолютный путь картинки: план исполняется из любой текущей папки. */
+export function absoluteImageMap(images, snapshotRoot) {
+  return Object.fromEntries(Object.entries(images ?? {}).map(([src, rel]) => [src, resolve(snapshotRoot, rel)]));
+}
+
 /**
  * Сборка плана по слепку и каталогу без записи файла: общая основа
  * `generateReferencePlan`, сверки (`reference compare`) и дописывания (`reference plan --update`).
@@ -1060,7 +1065,7 @@ export function prepareReferencePlan({ slug, source, page, startAfter, baseDir, 
   }
   const structure = JSON.parse(readFileSync(structPath, 'utf8'));
   const manifest = readManifest(slug, { baseDir });
-  const imageMap = manifest ? manifest.images ?? {} : {};
+  const imageMap = absoluteImageMap(manifest?.images, paths.root);
   const subs = resolved.substitutes;
   const tplids = tplidsFromStructure(structure);
   const catalogs = loadCatalogs([...tplids, ...Object.values(subs)], { baseDir: catalogDir });

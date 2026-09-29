@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setLogLevel } from '../lib/log.mjs';
-import { buildReferencePlan, BUTTON_REASONS, generateReferencePlan, linkFieldFor, menuItems, parseSubstitutes, SHAPE_REASONS, soclinksShapeSupported, VIDEO_FIELD_BY_KIND, VIDEO_REASONS } from '../reference-plan.mjs';
+import { absoluteImageMap, buildReferencePlan, BUTTON_REASONS, generateReferencePlan, linkFieldFor, menuItems, parseSubstitutes, SHAPE_REASONS, soclinksShapeSupported, VIDEO_FIELD_BY_KIND, VIDEO_REASONS } from '../reference-plan.mjs';
 import { buildLinkIndex, LINK_REASONS } from '../lib/reference-links.mjs';
 
 setLogLevel('ERROR');
@@ -913,4 +913,10 @@ test('applyFontAliases replaces the reference custom font family in JSON setting
   assert.deepEqual(JSON.parse(out[0].value), { color: '#ffffff', fontfamily: 'Montserrat' });
   assert.equal(out[1].value, '{"fontfamily":"Roboto"}');
   assert.equal(out[2].value, '60px');
+});
+
+test('absoluteImageMap turns snapshot-relative image paths into absolute ones', () => {
+  const root = join(tmpdir(), 'tilda-ref-root');
+  assert.deepEqual(absoluteImageMap({ 'https://cdn.test/a.png': 'images/a.png' }, root), { 'https://cdn.test/a.png': resolve(root, 'images/a.png') });
+  assert.deepEqual(absoluteImageMap(undefined, root), {});
 });

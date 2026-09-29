@@ -8,12 +8,18 @@
  * `slug` выбирает пользователь, домен в путях не участвует.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { extname, join } from 'node:path';
+import { extname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createLogger } from './log.mjs';
 import { referenceDir } from './paths.mjs';
 
 const log = createLogger('reference-store');
+
+/** Подпапки слепка: по ним в старых путях манифеста находится начало пути от папки слепка. */
+const SNAPSHOT_SUBDIRS = new Set(['pages', 'images', 'structure', 'shots', 'reports']);
+
+/** Значение `pathBase` манифеста: пути файлов считаются от папки слепка `<TILDA_REFERENCE_DIR>/<slug>/`. */
+export const MANIFEST_PATH_BASE = 'snapshot';
 
 /** Допустимое имя слепка: латиница, цифры, дефис; до 40 символов. */
 export const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -73,16 +79,68 @@ export function ensureDirs(slug, opts) {
   return paths;
 }
 
-/** Читает манифест; нет файла → null; битый JSON → ошибка. */
+/** Абсолютный путь файла слепка по пути из манифеста (от папки слепка). */
+export function snapshotFile(paths, rel) {
+  return resolve(paths.root, rel);
+}
+
+/**
+ * Старый путь манифеста (от корня репозитория или с `..`) → путь от папки слепка:
+ * берётся хвост после сегмента `<slug>/<подпапка слепка>`. Не разобран → null.
+ */
+export function toSnapshotRelative(rel, slug) {
+  const segs = String(rel ?? '').replace(/\\/g, '/').split('/').filter(Boolean);
+  for (let i = segs.length - 2; i >= 0; i -= 1) {
+    if (segs[i] === slug && SNAPSHOT_SUBDIRS.has(segs[i + 1])) return segs.slice(i + 1).join('/');
+  }
+  return null;
+}
+
+/**
+ * Перевод старого манифеста на пути от папки слепка (меняет объект на месте).
+ * Не разобранные пути сбрасываются: картинка скачается заново при `reference fetch --images`.
+ * @returns {{ manifest: object, converted: number, dropped: number }}
+ */
+export function normalizeManifest(manifest, slug) {
+  if (manifest.pathBase === MANIFEST_PATH_BASE) return { manifest, converted: 0, dropped: 0 };
+  let converted = 0;
+  let dropped = 0;
+  for (const [src, rel] of Object.entries(manifest.images ?? {})) {
+    const next = toSnapshotRelative(rel, slug);
+    if (next === null) {
+      delete manifest.images[src];
+      dropped += 1;
+    } else {
+      manifest.images[src] = next;
+      converted += 1;
+    }
+  }
+  for (const page of manifest.pages ?? []) {
+    if (!page.file) continue;
+    const next = toSnapshotRelative(page.file, slug);
+    if (next === null) dropped += 1;
+    else converted += 1;
+    page.file = next;
+  }
+  manifest.pathBase = MANIFEST_PATH_BASE;
+  return { manifest, converted, dropped };
+}
+
+/** Читает манифест (старые пути переводятся на пути от папки слепка); нет файла → null; битый JSON → ошибка. */
 export function readManifest(slug, opts) {
   const { manifest } = refPaths(slug, opts);
   if (!existsSync(manifest)) return null;
+  let data;
   try {
-    return JSON.parse(readFileSync(manifest, 'utf8'));
+    data = JSON.parse(readFileSync(manifest, 'utf8'));
   } catch (e) {
     log.error('readManifest', 'манифест не разобрался', { path: manifest, error: e.message });
     throw e;
   }
+  const { converted, dropped } = normalizeManifest(data, slug);
+  if (converted || dropped) log.info('readManifest', 'манифест переведён на пути от папки слепка', { slug, converted, dropped });
+  if (dropped) log.warn('readManifest', 'часть путей манифеста не разобрана — записи сброшены', { slug, dropped });
+  return data;
 }
 
 /** Пишет манифест; возвращает путь. */
@@ -95,10 +153,10 @@ export function writeManifest(slug, manifest, opts) {
 
 /**
  * Новый манифест. Элемент `pages[]`: `{ name, url, file, status, title, blocks, fetchedAt, error }`;
- * `images` — объект `src → путь файла относительно корня репо`.
+ * `images` — объект `src → путь файла относительно папки слепка` (`pathBase: 'snapshot'`).
  */
 export function newManifest({ slug, url }) {
-  return { slug, url, createdAt: new Date().toISOString(), fetchedAt: null, pages: [], images: {} };
+  return { slug, url, pathBase: MANIFEST_PATH_BASE, createdAt: new Date().toISOString(), fetchedAt: null, pages: [], images: {} };
 }
 
 /** Имя файла картинки: 12 hex-символов sha1(src) + расширение из пути (или `.bin`). */

@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setLogLevel } from '../lib/log.mjs';
 import { referenceDir } from '../lib/paths.mjs';
 import {
-  assertSlug, assignLabels, ensureDirs, imageFileName, isLabel, newManifest, newSite, pageNameFromUrl,
-  readManifest, readSite, refPaths, resolveSource, upsertPage, writeManifest, writeSite,
+  assertSlug, assignLabels, ensureDirs, imageFileName, isLabel, newManifest, newSite, normalizeManifest, pageNameFromUrl,
+  readManifest, readSite, refPaths, resolveSource, snapshotFile, toSnapshotRelative, upsertPage, writeManifest, writeSite,
 } from '../lib/reference-store.mjs';
 
 setLogLevel('ERROR');
@@ -143,6 +143,55 @@ test('readSite and writeSite round-trip', () => {
     const back = readSite('demo', { baseDir });
     assert.deepEqual(back.pages.map((p) => p.label), ['HDR', 'P00']);
     assert.deepEqual(back.substitutes, { 770: '794' });
+  } finally {
+    rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
+// --- Пути манифеста от папки слепка ---
+
+test('toSnapshotRelative finds the tail after <slug>/<snapshot subfolder>', () => {
+  assert.equal(toSnapshotRelative('site-reference/demo/images/a.png', 'demo'), 'images/a.png');
+  assert.equal(toSnapshotRelative('..\\..\\Sites\\x\\site-reference\\demo\\pages\\index.html', 'demo'), 'pages/index.html');
+  assert.equal(toSnapshotRelative('other/a.png', 'demo'), null);
+  assert.equal(toSnapshotRelative('demo/x/demo/images/a.png', 'demo'), 'images/a.png');
+});
+
+test('normalizeManifest converts old paths, drops unparsable ones and leaves new manifests alone', () => {
+  const old = {
+    slug: 'demo',
+    pages: [{ name: 'index', file: 'site-reference/demo/pages/index.html', status: 'ok' }, { name: 'b', file: 'zzz/b.html', status: 'ok' }],
+    images: { 'https://cdn.test/a.png': 'site-reference/demo/images/a.png', 'https://cdn.test/b.png': 'nowhere/b.png' },
+  };
+  const r = normalizeManifest(old, 'demo');
+  assert.equal(r.converted, 2);
+  assert.equal(r.dropped, 2);
+  assert.equal(r.manifest.pages[0].file, 'pages/index.html');
+  assert.equal(r.manifest.pages[1].file, null);
+  assert.equal(r.manifest.images['https://cdn.test/a.png'], 'images/a.png');
+  assert.equal('https://cdn.test/b.png' in r.manifest.images, false);
+  assert.equal(r.manifest.pathBase, 'snapshot');
+
+  const fresh = { slug: 'demo', pathBase: 'snapshot', pages: [{ name: 'i', file: 'pages/i.html' }], images: { 'https://cdn.test/a.png': 'images/a.png' } };
+  const again = normalizeManifest(fresh, 'demo');
+  assert.deepEqual([again.converted, again.dropped], [0, 0]);
+  assert.equal(again.manifest.images['https://cdn.test/a.png'], 'images/a.png');
+});
+
+test('newManifest starts on snapshot-relative paths', () => {
+  assert.equal(newManifest({ slug: 'demo', url: 'https://ref.test/' }).pathBase, 'snapshot');
+});
+
+test('readManifest converts an old manifest on read', () => {
+  const baseDir = mkdtempSync(join(tmpdir(), 'ref-store-old-'));
+  try {
+    ensureDirs('demo', { baseDir });
+    const paths = refPaths('demo', { baseDir });
+    writeFileSync(paths.manifest, JSON.stringify({ slug: 'demo', pages: [{ name: 'index', file: 'site-reference/demo/pages/index.html', status: 'ok' }], images: { 'https://cdn.test/a.png': 'site-reference/demo/images/a.png' } }), 'utf8');
+    const manifest = readManifest('demo', { baseDir });
+    assert.equal(manifest.pages[0].file, 'pages/index.html');
+    assert.equal(manifest.images['https://cdn.test/a.png'], 'images/a.png');
+    assert.equal(snapshotFile(paths, manifest.pages[0].file), join(paths.pages, 'index.html'));
   } finally {
     rmSync(baseDir, { recursive: true, force: true });
   }

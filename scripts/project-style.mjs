@@ -15,8 +15,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
-import { baselineDir, repoRoot } from './lib/paths.mjs';
-import { readManifest, refPaths } from './lib/reference-store.mjs';
+import { baselineDir } from './lib/paths.mjs';
+import { readManifest, refPaths, snapshotFile } from './lib/reference-store.mjs';
 import { projectCssUrl, PROJECT_REASONS, PROJECT_STYLE_KEYS, weightFromLabel } from './lib/project-style.mjs';
 import { diffFingerprints } from './page-role.mjs';
 
@@ -50,8 +50,7 @@ export async function fetchProjectCss(session, { slug }, opts = {}, deps = {}) {
   if (!manifest) throw new ProjectStyleError('NO_MANIFEST', `слепок ${slug} не найден: сначала reference fetch`);
   const first = (manifest.pages ?? []).find((p) => p.status === 'ok' && p.file);
   if (!first) throw new ProjectStyleError('NO_PAGES', `в слепке ${slug} нет снятых страниц`);
-  const file = join(repoRoot(), String(first.file).replace(/\\/g, '/'));
-  const html = readFileSync(existsSync(file) ? file : String(first.file), 'utf8');
+  const html = readFileSync(snapshotFile(refPaths(slug, opts), first.file), 'utf8');
   const url = projectCssUrl(html);
   if (!url) throw new ProjectStyleError('NO_CSS', PROJECT_REASONS.noCss);
   const browser = deps.browser || (await import('./lib/browser.mjs'));
