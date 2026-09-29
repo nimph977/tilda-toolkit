@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import vm from 'node:vm';
 import {
   BrowserError, buildCallExpression, isRetryable, isSessionLost, retryDelayMs,
@@ -124,7 +124,7 @@ test('donor role builds addresses and profile from its own variables and never f
     assert.match(editorUrl('200002', undefined, 'donor'), /projectid=100002$/);
     assert.match(editorUrl('200002'), /projectid=100001$/);
     assert.throws(() => editorUrl('200002', '100001', 'donor'), ConfigError);
-    assert.equal(profileDir('donor'), join('C:/tmp/donor-profile'));
+    assert.equal(profileDir('donor'), resolve('C:/tmp/donor-profile'));
     assert.throws(() => profileDir('other'), ConfigError);
   });
   withEnv({ TILDA_DONOR_BROWSER_PROFILE: undefined }, () => {
