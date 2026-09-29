@@ -404,7 +404,8 @@ function writeBuildCall(dir, pageid, createOps, plan) {
  * @param {object} plan {page, ops}
  */
 export function prepare(plan, opts = {}) {
-  const o = { baseDir: baselineDir(), out: null, emitCalls: true, ...opts };
+  const o = { out: null, emitCalls: true, ...opts };
+  o.baseDir ||= baselineDir();
   o.out = o.out || join(o.baseDir, 'payload');
   const pageid = String(plan.page);
   if (protectedPages().includes(pageid)) {
@@ -626,7 +627,8 @@ export function prepare(plan, opts = {}) {
  * @returns {{plan: object, missing: Array<{recordid, kind}>}}
  */
 export function buildCopyPlan({ from, to, startAfter = '' }, opts = {}) {
-  const o = { baseDir: baselineDir(), ...opts };
+  const o = { ...opts };
+  o.baseDir ||= baselineDir();
   const src = String(from);
   const dst = String(to);
   if (protectedPages().includes(dst)) {
@@ -761,7 +763,8 @@ function verifyCreated(createIds, pageid, o) {
  * Сверяет перечитанные модели с ожидаемыми. Возвращает список расхождений (пустой = успех).
  */
 export function verify(plan, opts = {}) {
-  const o = { baseDir: baselineDir(), out: null, reread: null, ...opts };
+  const o = { out: null, reread: null, ...opts };
+  o.baseDir ||= baselineDir();
   o.out = o.out || join(o.baseDir, 'payload');
   o.reread = o.reread || join(o.baseDir, 'reread');
   const pageid = String(plan.page);

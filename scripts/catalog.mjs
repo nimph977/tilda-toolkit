@@ -4,13 +4,13 @@
  * Из опубликованного HTML восстановимы имена полей, но не то, какие поля принимает `saverecord`
  * и какие значения в них по умолчанию. Эталон снимается с только что созданного блока на
  * черновой странице: `addRecord(tplid)` → `readRecordSnapshot` → `deleteRecord`. Файлы лежат в
- * `TILDA_BASELINE_DIR/catalog/<tplid>.json` (вне git). Драйвер браузера приходит снаружи —
+ * `TILDA_CATALOG_DIR/<tplid>.json` (общая папка каталога всех сайтов, вне git). Драйвер браузера приходит снаружи —
  * модуль не импортирует `lib/browser.mjs`.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
-import { baselineDir } from './lib/paths.mjs';
+import { catalogRoot } from './lib/paths.mjs';
 import { recordFields } from './lib/record-fields.mjs';
 import { refPaths } from './lib/reference-store.mjs';
 import { decodeList } from './list-model.mjs';
@@ -23,8 +23,9 @@ export const ZERO_TPLID = '396';
 /** Пауза между эталонами — тот же темп, что у чтений цикла (`cycle.mjs`, READ_DELAY_MS). */
 export const CAPTURE_DELAY_MS = 2500;
 
+/** Папка каталога: `<opts.baseDir>/catalog` (тесты) или общая `TILDA_CATALOG_DIR` для всех сайтов. */
 export function catalogDir(opts = {}) {
-  return join(opts.baseDir || baselineDir(), 'catalog');
+  return opts.baseDir ? join(opts.baseDir, 'catalog') : catalogRoot();
 }
 
 export function catalogPath(tplid, opts) {

@@ -10,6 +10,7 @@ import {
   openProject, openProjectSettings,
 } from '../lib/browser.mjs';
 import { ConfigError } from '../lib/config.mjs';
+import { repoRoot } from '../lib/paths.mjs';
 import { setLogLevel } from '../lib/log.mjs';
 
 setLogLevel('ERROR');
@@ -120,12 +121,16 @@ function withEnv(patch, fn) {
 }
 
 test('donor role builds addresses and profile from its own variables and never from the test ones', () => {
-  withEnv({ TILDA_PROJECT_ID: '100001', TILDA_DONOR_PROJECT_ID: '100002', TILDA_DONOR_BROWSER_PROFILE: 'C:/tmp/donor-profile' }, () => {
+  const donorProfile = join(tmpdir(), 'donor-profile');
+  withEnv({ TILDA_PROJECT_ID: '100001', TILDA_DONOR_PROJECT_ID: '100002', TILDA_DONOR_BROWSER_PROFILE: donorProfile }, () => {
     assert.match(editorUrl('200002', undefined, 'donor'), /projectid=100002$/);
     assert.match(editorUrl('200002'), /projectid=100001$/);
     assert.throws(() => editorUrl('200002', '100001', 'donor'), ConfigError);
-    assert.equal(profileDir('donor'), resolve('C:/tmp/donor-profile'));
+    assert.equal(profileDir('donor'), resolve(donorProfile));
     assert.throws(() => profileDir('other'), ConfigError);
+  });
+  withEnv({ TILDA_DONOR_BROWSER_PROFILE: join(repoRoot(), '.browser-profile-donor') }, () => {
+    assert.throws(() => profileDir('donor'), (e) => e instanceof ConfigError && e.variable === 'TILDA_DONOR_BROWSER_PROFILE');
   });
   withEnv({ TILDA_DONOR_BROWSER_PROFILE: undefined }, () => {
     assert.throws(() => profileDir('donor'), ConfigError);
@@ -135,6 +140,23 @@ test('donor role builds addresses and profile from its own variables and never f
   assert.equal(sessionProject('test', { TILDA_PROJECT_ID: '100001' }), '100001');
   assert.equal(sessionProject('donor', { TILDA_DONOR_PROJECT_ID: '100002' }), '100002');
   assert.throws(() => sessionProject('donor', { TILDA_DONOR_PROJECT_ID: 'x' }), ConfigError);
+});
+
+test('test profile comes from TILDA_BROWSER_PROFILE or the site folder and never from the repo root', () => {
+  const site = mkdtempSync(join(tmpdir(), 'tilda-profile-'));
+  try {
+    withEnv({ TILDA_BROWSER_PROFILE: undefined, TILDA_SITE_DIR: undefined }, () => {
+      assert.throws(() => profileDir('test'), ConfigError);
+    });
+    withEnv({ TILDA_BROWSER_PROFILE: undefined, TILDA_SITE_DIR: site }, () => {
+      assert.equal(profileDir('test'), join(resolve(site), '.browser-profile'));
+    });
+    withEnv({ TILDA_BROWSER_PROFILE: join(repoRoot(), '.browser-profile'), TILDA_SITE_DIR: site }, () => {
+      assert.throws(() => profileDir('test'), (e) => e instanceof ConfigError && e.variable === 'TILDA_BROWSER_PROFILE');
+    });
+  } finally {
+    rmSync(site, { recursive: true, force: true });
+  }
 });
 
 test('browser hide for the donor holder without a running holder starts no browser', async () => {

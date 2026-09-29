@@ -5,7 +5,7 @@
  * читается схема вкладки «Настройки» (`readSettingsSchema`), затем `previewrecord` перебирает
  * пробные значения полей — сервер отдаёт HTML блока и ничего не сохраняет. Признаки разметки
  * (`lib/markup-features.mjs`) каждого предпросмотра сводятся в карту (`lib/settings-calibration.mjs`),
- * карта пишется в `TILDA_BASELINE_DIR/catalog/<tplid>.settings.json`, блок удаляется.
+ * карта пишется в `TILDA_CATALOG_DIR/<tplid>.settings.json`, блок удаляется.
  * Запись в Tilda — только создание и удаление временного блока. Драйвер браузера приходит
  * снаружи — модуль не импортирует `lib/browser.mjs`.
  */

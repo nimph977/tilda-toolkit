@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
 import { baselineDir } from './lib/paths.mjs';
+import { cliHint } from './lib/site.mjs';
 import { assertSlug, assignLabels, isLabel, newSite, readManifest, readSite, refPaths, resolveSource, writeSite } from './lib/reference-store.mjs';
 import { collectUrls } from './link-check.mjs';
 
@@ -199,7 +200,7 @@ export async function auditPage(driver, { slug, label, projectid, baseDir, pages
   const manifest = readManifest(slug, { baseDir });
   if (!manifest) throw siteError(`слепок ${slug} не найден: сначала reference fetch`, 'NO_MANIFEST', 1);
   const file = pagesFile || join(baselineDir(), 'pages', `${projectid}.json`);
-  if (!existsSync(file)) throw siteError('перечня страниц проекта нет: сначала node --env-file=.env scripts/tilda.mjs page list', 'NO_PAGE_LIST', 1);
+  if (!existsSync(file)) throw siteError(`перечня страниц проекта нет: сначала ${cliHint('page list')}`, 'NO_PAGE_LIST', 1);
   const list = JSON.parse(readFileSync(file, 'utf8'));
   const knownPageIds = (list.pages ?? []).map((p) => String(p.pageid));
   const knownAliases = (list.pages ?? []).filter((p) => String(p.alias ?? '').trim()).map((p) => aliasPath(p.alias));

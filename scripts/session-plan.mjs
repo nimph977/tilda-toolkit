@@ -1,6 +1,6 @@
 /**
  * Режим реплик: правки из разговора копятся в один план
- * `scripts/plans/session-<ISO>-<pageid>.json`, на каждую реплику — `prepare` без записи и
+ * `<папка сайта>/plans/session-<ISO>-<pageid>.json`, на каждую реплику — `prepare` без записи и
  * локальный diff (ноль запросов в Тильду), запись всего разом по явной команде пользователя.
  *
  *   openSession(pageid)          → текущий незакрытый план страницы или новый
@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createLogger } from './lib/log.mjs';
-import { baselineDir, repoRoot, protectedPages } from './lib/paths.mjs';
+import { baselineDir, plansDir, protectedPages } from './lib/paths.mjs';
 import { prepare } from './apply-plan.mjs';
 
 const log = createLogger('session-plan');
@@ -34,7 +34,7 @@ export class StageError extends Error {
 }
 
 export function sessionDir(opts = {}) {
-  return opts.dir ? resolve(opts.dir) : join(repoRoot(), 'scripts', 'plans');
+  return opts.dir ? resolve(opts.dir) : plansDir();
 }
 
 export function sessionName(pageid, at = new Date()) {

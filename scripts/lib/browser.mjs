@@ -1,7 +1,7 @@
 /**
  * Слой собственного браузера.
  *
- * Chrome с постоянным профилем `.browser-profile/` держит отдельный фоновый процесс
+ * Chrome с постоянным профилем (`<папка сайта>/.browser-profile/`) держит отдельный фоновый процесс
  * (`browser-daemon.mjs`): браузер открывается один раз и живёт между командами — сессионная
  * кука Тильды не переживает перезапуск Chrome (проверено 2026-09-11), а частые
  * старты браузера роняли сессию. Каждая команда подключается к нему по CDP (`connectOverCDP`)
@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { chromium } from 'playwright-core';
 import { createLogger } from './log.mjs';
-import { repoRoot, protectedPages } from './paths.mjs';
+import { repoRoot, protectedPages, testProfileDir, assertOutsideRepo } from './paths.mjs';
 import { resetTildaZoom } from './browser-profile.mjs';
 import { resolveProjectIdFor, getProjectIdFor, getDonorProfile, requireDonorConfig, PROJECT_ROLES } from './config.mjs';
 
@@ -88,11 +88,11 @@ export function projectSettingsUrl(projectid, role = 'test', tab = 'ss_menu_head
 /** Select, по которому видно, что вкладка настроек открыта и форма готова. */
 export const SETTINGS_TAB_SELECT = { ss_menu_header: '#headerpageid', ss_menu_index: '#indexpageid' };
 
-/** Каталог профиля Chrome по роли: тестовый — `TILDA_BROWSER_PROFILE` или `.browser-profile/`, донор — только `TILDA_DONOR_BROWSER_PROFILE`. */
+/** Каталог профиля Chrome по роли: тестовый — `TILDA_BROWSER_PROFILE` или `<папка сайта>/.browser-profile`, донор — только `TILDA_DONOR_BROWSER_PROFILE`; внутри репозитория — отказ. */
 export function profileDir(role = 'test') {
-  if (role === 'donor') return resolve(getDonorProfile());
+  if (role === 'donor') return assertOutsideRepo(resolve(getDonorProfile()), 'TILDA_DONOR_BROWSER_PROFILE');
   if (role !== 'test') getProjectIdFor(role); // бросает ConfigError на неизвестную роль
-  return process.env.TILDA_BROWSER_PROFILE ? resolve(process.env.TILDA_BROWSER_PROFILE) : resolve(repoRoot(), '.browser-profile');
+  return testProfileDir();
 }
 
 /**

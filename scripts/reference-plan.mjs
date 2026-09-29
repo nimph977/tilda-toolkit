@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
-import { repoRoot } from './lib/paths.mjs';
+import { plansDir } from './lib/paths.mjs';
 import { isLabel, readManifest, readSite, refPaths, resolveSource } from './lib/reference-store.mjs';
 import { buildLinkIndex, LINK_REASONS, rewriteReferenceUrl } from './lib/reference-links.mjs';
 import { escapeAttr } from './lib/reference-structure.mjs';
@@ -1014,7 +1014,7 @@ export function resolveLabelSource({ slug, source, page, zone, substitutes, base
 }
 
 /**
- * Собрать план по слепку и каталогу и записать его в файл (по умолчанию `scripts/plans/`).
+ * Собрать план по слепку и каталогу и записать его в файл (по умолчанию `<папка сайта>/plans/`).
  * `source` — имя страницы слепка (разовая сборка) или метка карты сайта (`P07`, `HDR`, `FTR`):
  * по метке зона, страница, замены и перепись ссылок берутся из `site.json`.
  */
@@ -1033,7 +1033,7 @@ export function generateReferencePlan(params) {
     log.warn('generateReferencePlan', hint, { header: zones.header, footer: zones.footer });
   }
 
-  const path = out || join(repoRoot(), 'scripts', 'plans', planFileName(slug, source, resolved.page));
+  const path = out || join(plansDir(), planFileName(slug, source, resolved.page));
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(plan, null, 2) + '\n', 'utf8');
   log.info('generateReferencePlan', 'план записан', { path, ops: plan.ops.length, blocks: structure.blocks.length, zone: resolved.zone, zoneFiltered });

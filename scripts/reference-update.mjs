@@ -2,13 +2,13 @@
  * `reference plan --source <метка> --update` — план дописывания уже собранной страницы метки:
  * план сборки по метке сравнивается с живыми блоками
  * страницы (`listRecords` + `readRecordFields`), результат — операции `field`/`listSet`/`newRecord`
- * в `scripts/plans/reference-<slug>-<метка>-update.json`. Блоки не пересоздаются, `pageid` не меняется.
+ * в `<папка сайта>/plans/reference-<slug>-<метка>-update.json`. Блоки не пересоздаются, `pageid` не меняется.
  * Драйвер приходит снаружи — модуль не импортирует `lib/browser.mjs`.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
-import { repoRoot } from './lib/paths.mjs';
+import { plansDir } from './lib/paths.mjs';
 import { buildUpdateOps } from './lib/plan-update.mjs';
 import { prepareReferencePlan } from './reference-plan.mjs';
 import { normalizeFieldValue } from './apply-plan.mjs';
@@ -34,7 +34,7 @@ export async function updateReferencePlan(driver, { slug, label, pageid, out, st
   }
   const upd = buildUpdateOps(plan.ops, live, { normalize: normalizeFieldValue });
   const updatePlan = { page: String(pageid), name: `reference:${slug}/${label}:update`, startAfter: upd.startAfter, ops: upd.ops };
-  const path = out || join(repoRoot(), 'scripts', 'plans', `reference-${slug}-${label}-update.json`);
+  const path = out || join(plansDir(), `reference-${slug}-${label}-update.json`);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(updatePlan, null, 2) + '\n', 'utf8');
   const unmapped = [...upd.unmapped, ...(built.unmapped ?? [])];

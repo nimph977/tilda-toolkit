@@ -17,7 +17,7 @@
  *   rollback    <запись журнала> — обратный план из from тем же циклом с той же сверкой
  *   journal     список записей журнала страницы (--page)
  *   find        <строка> — адреса вхождений по локальным снимкам страницы (без браузера)
- *   replace     <строка> <строка> — план замены по всем адресам → --out (по умолчанию scripts/plans/replace-<pageid>.json)
+ *   replace     <строка> <строка> — план замены по всем адресам → --out (по умолчанию <папка сайта>/plans/replace-<pageid>.json)
  *   upload      <файл> — картинка с диска на CDN Тильды; в ответе готовый set.image (в плане можно писать "image": {"file": "путь"})
  *   preview     --plan <план> — предпросмотр правки без записи (previewrecord) и скриншот затронутых блоков
  *   shot        --page <id> [--width 1440,320] [--links] — скриншоты вида страницы (и проверка ссылок)
@@ -36,7 +36,7 @@
  *               сверка бэкапа с копией (расхождение сверх плана — останов) → накат заменой page →
  *               бэкап остаётся; защита живой снимается только явным --unprotect на этот вызов
  *   stage       режим реплик: stage '<json-операция>' | stage --plan <файл> — добавить в
- *               накопительный план scripts/plans/session-<ISO>-<pageid>.json и показать локальный diff (без сети);
+ *               накопительный план <папка сайта>/plans/session-<ISO>-<pageid>.json и показать локальный diff (без сети);
  *               stage diff | stage apply | stage drop | stage list
  *   reference   fetch | structure | pages | plan | shot | audit — слепок референс-сайта через держатель (--url --slug [--follow --sitemap --max
  *               --images --delay --settle]), переразбор структуры без сети, план сборки newRecord по структуре
@@ -55,9 +55,12 @@
  * Коды выхода: 0 успех; 1 расхождение или отказ операции; 2 ошибка аргументов; 3 SESSION_LOST.
  */
 import { parseArgs } from 'node:util';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createLogger } from './lib/log.mjs';
-import { protectedPages, envFileToLoad } from './lib/paths.mjs';
+import { protectedPages, plansDir, repoRoot } from './lib/paths.mjs';
+import { applySite, cliHint } from './lib/site.mjs';
 import { getDefaultPage, requireOnlineConfig } from './lib/config.mjs';
 import { isLabel } from './lib/reference-store.mjs';
 
@@ -77,6 +80,7 @@ export const NOT_IMPLEMENTED = new Set([]);
 const ONLINE_COMMANDS = new Set(['session', 'inventory', 'snapshot', 'apply', 'verify', 'rollback', 'upload', 'preview', 'shot', 'links', 'map', 'page', 'promote']);
 
 export const OPTIONS = {
+  site: { type: 'string' },
   page: { type: 'string' },
   plan: { type: 'string' },
   out: { type: 'string' },
@@ -134,7 +138,7 @@ export class UsageError extends Error {
 
 export function usage() {
   return [
-    'Использование: node scripts/tilda.mjs <команда> [флаги]',
+    'Использование: node scripts/tilda.mjs --site <папка сайта> <команда> [флаги]',
     '',
     'Команды: ' + COMMANDS.join(', '),
     '  browser start|stop|status|show|hide — держатель браузера (по умолчанию команды поднимают его сами); show — окно на экран, hide — свернуть; --donor — держатель донора (профиль TILDA_DONOR_BROWSER_PROFILE)',
@@ -162,6 +166,7 @@ export function usage() {
     '  catalog calibrate --page <черновая> --slug|--tplid [--force] [--delay мс] [--batch n] [--pause с]  карта «значение настройки → разметка» по предпросмотру (временный блок создаётся и удаляется)',
     '',
     'Флаги:',
+    '  --site <папка>    папка сайта вне репозитория: .env, site-baseline, site-reference, .browser-profile, plans (или TILDA_SITE_DIR); без неё команды с данными сайта отказывают с кодом 2',
     '  --page <pageid>   страница (иначе TILDA_DEFAULT_PAGE, если команда требует страницу)',
     '  --plan <файл>     план операций JSON (apply, verify)',
     '  --out <путь>      куда положить результат',
@@ -196,11 +201,11 @@ export function usage() {
     '  --tplid <список>  catalog capture: шаблоны через запятую вместо --slug (например 796,702); --delay — мс между эталонами (2500)',
     '  --force           catalog capture: переснять уже снятые шаблоны',
     '',
-    'rollback <запись>   откат по записи журнала: node scripts/tilda.mjs rollback site-baseline/journal/<pageid>/<файл>.json',
+    'rollback <запись>   откат по записи журнала: node scripts/tilda.mjs --site <папка сайта> rollback <папка сайта>/site-baseline/journal/<pageid>/<файл>.json',
     '',
     'Коды выхода: 0 успех, 1 расхождение/отказ, 2 аргументы, 3 сессии нет.',
     '',
-    'Запуск из любой папки: node <путь-к-репо>/scripts/tilda.mjs … — .env из корня репозитория подгружается сам, если TILDA_PROJECT_ID не задан (TILDA_ENV_AUTOLOAD=0 отключает).',
+    'Запуск из любой папки: node <путь-к-репо>/scripts/tilda.mjs --site <папка сайта> …; .env из корня репозитория не читается. Каталог шаблонов — TILDA_CATALOG_DIR (общий для всех сайтов).',
   ].join('\n');
 }
 
@@ -293,7 +298,7 @@ export function parseCli(argv) {
       }
     }
   }
-  if (cmd === 'rollback' && !rest[0]) throw new UsageError('rollback: нужен путь к записи журнала (site-baseline/journal/<pageid>/<файл>.json)');
+  if (cmd === 'rollback' && !rest[0]) throw new UsageError('rollback: нужен путь к записи журнала (<папка сайта>/site-baseline/journal/<pageid>/<файл>.json)');
   if (cmd === 'find' && !rest[0]) throw new UsageError('find: нужна строка для поиска');
   if (cmd === 'upload' && !rest[0]) throw new UsageError('upload: нужен путь к файлу');
   if (cmd === 'replace' && rest.length < 2) throw new UsageError('replace: нужны две строки — что и на что заменить');
@@ -350,7 +355,7 @@ async function cmdInventory(values) {
       records: list.length,
       zero: list.filter((r) => r.zeroIndex).length,
       hidden: list.filter((r) => r.hidden).map((r) => r.recordid),
-      path: `site-baseline/records/${values.page}/_inventory.json`,
+      path: `<папка сайта>/site-baseline/records/${values.page}/_inventory.json`,
     };
   });
 }
@@ -447,7 +452,7 @@ async function cmdFind(values, positionals) {
     hits: r.hits.slice(0, 15).map((h) => `${h.kind} ${h.recordid}${h.elem_id ? ' elem ' + h.elem_id : h.lid ? ' lid ' + h.lid : ''} .${h.field}: ${JSON.stringify(fr.normalize(h.value)).slice(0, 80)}`),
     skippedForm: r.skippedForm.map((x) => `${x.kind} ${x.recordid} .${x.field} (поле формы — пропущено)`),
     ...staleLine(r.skippedStale),
-    snapshotsAge: Number.isFinite(ageSec) ? `инвентарь снят ${ageSec} с назад; свежесть снимков — site-baseline/snapshots-index.json` : 'инвентаря нет — снимите snapshot',
+    snapshotsAge: Number.isFinite(ageSec) ? `инвентарь снят ${ageSec} с назад; свежесть снимков — <папка сайта>/site-baseline/snapshots-index.json` : 'инвентаря нет — снимите snapshot',
   };
 }
 
@@ -455,10 +460,9 @@ async function cmdReplace(values, positionals) {
   const fr = await import('./find-replace.mjs');
   const { writeFileSync, mkdirSync } = await import('node:fs');
   const { resolve, dirname } = await import('node:path');
-  const { repoRoot } = await import('./lib/paths.mjs');
   const [needle, replacement] = positionals;
   const r = fr.buildReplacePlan(values.page, needle, replacement);
-  const out = resolve(values.out || `${repoRoot()}/scripts/plans/replace-${values.page}.json`);
+  const out = resolve(values.out || join(plansDir(), `replace-${values.page}.json`));
   const outSlash = out.replace(/\\/g, '/');
   if (r.plan.ops.length) {
     mkdirSync(dirname(out), { recursive: true });
@@ -634,8 +638,8 @@ async function pageRole(values) {
       projectid: resolveProjectId(),
       protectedIds: protectedPages(),
     });
-    const rollback = r.rollback.startsWith('page role') ? `node --env-file=.env scripts/tilda.mjs ${r.rollback}` : r.rollback;
-    const base = { before: r.before, after: r.after, record: r.record, rollback, protectedAffected: protectedPages().length, next: 'node --env-file=.env scripts/tilda.mjs page list' };
+    const rollback = r.rollback.startsWith('page role') ? cliHint(r.rollback) : r.rollback;
+    const base = { before: r.before, after: r.after, record: r.record, rollback, protectedAffected: protectedPages().length, next: cliHint('page list') };
     if (r.otherChanged.length) return { status: `назначено, но изменились другие настройки: ${r.otherChanged.join(', ')}`, ...base, otherChanged: r.otherChanged, exitCode: EXIT.REFUSED };
     const done = indexMode ? 'главная назначена' : 'шапка и подвал назначены';
     return { status: r.changed ? done : 'без изменений: роли уже такие', ...base };
@@ -664,7 +668,7 @@ async function pageTitle(values, ops) {
     const r = await ops.setPageTitle(driver, values.page, values.title, { protectedIds: guard });
     const st = await browser.openEditor(session, values.page, { layers: [] });
     // document.title редактора — «Tilda: <заголовок>»; в итоге — сам заголовок.
-    return { status: `заголовок страницы ${r.pageid} записан`, pageid: r.pageid, title: String(st.title ?? '').replace(/^tilda:\s*/i, ''), next: 'node --env-file=.env scripts/tilda.mjs page list' };
+    return { status: `заголовок страницы ${r.pageid} записан`, pageid: r.pageid, title: String(st.title ?? '').replace(/^tilda:\s*/i, ''), next: cliHint('page list') };
   } finally {
     await browser.close(session);
   }
@@ -1022,7 +1026,7 @@ async function donorCopy(values) {
     const r = await dc.copyDonorPage(drivers, { sourcePageid: source, targetPageid: target, replace: values.replace, dryRun: values['dry-run'], protectedPages: protectedPages(), label, role: entryRole, donorTitle, alias });
     const summary = { label, source: r.source, target: r.target, blocks: r.blocks };
     if (r.dryRun) return { status: `dry-run: к переносу ${r.blocks} блоков${r.before ? ` (на приёмнике ${r.before}, --replace: ${values.replace ? 'да' : 'нет'})` : ''}`, ...summary, plan: r.plan.steps.join(' → ') };
-    const next = label ? `node --env-file=.env scripts/tilda.mjs donor verify --slug ${values.slug} --source ${label}` : undefined;
+    const next = label ? cliHint(`donor verify --slug ${values.slug} --source ${label}`) : undefined;
     return {
       status: r.ok ? `перенесено ${r.pasted} блоков, порядок совпал` : `перенесено ${r.pasted} из ${r.blocks}, порядок НЕ совпал`,
       ...summary,
@@ -1061,14 +1065,14 @@ async function donorAliases(values) {
     const r = await da.assignDonorAliases(driver, { slug: values.slug, donorProjectId: getProjectIdFor('donor'), testProjectId: resolveProjectId(), protectedIds: protectedPages(), dryRun });
     const skipped = r.skipped.map((s) => `${s.label}: ${s.reason}`);
     if (r.dryRun) {
-      return { status: `dry-run: к записи ${r.todo.length} адресов, пропущено ${r.skipped.length}`, todo: r.todo.map((t) => t.label).join(', '), skipped, next: `node --env-file=.env scripts/tilda.mjs donor aliases --slug ${values.slug}` };
+      return { status: `dry-run: к записи ${r.todo.length} адресов, пропущено ${r.skipped.length}`, todo: r.todo.map((t) => t.label).join(', '), skipped, next: cliHint(`donor aliases --slug ${values.slug}`) };
     }
     return {
       status: `адресов записано ${r.assigned.length} из ${r.todo.length}, пропущено ${r.skipped.length}, отказов ${r.failed.length}${r.stopped ? ' — остановлено после отказов подряд' : ''}`,
       assigned: r.assigned.map((a) => a.label).join(', '),
       skipped,
       ...(r.failed.length ? { failed: r.failed.map((f) => `${f.label}: ${f.code} ${f.reason}`) } : {}),
-      next: 'node --env-file=.env scripts/tilda.mjs page list',
+      next: cliHint('page list'),
       exitCode: r.failed.length ? EXIT.REFUSED : EXIT.OK,
     };
   } finally {
@@ -1089,7 +1093,6 @@ async function donorLinks(values) {
   const { resolveProjectId, getProjectIdFor } = await import('./lib/config.mjs');
   const { writeFileSync, mkdirSync } = await import('node:fs');
   const { resolve, dirname } = await import('node:path');
-  const { repoRoot } = await import('./lib/paths.mjs');
   const site = readSite(values.slug);
   const entry = site && resolveSource(site, values.source);
   if (!entry) return { status: `donor links: метки ${values.source} нет в site.json слепка ${values.slug}`, exitCode: EXIT.REFUSED };
@@ -1117,12 +1120,12 @@ async function donorLinks(values) {
       ...(r.skippedForm.length ? { forms: r.skippedForm.map((x) => `${x.recordid}.${x.field}: ${x.reason}`) } : {}),
     };
     if (!r.plan.ops.length) return { status: `ссылок донора (домен, страницы по ID) для переписи нет (оставлено ${r.unchanged.length}, поля форм ${r.skippedForm.length})`, ...base };
-    const out = resolve(`${repoRoot()}/scripts/plans/donor-links-${values.slug}-${entry.label}.json`);
+    const out = join(plansDir(), `donor-links-${values.slug}-${entry.label}.json`);
     const outSlash = out.replace(/\\/g, '/');
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, `${JSON.stringify({ _: `Ссылки на домен донора → относительные пути, метка ${entry.label}; собрано tilda.mjs donor links`, ...r.plan }, null, 2)}\n`, 'utf8');
     if (values['dry-run']) {
-      return { status: `dry-run: к переписи ${r.changed} ссылок в ${r.plan.ops.length} операциях`, ...base, plan: outSlash, next: `node --env-file=.env scripts/tilda.mjs donor links --slug ${values.slug} --source ${entry.label}` };
+      return { status: `dry-run: к переписи ${r.changed} ссылок в ${r.plan.ops.length} операциях`, ...base, plan: outSlash, next: cliHint(`donor links --slug ${values.slug} --source ${entry.label}`) };
     }
     const a = await cycle.apply(driver, r.plan, { planPath: out });
     const summary = planSummary(a, { plan: outSlash });
@@ -1184,7 +1187,7 @@ async function donorCheck(values) {
     checks: rel(r.checksPath),
     summary: rel(r.summaryPath),
     next: !r.index.ok && r.index.fix
-      ? `node --env-file=.env scripts/tilda.mjs ${r.index.fix}, затем page list и повторный donor check --slug ${values.slug}`
+      ? `${cliHint(r.index.fix)}, затем page list и повторный donor check --slug ${values.slug}`
       : 'HTML-блоки, formmsgurl и ручные пункты — назвать владельцу по разделу сводки',
     exitCode: r.exitCode ? EXIT.REFUSED : EXIT.OK,
   };
@@ -1205,7 +1208,7 @@ async function donorStyleCapture(values) {
       fonts: r.fonts.map((f) => `${f.name}: весов ${Object.keys(f.files).length}`),
       values: shown,
       path: r.path,
-      next: `node --env-file=.env scripts/tilda.mjs donor style --slug ${values.slug} --apply --confirm`,
+      next: cliHint(`donor style --slug ${values.slug} --apply --confirm`),
     };
   } finally {
     await browser.close(session);
@@ -1246,7 +1249,7 @@ async function donorStyleApply(values) {
       notMatched: r.notMatched,
       otherChanged: r.otherChanged,
       record: r.record,
-      next: `node --env-file=.env scripts/tilda.mjs donor verify --slug ${values.slug} --source P00`,
+      next: cliHint(`donor verify --slug ${values.slug} --source P00`),
     };
     const failed = r.notMatched.length || r.otherChanged.length;
     const nothing = !r.fonts.uploaded.length && !r.changed.length;
@@ -1418,7 +1421,7 @@ async function cmdReference(values, positionals) {
     skipped: r.skipped.slice(0, 20),
     unmapped: r.unmapped.slice(0, 20),
     unmappedTotal: r.unmapped.length,
-    next: `node --env-file=.env scripts/tilda.mjs apply --plan ${r.path} --dry-run`,
+    next: cliHint(`apply --plan ${r.path} --dry-run`),
     exitCode: r.skipped.length ? EXIT.REFUSED : EXIT.OK,
   };
 }
@@ -1475,7 +1478,7 @@ async function cmdReferenceProject(values) {
     }
     const { resolveProjectId } = await import('./lib/config.mjs');
     const r = await ps.applyProjectStyle(driver, { desired, confirmed: true, confirm: ps.STYLE_CONFIRM, projectid: resolveProjectId() });
-    const out = { ...base, changed: r.changed, otherChanged: r.otherChanged, record: r.record, next: 'node --env-file=.env scripts/tilda.mjs page list' };
+    const out = { ...base, changed: r.changed, otherChanged: r.otherChanged, record: r.record, next: cliHint('page list') };
     if (r.otherChanged.length) return { status: `оформление записано, но изменились другие настройки: ${r.otherChanged.join(', ')}`, ...out, exitCode: EXIT.REFUSED };
     return { status: r.changed.length ? `оформление записано: ${r.changed.join(', ')}` : 'без изменений: оформление уже как у референса', ...out };
   } finally {
@@ -1532,7 +1535,7 @@ async function cmdReferenceUpdate(values) {
       status: `план дописывания ${r.label}: операций ${r.ops} (полей ${r.fields}, списков ${r.lists}, новых блоков ${r.created}); причин ${r.unmapped.length}`,
       path: r.path,
       unmapped: r.unmapped.slice(0, 20),
-      next: `node --env-file=.env scripts/tilda.mjs apply --plan ${r.path} --dry-run`,
+      next: cliHint(`apply --plan ${r.path} --dry-run`),
     };
   });
 }
@@ -1662,6 +1665,9 @@ export async function run(argv) {
     console.log(usage());
     return EXIT.OK;
   }
+  const site = applySite({ flag: values.site });
+  warnRepoEnv();
+  log.debug('run', 'сайт', { site: site?.siteDir ?? null });
   const stageOnline = cmd === 'stage' && positionals[0] === 'apply';
   const catalogOnline = cmd === 'catalog' && (positionals[0] === 'capture' || positionals[0] === 'calibrate');
   const referenceOnline = cmd === 'reference' && ((positionals[0] === 'pages' && values.create) || positionals[0] === 'audit' || positionals[0] === 'compare' || (positionals[0] === 'project' && values.apply) || (positionals[0] === 'plan' && values.update));
@@ -1707,21 +1713,14 @@ export async function run(argv) {
   return code;
 }
 
-/** Запуск не из папки проекта: `.env` из корня репозитория подгружается сам, если ID проекта не задан. */
-function autoloadEnv() {
-  try {
-    const file = envFileToLoad();
-    if (!file) return;
-    process.loadEnvFile(file);
-    log.info('main', '.env подгружен из корня репозитория', { file: file.replace(/\\/g, '/') });
-  } catch (e) {
-    log.warn('main', '.env не подгружен', { error: e.message });
-  }
+/** `.env` в корне репозитория больше не читается: данные и настройки сайта живут в папке сайта. */
+function warnRepoEnv() {
+  const file = join(repoRoot(), '.env');
+  if (existsSync(file)) log.warn('main', '.env в корне репозитория не читается — перенесите его в папку сайта и запускайте с --site <папка>', { file: file.replace(/\\/g, '/') });
 }
 
 async function main() {
   let code;
-  autoloadEnv();
   try {
     code = await run(process.argv.slice(2));
   } catch (e) {

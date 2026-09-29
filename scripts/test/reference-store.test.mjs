@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setLogLevel } from '../lib/log.mjs';
-import { referenceDir, repoRoot } from '../lib/paths.mjs';
+import { referenceDir } from '../lib/paths.mjs';
 import {
   assertSlug, assignLabels, ensureDirs, imageFileName, isLabel, newManifest, newSite, pageNameFromUrl,
   readManifest, readSite, refPaths, resolveSource, upsertPage, writeManifest, writeSite,
@@ -61,16 +61,21 @@ test('manifest round-trip and upsertPage', () => {
   }
 });
 
-test('referenceDir honours TILDA_REFERENCE_DIR', () => {
-  const saved = process.env.TILDA_REFERENCE_DIR;
+test('referenceDir honours TILDA_REFERENCE_DIR and refuses to guess without a site', () => {
+  const saved = { ref: process.env.TILDA_REFERENCE_DIR, site: process.env.TILDA_SITE_DIR };
+  const custom = mkdtempSync(join(tmpdir(), 'ref-dir-'));
   try {
     delete process.env.TILDA_REFERENCE_DIR;
-    assert.equal(referenceDir(), resolve(repoRoot(), 'site-reference'));
-    process.env.TILDA_REFERENCE_DIR = './custom-ref';
-    assert.equal(referenceDir(), resolve('./custom-ref'));
+    delete process.env.TILDA_SITE_DIR;
+    assert.throws(() => referenceDir(), (e) => e.code === 'CONFIG_ERROR' && e.exitCode === 2);
+    process.env.TILDA_REFERENCE_DIR = custom;
+    assert.equal(referenceDir(), resolve(custom));
   } finally {
-    if (saved === undefined) delete process.env.TILDA_REFERENCE_DIR;
-    else process.env.TILDA_REFERENCE_DIR = saved;
+    rmSync(custom, { recursive: true, force: true });
+    if (saved.ref === undefined) delete process.env.TILDA_REFERENCE_DIR;
+    else process.env.TILDA_REFERENCE_DIR = saved.ref;
+    if (saved.site === undefined) delete process.env.TILDA_SITE_DIR;
+    else process.env.TILDA_SITE_DIR = saved.site;
   }
 });
 
