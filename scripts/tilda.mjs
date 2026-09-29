@@ -48,6 +48,8 @@
  *   catalog     capture | list — эталонные поля шаблонов: снять на черновой странице (--page --slug|--tplid;
  *               блок каждого шаблона создаётся, читается и удаляется) или показать снятое без сети;
  *               calibrate — карта «значение настройки → разметка» по предпросмотру (временный блок на черновой)
+ *   doctor      [--site <папка>] [--json] — проверить Node.js, зависимости, Chrome, git, папку сайта, .env и скилл;
+ *               только читает и печатает готовые команды исправления; доступен и как node scripts/doctor.mjs
  *
  * В stdout — короткий итог (не длиннее ~20 строк), подробности уходят в файлы. Логи — в stderr
  * через lib/log.mjs (LOG_LEVEL=DEBUG печатает тела запросов к Тильде без кук).
@@ -67,7 +69,7 @@ import { isLabel } from './lib/reference-store.mjs';
 const log = createLogger('tilda');
 
 export const EXIT = { OK: 0, REFUSED: 1, USAGE: 2, SESSION_LOST: 3 };
-export const COMMANDS = ['browser', 'session', 'inventory', 'snapshot', 'apply', 'verify', 'rollback', 'journal', 'find', 'replace', 'upload', 'preview', 'shot', 'links', 'map', 'page', 'promote', 'stage', 'reference', 'catalog', 'donor'];
+export const COMMANDS = ['browser', 'session', 'inventory', 'snapshot', 'apply', 'verify', 'rollback', 'journal', 'find', 'replace', 'upload', 'preview', 'shot', 'links', 'map', 'page', 'promote', 'stage', 'reference', 'catalog', 'donor', 'doctor'];
 /** Действия переноса через кабинет донора. */
 export const DONOR_ACTIONS = ['pages', 'map', 'copy', 'style', 'verify', 'aliases', 'links', 'check'];
 export const BROWSER_ACTIONS = ['start', 'stop', 'status', 'show', 'hide'];
@@ -164,6 +166,7 @@ export function usage() {
     '  donor check --slug <слепок> [--source P01,P02]  проверки после переноса по меткам: ссылки (домен донора, относительные адреса, страницы донора по ID), HTML-блоки, formmsgurl, полнота карты, главная; итог — раздел сводки',
     '  donor verify --slug <слепок> --source <метка> [--width 1440,320]  состав блоков против слепка, сверка разметки, кадры сборки и референса, доклад reports/<метка>.transfer.md',
     '  catalog calibrate --page <черновая> --slug|--tplid [--force] [--delay мс] [--batch n] [--pause с]  карта «значение настройки → разметка» по предпросмотру (временный блок создаётся и удаляется)',
+    '  doctor [--site <папка>] [--json] — проверить Node.js, зависимости, Chrome, git, папку сайта, .env и скилл; только проверяет и печатает команды исправления',
     '',
     'Флаги:',
     '  --site <папка>    папка сайта вне репозитория: .env, site-baseline, site-reference, .browser-profile, plans (или TILDA_SITE_DIR); без неё команды с данными сайта отказывают с кодом 2',
@@ -298,6 +301,7 @@ export function parseCli(argv) {
       }
     }
   }
+  if (cmd === 'doctor' && rest.length) throw new UsageError('doctor: лишние аргументы');
   if (cmd === 'rollback' && !rest[0]) throw new UsageError('rollback: нужен путь к записи журнала (<папка сайта>/site-baseline/journal/<pageid>/<файл>.json)');
   if (cmd === 'find' && !rest[0]) throw new UsageError('find: нужна строка для поиска');
   if (cmd === 'upload' && !rest[0]) throw new UsageError('upload: нужен путь к файлу');
@@ -1664,6 +1668,13 @@ export async function run(argv) {
   if (cmd === 'help') {
     console.log(usage());
     return EXIT.OK;
+  }
+  // doctor идёт до applySite: битая или ещё не созданная папка сайта — результат проверки, а не ранняя ConfigError.
+  if (cmd === 'doctor') {
+    const { runDoctor, formatReport } = await import('./doctor.mjs');
+    const report = await runDoctor({ site: values.site });
+    console.log(values.json ? JSON.stringify(report, null, 2) : formatReport(report));
+    return report.status === 'fail' ? EXIT.REFUSED : EXIT.OK;
   }
   const site = applySite({ flag: values.site });
   warnRepoEnv();

@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { parseCli, UsageError } from '../tilda.mjs';
+import { parseCli, usage, UsageError } from '../tilda.mjs';
 
 const cli = fileURLToPath(new URL('../tilda.mjs', import.meta.url));
 const repoDir = fileURLToPath(new URL('../..', import.meta.url));
@@ -397,5 +397,40 @@ test('ID проекта только в окружении, а в .env сайт�
     assert.doesNotMatch(out, /100002/);
   } finally {
     rmSync(site, { recursive: true, force: true });
+  }
+});
+
+test('parseCli accepts doctor without positionals and usage lists it', () => {
+  assert.equal(parseCli(['doctor']).cmd, 'doctor');
+  assert.equal(parseCli(['doctor', '--json', '--site', 'x']).values.json, true);
+  assert.throws(() => parseCli(['doctor', 'x']), UsageError);
+  assert.match(usage(), /doctor/);
+});
+
+test('doctor без сайта печатает отчёт, пропускает пункт site и не создаёт профиль браузера', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tilda-cli-doctor-'));
+  try {
+    const profile = join(root, 'profile');
+    const result = runCli(['doctor', '--json'], bareEnv({ TILDA_BROWSER_PROFILE: profile }));
+    assert.ok([0, 1].includes(result.status), `${result.stdout}\n${result.stderr}`);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.checks.map((check) => check.id), ['node', 'dependencies', 'chrome', 'git', 'repo-env', 'site', 'skill']);
+    assert.equal(report.checks.find((check) => check.id === 'site').status, 'skip');
+    assert.equal(existsSync(profile), false, 'doctor не должен создавать профиль браузера');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('doctor с несуществующей папкой сайта отвечает провалом пункта site, а не кодом 2', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tilda-cli-doctor-'));
+  try {
+    const result = runCli(['--site', join(root, 'no-such-site'), 'doctor', '--json'], bareEnv());
+    assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+    const site = JSON.parse(result.stdout).checks.find((check) => check.id === 'site');
+    assert.equal(site.status, 'fail');
+    assert.match(site.fix, /setup/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
