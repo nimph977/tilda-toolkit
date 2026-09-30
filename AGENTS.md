@@ -136,6 +136,7 @@ Docs are in English (`docs/en`) and Russian (`docs/ru`).
 | Workflow | [docs/en/workflow.md](docs/en/workflow.md) |
 | CLI commands | [docs/en/cli.md](docs/en/cli.md) |
 | Architecture map | [docs/en/architecture.md](docs/en/architecture.md) |
+| Russian documentation | [docs/ru/getting-started.md](docs/ru/getting-started.md) |
 | Agent skill | [skills/tilda-manager/SKILL.md](skills/tilda-manager/SKILL.md) |
 | Third-party notices | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) |
 | License | [LICENSE](LICENSE) — MIT |
