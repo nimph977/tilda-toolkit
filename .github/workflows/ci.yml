@@ -44,6 +44,11 @@ jobs:
         run: node .github/scripts/docs-path-check.mjs --doc docs/en/getting-started.md
         env:
           EXPECT_CHROME: present
+      - name: Newcomer path check (ru)
+        if: matrix.os == 'ubuntu-latest'
+        run: node .github/scripts/docs-path-check.mjs --doc docs/ru/getting-started.md
+        env:
+          EXPECT_CHROME: present
 
   clean-linux:
     name: test (clean Linux container)
