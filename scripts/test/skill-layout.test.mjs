@@ -11,7 +11,7 @@ const SKILL_DIR = join(ROOT, 'skills', 'tilda-manager');
 const REFERENCES = ['manual-steps.md', 'operations.md', 'plan-schema.md', 'scenarios.md'];
 
 /** Корни с Markdown, где относительные ссылки обязаны вести на существующие файлы. */
-const LINK_ROOTS = ['skills', 'docs', 'README.md', 'README.ru.md', 'AGENTS.md'];
+const LINK_ROOTS = ['skills', 'docs', 'README.md', 'README.ru.md', 'AGENTS.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md'];
 
 /** Старые имена скиллов; собраны из частей, чтобы этот файл сам не попал под поиск. */
 const RETIRED_NAME = new RegExp(['tilda', '(?:edit|transfer)'].join('-') + '(?![\\w-])');

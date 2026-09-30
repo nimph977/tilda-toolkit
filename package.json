@@ -34,7 +34,10 @@
     "AGENTS.md",
     "CLAUDE.md",
     "LICENSE",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md"
   ],
   "dependencies": {
     "playwright-core": "1.63.0"

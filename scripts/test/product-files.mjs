@@ -10,6 +10,7 @@ export const ROOT = join(import.meta.dirname, '..', '..');
 export const PRODUCT_ROOTS = [
   'scripts', 'docs', 'examples', 'skills', 'locales', '.github',
   'README.md', 'README.ru.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
+  'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md',
   'package.json', '.env.example', '.gitignore', '.gitattributes',
 ];
 
