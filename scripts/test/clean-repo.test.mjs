@@ -74,7 +74,7 @@ test('public files required by the license and agent instructions exist', () => 
   assert.equal(readFileSync(join(ROOT, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n');
   assert.match(readFileSync(join(ROOT, 'LICENSE'), 'utf8'), /^MIT License\n\nCopyright \(c\) 2026 nimph977\n/);
   assert.equal(JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).license, 'MIT');
-  for (const path of ['AGENTS.md', 'README.md', 'THIRD_PARTY_NOTICES.md', '.github/workflows/ci.yml']) {
+  for (const path of ['AGENTS.md', 'README.md', 'README.ru.md', 'THIRD_PARTY_NOTICES.md', '.github/workflows/ci.yml']) {
     assert.ok(existsSync(join(ROOT, path)), `missing ${path}`);
   }
 });

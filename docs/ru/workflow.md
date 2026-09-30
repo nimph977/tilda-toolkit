@@ -1,4 +1,4 @@
-[← Настройка](configuration.md) · [Назад к README](../README.md) · [Команды CLI →](cli.md)
+[← Настройка](configuration.md) · [Назад к README](../../README.ru.md) · [Команды CLI →](cli.md)
 
 # Рабочий цикл
 
@@ -27,8 +27,8 @@
    ```
 
 3. Создайте план операций (JSON). Схема и безопасный синтетический пример — в
-   [skills/tilda-manager/references/plan-schema.md](../skills/tilda-manager/references/plan-schema.md) и
-   [examples/basic-text-edit.json](../examples/basic-text-edit.json). Не копируйте пример
+   [skills/tilda-manager/references/plan-schema.md](../../skills/tilda-manager/references/plan-schema.md) и
+   [examples/basic-text-edit.json](../../examples/basic-text-edit.json). Не копируйте пример
    в рабочий план без замены всех ID.
 
 4. Посмотрите, что будет изменено, без записи:
@@ -44,7 +44,7 @@
    node scripts/tilda.mjs --site <папка сайта> verify --page 200002 --plan .\my-plan.json
    ```
 
-   Ожидаемый итог: `verify: 0 расхождений`, код выхода 0. При расхождениях код выхода 1 —
+   Ожидаемый итог: `расхождений verify: 0`, код выхода 0. При расхождениях код выхода 1 —
    не публикуйте, изучите журнал или откатите запись.
 
 6. Откройте страницу в редакторе и проверьте визуально на нужных ширинах
@@ -117,7 +117,7 @@ node scripts/tilda.mjs --site <папка сайта> catalog capture --page 200
 node scripts/tilda.mjs --site <папка сайта> reference plan --slug demo --source index --page 200002
 # 6. Проверка без записи: список блоков и предупреждения о полях
 node scripts/tilda.mjs --site <папка сайта> apply --plan <папка сайта>/plans/reference-demo-index-200002.json --dry-run
-# 7. Сборка: картинки на CDN -> блоки -> перечитать -> verify: 0 расхождений
+# 7. Сборка: картинки на CDN -> блоки -> перечитать -> verify без расхождений
 node scripts/tilda.mjs --site <папка сайта> apply --plan <папка сайта>/plans/reference-demo-index-200002.json
 # 8. Скриншоты для приёмки на 1440 и 320 -> <папка сайта>/site-baseline/shots/200002/
 node scripts/tilda.mjs --site <папка сайта> shot --page 200002 --width 1440,320
@@ -147,23 +147,26 @@ node scripts/tilda.mjs --site <папка сайта> reference plan --slug demo
 ### Пропуски и несопоставленные поля
 
 Итог `reference plan` перечисляет `skipped` (блоки, которые не собираются) и `unmapped`
-(поля, которые не перенеслись). Их дорабатывают вручную операциями `field`/`stage`
+(поля, которые не перенеслись); в итоге выводятся первые 20 записей каждого списка, число
+несопоставленных полей — в `unmappedTotal`. Их дорабатывают вручную операциями `field`/`stage`
 или в интерфейсе Tilda. Ожидаемые пропуски: Zero Block, HTML-блоки, блоки-формы, шаблоны,
-которые Tilda не даёт добавить (`шаблон недоступен на тарифе — укажите --substitute …`),
-пустые разделители.
+которые Tilda не даёт добавить (`template is unavailable on the plan — pass --substitute
+<tplid>=<available one>`), пустые разделители.
 
-Причина всегда говорит, что именно осталось невыполненным:
+Причина всегда говорит, что именно осталось невыполненным. В плане у каждой причины два поля:
+`reason` — текст на английском и `code` — машинный код. Они не зависят от языка запуска
+(`--lang`), поэтому таблицы ниже дают оба:
 
-| Причина | Что значит |
+| `code` и `reason` | Что значит |
 | --- | --- |
-| `отступ: поля margintop/marginbottom нет в каталоге` | у шаблона нет полей отступов — расстояние останется шаблонным |
-| `фон: нет поля фона в каталоге` | шаблон не хранит цвет фона блока |
-| `типографика: поля <семейство>_typo нет в каталоге` | у шаблона нет такого семейства текста |
-| `соцссылки: нет поля soclinks в каталоге` | иконки соцсетей некуда записать |
-| `соцссылки: формат soclinks шаблона не поддерживается` | блок мессенджеров (форма `type`/`username`) |
-| `ссылка карточки: шаблон не хранит li_link` | карточки списка не кликабельны у этого шаблона |
-| `меню: у шаблона нет menuitems или списка li_title/li_link` | шаблон-замена не годится для меню |
-| `каталог замены не снят: catalog capture --tplid <id>` | укажите `--substitute` на шаблон со снятым каталогом |
+| `spacing` — `spacing: the margintop/marginbottom fields are not in the catalog` | у шаблона нет полей отступов — расстояние останется шаблонным |
+| `background` — `background: there is no background field in the catalog` | шаблон не хранит цвет фона блока |
+| `typography` — `typography: the <family>_typo field is not in the catalog` | у шаблона нет такого семейства текста |
+| `soclinksNoField` — `social links: there is no soclinks field in the catalog` | иконки соцсетей некуда записать |
+| `soclinksShape` — `social links: the soclinks format of the template is not supported` | блок мессенджеров (форма `type`/`username`) |
+| `cardNoLink` — `card link: the template does not store li_link` | карточки списка не кликабельны у этого шаблона |
+| `menuNoTarget` — `menu: the template has no menuitems or li_title/li_link list` | шаблон-замена не годится для меню |
+| `substituteCatalogMissing` — `substitute catalog not captured: catalog capture --tplid <id>` | снимите каталог шаблона-замены, затем повторите `reference plan` |
 
 Что переносится: тексты с переносами строк, ссылки кнопок и карточек (`li_link`), картинки,
 карточки списков, иконки соцсетей, пункты меню, отступы блока, цвет фона и типографика
@@ -232,20 +235,27 @@ node scripts/tilda.mjs --site <папка сайта> reference shot --slug demo
 
 ### Что не переносится и почему
 
-| Причина в плане или докладе | Что значит |
+Причины в плане (`code` и английский `reason`, не зависят от языка запуска):
+
+| `code` и `reason` | Что значит |
 | --- | --- |
-| `форма: получатели заявок — настройка проекта-копии, не переносится` | куда уходят заявки, задаёт владелец копии |
-| `форма: тип поля <тип> не распознан` | поле формы с незнакомым типом пропущено |
-| `HTML-блок: скрипты вырезаны — их запись сбрасывает сессию Tilda` | `<script>` в коде HTML-блока не пишется |
-| `HTML-блок: код больше 25 КБ` | большой код переносится вручную |
-| `настройки: шаблон <a> заменён на <b> — перенесены только отступы, фон и типографика` | архивный шаблон собран заменой со своим видом |
-| `настройки: шаблон не откалиброван — catalog calibrate` | для шаблона нет карты влияния |
-| `настройки: значение не распознано картой (<почему>)` | признак подходит под несколько значений (`ambiguous`) или не найден (`absent`) |
-| `настройки: признаки разметки без поля — число в text` | в разметке есть признаки, которые не объясняет ни одна настройка — например, другая версия шаблона у референса |
-| `свои шрифты не переносятся … — выбран пресет Tilda с тем же начертанием` | шрифт проекта заменяется пресетом Tilda |
+| `formReceivers` — `form: request recipients are a setting of the copy project, not transferred` | куда уходят заявки, задаёт владелец копии |
+| `formInputUnknown` — `form: field type <type> is not recognized` | поле формы с незнакомым типом пропущено |
+| `codeScriptsRemoved` — `HTML block: scripts are removed — writing them resets the Tilda session` | `<script>` в коде HTML-блока не пишется |
+| `codeTooLarge` — `HTML block: the code is larger than 25 KB` | большой код переносится вручную |
+| `settingsSubstituted` — `settings: template <a> is replaced by <b> — only spacing, background and typography are transferred` | архивный шаблон собран заменой со своим видом |
+| `settingsNoMap` — `settings: the template is not calibrated — catalog calibrate` | для шаблона нет карты влияния |
+| `settingsUndecided` — `settings: the value is not recognized by the map (<why>)` | признак подходит под несколько значений (`ambiguous`) или не найден (`absent`) |
+| `settingsUnexplained` — `settings: markup features without a field — the number is in text` | в разметке есть признаки, которые не объясняет ни одна настройка — например, другая версия шаблона у референса |
+| `updatePlacement` — `the new block will be placed after the previous new one — move it after block <id>` | дописывание: блок создан не на своём месте |
+| `updateImageKept` — `the image is already on the page — it is not uploaded again` | дописывание картинки не трогает |
+
+Тексты итога и докладов пишутся на языке запуска (здесь — русский вариант):
+
+| Причина в итоге или докладе | Что значит |
+| --- | --- |
+| `свои шрифты не переносятся — выбран пресет Tilda с тем же начертанием` | шрифт проекта заменяется пресетом Tilda (итог `reference project`) |
 | `разметка отличается — возможно, версия шаблона` | доклад сверки: блок референса сделан другой версией шаблона |
-| `новый блок встанет после предыдущего нового — переставьте после блока <id>` | дописывание: блок создан не на своём месте |
-| `картинка уже на странице — не перезаливается` | дописывание картинки не трогает |
 
 Не разведаны: Zero Block и настройки, которые не меняют разметку (`noSignal` в карте) — их
 значения по разметке не восстановить.
@@ -330,7 +340,7 @@ node scripts/tilda.mjs --site <папка сайта> donor check --slug demo
 
 Кадры предпросмотра не показывают ни 404, ни уход на сайт донора, ни HTML-блоки. До приёмки
 пройдите весь список «Проверки после переноса» из
-[сценариев скилла](../skills/tilda-manager/references/scenarios.md). Шаг 9 (`donor check`)
+[сценариев скилла](../../skills/tilda-manager/references/scenarios.md). Шаг 9 (`donor check`)
 выполняет автоматические пункты по всем перенесённым меткам: ссылки вида страницы (домен донора,
 относительные адреса без страницы, страницы донора по ID), HTML-блоки с заглушкой или внешними
 хостами, `formmsgurl` на домене донора, полноту карты и главную страницу проекта. Итог — раздел
@@ -351,7 +361,7 @@ node scripts/tilda.mjs --site <папка сайта> donor check --slug demo
 Гейты человека: доступ сотрудника и оплата, вход в аккаунт донора, каждый запуск
 `donor copy` или пакет запусков, запись оформления, подтверждение приёмки, публикация.
 Пошаговый сценарий для агента и журнал ручных шагов — скилл
-[tilda-manager](../skills/tilda-manager/SKILL.md).
+[tilda-manager](../../skills/tilda-manager/SKILL.md).
 
 ### Что переносится и что нет
 
