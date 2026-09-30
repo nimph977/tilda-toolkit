@@ -34,8 +34,8 @@
   const requireApi = (names, fn) => {
     const missing = names.filter((n) => typeof T[n] !== 'function');
     if (missing.length) {
-      LOG('error', fn, 'не установлены части браузерного слоя', { missing });
-      throw new Error(`NO_API ${missing.join(',')}: установите tilda-zero.js и tilda-page.js`);
+      LOG('error', fn, 'browser layer parts are not installed', { missing });
+      throw new Error(`NO_API ${missing.join(',')}: install tilda-zero.js and tilda-page.js`);
     }
   };
 
@@ -62,7 +62,7 @@
     const text = await r.text();
     if (looksLikeHtml(text)) {
       const head = text.slice(0, 12);
-      LOG('error', fn, 'SESSION_LOST: вместо данных пришёл HTML (<!--tlp--> = страница логина, <!--tpbaa--> = чужой аккаунт)', { url, status: r.status, head });
+      LOG('error', fn, 'SESSION_LOST: got HTML instead of data (<!--tlp--> = login page, <!--tpbaa--> = another account)', { url, status: r.status, head });
       throw new Error(`SESSION_LOST ${url} status=${r.status} head=${JSON.stringify(head)}`);
     }
     return { status: r.status, text };
@@ -87,16 +87,16 @@
   T.copySelectedToBuffer = async (pageid, recordids) => {
     requireApi(['listRecords', 'assertWritable'], 'copySelectedToBuffer');
     pageid = String(pageid);
-    if (!Array.isArray(recordids) || recordids.length === 0) throw new Error('COPY_NO_RECORDS: нечего копировать');
+    if (!Array.isArray(recordids) || recordids.length === 0) throw new Error('COPY_NO_RECORDS: nothing to copy');
     const selects = recordids.map(String);
-    if (selects.length > COPY_LIMIT) LOG('warn', 'copySelectedToBuffer', 'записей больше лимита редактора', { count: selects.length, limit: COPY_LIMIT });
-    LOG('debug', 'copySelectedToBuffer', 'запрос', { pageid, count: selects.length });
+    if (selects.length > COPY_LIMIT) LOG('warn', 'copySelectedToBuffer', 'more records than the editor limit', { count: selects.length, limit: COPY_LIMIT });
+    LOG('debug', 'copySelectedToBuffer', 'request', { pageid, count: selects.length });
     const { text, status } = await post('/page/submit/', { comm: 'copyselectedrecords_tobuf', pageid, selects }, 'copySelectedToBuffer');
     if (text.trim() !== 'OK') {
-      LOG('error', 'copySelectedToBuffer', 'copyselectedrecords_tobuf не OK', { pageid, status, body: text.slice(0, 200) });
+      LOG('error', 'copySelectedToBuffer', 'copyselectedrecords_tobuf is not OK', { pageid, status, body: text.slice(0, 200) });
       throw new Error(`COPY_TO_BUF_FAILED ${pageid}: ${text.slice(0, 200)}`);
     }
-    LOG('info', 'copySelectedToBuffer', 'скопировано в буфер аккаунта', { pageid, count: selects.length });
+    LOG('info', 'copySelectedToBuffer', 'copied to the account buffer', { pageid, count: selects.length });
     return { pageid, count: selects.length };
   };
 
@@ -105,28 +105,28 @@
     requireApi(['listRecords', 'assertWritable'], 'pasteFromBuffer');
     dstPageid = String(dstPageid);
     T.assertWritable(dstPageid, 'pasteFromBuffer');
-    LOG('debug', 'pasteFromBuffer', 'запрос', { dstPageid, afterid: afterid || '' });
+    LOG('debug', 'pasteFromBuffer', 'request', { dstPageid, afterid: afterid || '' });
     const { text, status } = await post('/page/submit/', { comm: 'pasterecord_frombuf', pageid: dstPageid, recordid: afterid || '', with_code: 'yes' }, 'pasteFromBuffer');
-    if (!text.trim()) throw new Error(`PASTE_FAILED ${dstPageid}: пустой ответ`);
+    if (!text.trim()) throw new Error(`PASTE_FAILED ${dstPageid}: empty response`);
     let json;
     try {
       json = JSON.parse(text);
     } catch {
-      LOG('error', 'pasteFromBuffer', 'ответ не JSON', { dstPageid, status, head: text.slice(0, 120) });
+      LOG('error', 'pasteFromBuffer', 'response is not JSON', { dstPageid, status, head: text.slice(0, 120) });
       throw new Error(`BAD_JSON pasteFromBuffer ${dstPageid}`);
     }
     if (json && !Array.isArray(json) && json.error) {
-      LOG('error', 'pasteFromBuffer', 'pasterecord_frombuf вернул ошибку', { dstPageid, status, error: json.error });
+      LOG('error', 'pasteFromBuffer', 'pasterecord_frombuf returned an error', { dstPageid, status, error: json.error });
       throw new Error(`PASTE_FAILED ${dstPageid}: ${json.error}`);
     }
     const items = Array.isArray(json) ? json : [json];
     const html = items.map((it) => String((it && it.html) || '')).join('');
     const records = T.parsePastedHtml(html);
     if (!records.length) {
-      LOG('error', 'pasteFromBuffer', 'в ответе нет записей', { dstPageid, status, items: items.length, htmlBytes: html.length });
-      throw new Error(`PASTE_FAILED ${dstPageid}: в ответе нет записей`);
+      LOG('error', 'pasteFromBuffer', 'no records in the response', { dstPageid, status, items: items.length, htmlBytes: html.length });
+      throw new Error(`PASTE_FAILED ${dstPageid}: no records in the response`);
     }
-    LOG('info', 'pasteFromBuffer', 'вставлено', { dstPageid, pasted: records.length, htmlBytes: html.length });
+    LOG('info', 'pasteFromBuffer', 'pasted', { dstPageid, pasted: records.length, htmlBytes: html.length });
     return { records, htmlBytes: html.length };
   };
 

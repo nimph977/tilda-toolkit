@@ -23,8 +23,9 @@ import { createLogger } from './lib/log.mjs';
 import { readSite, refPaths } from './lib/reference-store.mjs';
 import { compareReferencePage } from './reference-compare.mjs';
 import { prepareReferencePlan } from './reference-plan.mjs';
-import { readDonorStyle } from './donor-style.mjs';
+import { STYLE_REASONS, readDonorStyle } from './donor-style.mjs';
 import { decodeEntities } from './lib/entities.mjs';
+import { LANGS, isMessage, messageText, msg, render, t } from './lib/i18n.mjs';
 
 const log = createLogger('donor-verify');
 
@@ -61,29 +62,46 @@ export function listHtmlBlocks(source) {
     });
 }
 
-/** Строки раздела «HTML-блоки» доклада. */
-function renderHtmlBlocks(blocks) {
-  if (!blocks) return ['Перечень не собирался.'];
-  if (!blocks.length) return ['HTML-блоков нет.'];
+/** Строки раздела «HTML-блоки» доклада на языке `lang`. */
+function renderHtmlBlocks(blocks, lang) {
+  if (!blocks) return [t(lang, 'report.transfer.htmlNotCollected')];
+  if (!blocks.length) return [t(lang, 'report.transfer.htmlNone')];
   const state = (b) => [
-    b.hidden ? 'скрыт' : null,
-    b.empty ? 'пустой — на публикации заглушка «Html code will be here»' : b.placeholder ? 'в коде заглушка «Html code will be here»' : 'есть код',
+    b.hidden ? t(lang, 'report.transfer.htmlHidden') : null,
+    t(lang, b.empty ? 'report.transfer.htmlEmpty' : b.placeholder ? 'report.transfer.htmlPlaceholder' : 'report.transfer.htmlHasCode'),
   ].filter(Boolean).join('; ');
   return [
-    `Блоков: ${blocks.length}; с заглушкой: ${blocks.filter((b) => b.placeholder).length}; с внешними хостами: ${blocks.filter((b) => b.hosts.length).length}. Предпросмотр код не выполняет — проверять на публикации.`,
+    t(lang, 'report.transfer.htmlSummary', { total: blocks.length, placeholder: blocks.filter((b) => b.placeholder).length, hosts: blocks.filter((b) => b.hosts.length).length }),
     '',
-    '| Блок | Состояние | Внешние хосты | iframe / script / form |',
+    t(lang, 'report.transfer.htmlHead'),
     '| --- | --- | --- | --- |',
     ...blocks.map((b) => `| ${b.recordid} | ${state(b)} | ${b.hosts.join(', ') || '—'} | ${b.iframes} / ${b.scripts} / ${b.forms} |`),
   ];
 }
 
-/** Известные ложные отличия предпросмотра от публикации. */
-export const PREVIEW_ARTIFACTS = [
-  'ссылки tel: в предпросмотре отдаются как href="#" цветом ссылок проекта — на публикации tel: чёрным',
-  'текст кнопки формы в предпросмотре может переноситься на две строки против одной с многоточием на публикации (причина не проверена)',
-  'шапка и подвал на кадре сборки — страницы HDR/FTR тестового проекта, на кадре референса — донорские',
-];
+/**
+ * Известные ложные отличия предпросмотра от публикации: имя → ключ словаря. В данные слепка
+ * (`transfer/<метка>.json`) пишутся имена, в доклад — текст на языке доклада.
+ */
+export const PREVIEW_ARTIFACT_KEYS = {
+  telLink: 'report.transfer.artifactTelLink',
+  buttonWrap: 'report.transfer.artifactButtonWrap',
+  headerFooter: 'report.transfer.artifactHeaderFooter',
+};
+export const PREVIEW_ARTIFACTS = Object.keys(PREVIEW_ARTIFACT_KEYS);
+
+/** Причины расхождения состава блоков: имя → ключ словаря. Подстановки: {tplid, position}, у `orderDiffers` {position}. */
+export const SEQUENCE_REASONS = {
+  missing: 'report.transfer.reasonMissing',
+  extra: 'report.transfer.reasonExtra',
+  orderDiffers: 'report.transfer.reasonOrderDiffers',
+};
+
+/** Причины расхождения состава как `Message` — для итога команды; состав без `reasonItems` даёт записанные строки. */
+export function compositionReasons(composition) {
+  if (!Array.isArray(composition?.reasonItems)) return composition?.reasons ?? [];
+  return composition.reasonItems.map((i) => msg(SEQUENCE_REASONS[i.code], i.params));
+}
 
 /** Ожидаемая последовательность tplid зоны метки из структуры слепка с учётом substitutes. */
 export function expectedTplids(structureBlocks, zone, substitutes = {}) {
@@ -119,106 +137,172 @@ export function compareTplidSequence(expected, actual) {
       seenExtra.set(tplid, used + 1);
     }
   });
-  const reasons = [
-    ...missing.map((m) => `блок ${m.tplid} отсутствует на позиции ${m.index + 1}`),
-    ...extra.map((e) => `лишний блок ${e.tplid} на позиции ${e.index + 1}`),
+  const reasonItems = [
+    ...missing.map((m) => ({ code: 'missing', params: { tplid: m.tplid, position: m.index + 1 } })),
+    ...extra.map((e) => ({ code: 'extra', params: { tplid: e.tplid, position: e.index + 1 } })),
   ];
   const sameSet = missing.length === 0 && extra.length === 0;
   let equal = sameSet;
   if (sameSet) {
-    const first = exp.findIndex((t, i) => t !== act[i]);
+    const first = exp.findIndex((tplid, i) => tplid !== act[i]);
     if (first >= 0) {
       equal = false;
-      reasons.push(`порядок отличается начиная с позиции ${first + 1}`);
+      reasonItems.push({ code: 'orderDiffers', params: { position: first + 1 } });
     }
   }
-  return { equal, expected: exp, actual: act, missing, extra, reasons };
+  // `reasons` — английский текст для данных слепка, `reasonItems` — имя и подстановки для доклада.
+  const reasons = reasonItems.map((i) => messageText(msg(SEQUENCE_REASONS[i.code], i.params)));
+  return { equal, expected: exp, actual: act, missing, extra, reasons, reasonItems };
 }
 
 const rel = (p) => String(p ?? '').replace(/\\/g, '/').replace(/^.*?(site-baseline\/|site-reference\/)/, '$1');
 const pct = (x) => `${Math.round((Number(x) || 0) * 100)}%`;
 
-const VERDICT_HEADING = '## Вердикт агента';
-const VERDICT_TEMPLATE = 'Заполняется после осмотра кадров сборки и референса на каждой ширине.';
-const VERDICT_CARRIED = 'Вердикт перенесён из доклада от';
+/** Метки доклада, не зависящие от языка: по ним доклад читается при повторной сверке. */
+const VERDICT_START = '<!-- verdict:start -->';
+const VERDICT_END = '<!-- verdict:end -->';
+const TABLE_WIDTHS = '<!-- table:widths -->';
+const TAKEN_AT_RE = /<!-- taken-at: (\S+) -->/;
+
+// Доклады до двуязычной версии: заголовок вердикта, шаблон, пометка о переносе, шапка таблицы
+// и строка «Снято:» были русским текстом без меток. Старые доклады читаются по этим константам.
+const LEGACY_VERDICT_HEADING = '## Вердикт агента';
+const LEGACY_VERDICT_TEMPLATE = 'Заполняется после осмотра кадров сборки и референса на каждой ширине.';
+const LEGACY_VERDICT_CARRIED = 'Вердикт перенесён из доклада от';
+const LEGACY_TABLE_HEAD_RE = /^\|\s*Ширина/;
+const LEGACY_TAKEN_AT_RE = /^Снято: (\S+?)\.?\s/m;
+
+/** Текст ключа на каждом языке доклада: вердикт мог быть записан на другом языке, чем идёт нынешний запуск. */
+const inEveryLang = (key) => LANGS.map((lang) => t(lang, key));
+
+const isTableLine = (l) => l.trim().startsWith('|');
+const isSeparatorLine = (l) => /^\|[\s:|-]+\|?$/.test(l.trim());
 
 /**
- * Раздел «Вердикт агента» прежнего доклада. Чистая: `{ text, filled }` — текст раздела до
- * следующего `## ` без прежних пометок о переносе; `filled` — в таблице есть строка с непустой ячейкой
- * «Совпало» или «Не совпало», либо абзац раздела не шаблонный. Раздела нет → `{ text: '', filled: false }`.
+ * Строки раздела вердикта: по меткам `verdict:start/end`, иначе по заголовку раздела (нынешнему
+ * на любом языке или прежнему русскому). Раздела нет — `null`.
+ */
+function verdictBody(md) {
+  const lines = String(md ?? '').split(/\r?\n/);
+  const untilNextSection = (rest) => {
+    const end = rest.findIndex((l) => l.startsWith('## '));
+    return end < 0 ? rest : rest.slice(0, end);
+  };
+  const marked = lines.findIndex((l) => l.trim() === VERDICT_START);
+  if (marked >= 0) {
+    const rest = lines.slice(marked + 1);
+    const end = rest.findIndex((l) => l.trim() === VERDICT_END);
+    return end < 0 ? untilNextSection(rest) : rest.slice(0, end);
+  }
+  const headings = [LEGACY_VERDICT_HEADING, ...inEveryLang('report.transfer.verdictTitle')];
+  const start = lines.findIndex((l) => headings.includes(l.trim()));
+  if (start < 0) return null;
+  return untilNextSection(lines.slice(start + 1)).filter((l) => !l.startsWith(LEGACY_VERDICT_CARRIED));
+}
+
+/** Есть ли в докладе раздел вердикта (по меткам или по заголовку). */
+export function hasVerdictSection(md) {
+  return verdictBody(md) !== null;
+}
+
+/**
+ * Раздел «Вердикт агента» прежнего доклада. Чистая: `{ text, filled }` — текст раздела без прежних
+ * пометок о переносе; `filled` — в таблице есть строка с непустой ячейкой «Совпало» или «Не совпало»,
+ * либо абзац раздела не шаблонный (шаблон на любом языке). Раздела нет → `{ text: '', filled: false }`.
  */
 export function extractVerdict(md) {
-  const lines = String(md ?? '').split(/\r?\n/);
-  const start = lines.findIndex((l) => l.trim() === VERDICT_HEADING);
-  if (start < 0) return { text: '', filled: false };
-  const rest = lines.slice(start + 1);
-  const end = rest.findIndex((l) => l.startsWith('## '));
-  const body = (end < 0 ? rest : rest.slice(0, end)).filter((l) => !l.startsWith(VERDICT_CARRIED));
+  const body = verdictBody(md);
+  if (!body) return { text: '', filled: false };
   const text = body.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-  const rows = body.filter((l) => l.trim().startsWith('|') && !/^\|\s*(?:Ширина|-{3})/.test(l.trim()));
+  // Шапка и разделитель таблицы ширин — не строки данных: их находят по метке, по разделителю и по прежней шапке.
+  const notData = new Set();
+  body.forEach((l, i) => {
+    if (l.trim() === TABLE_WIDTHS) {
+      for (let j = i + 1, n = 0; j < body.length && n < 2 && isTableLine(body[j]); j += 1, n += 1) notData.add(j);
+    }
+    if (isSeparatorLine(l)) {
+      notData.add(i);
+      if (i > 0 && isTableLine(body[i - 1])) notData.add(i - 1);
+    }
+    if (LEGACY_TABLE_HEAD_RE.test(l.trim())) notData.add(i);
+  });
+  const rows = body.filter((l, i) => isTableLine(l) && !notData.has(i));
   const tableFilled = rows.some((l) => {
     const cells = l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
     return Boolean(cells[1] || cells[2]);
   });
-  const prose = body.map((l) => l.trim()).filter((l) => l && !l.startsWith('|'));
-  const proseFilled = prose.some((l) => l !== VERDICT_TEMPLATE);
+  const templates = [LEGACY_VERDICT_TEMPLATE, ...inEveryLang('report.transfer.verdictTemplate')];
+  const prose = body.map((l) => l.trim()).filter((l) => l && !l.startsWith('|') && !l.startsWith('<!--'));
+  const proseFilled = prose.some((l) => !templates.includes(l));
   return { text, filled: tableFilled || proseFilled };
 }
 
-/** Строка «Снято: …» доклада → время съёмки или null. */
+/** Время съёмки доклада: по метке `taken-at`, у прежнего доклада — по строке «Снято: …»; иначе null. */
 function reportTakenAt(md) {
-  return String(md ?? '').match(/^Снято: (\S+?)\.?\s/m)?.[1] ?? null;
+  const text = String(md ?? '');
+  return text.match(TAKEN_AT_RE)?.[1] ?? text.match(LEGACY_TAKEN_AT_RE)?.[1] ?? null;
 }
 
-/** Markdown-доклад сверки перенесённой страницы. */
+/** Причина пропуска настройки проекта на языке доклада: по имени, а у записи без имени — как записана. */
+function styleReasonText(entry, lang) {
+  return entry.code && STYLE_REASONS[entry.code] ? t(lang, STYLE_REASONS[entry.code]) : String(entry.reason ?? '');
+}
+
+/**
+ * Markdown-доклад сверки перенесённой страницы на языке `lang` (по умолчанию английский).
+ * Время съёмки пишется дважды: строкой для человека и меткой `taken-at`; вердикт окружён
+ * метками `verdict:start/end`, таблица ширин — `table:widths`.
+ */
 export function renderTransferReport(data) {
-  const { label, at, composition, markup, heights = [], shots = {}, artifacts = PREVIEW_ARTIFACTS, styleSkipped = [], referenceNote, htmlBlocks, previousVerdict } = data;
+  const { label, at, composition, markup, heights = [], shots = {}, artifacts = PREVIEW_ARTIFACTS, styleSkipped = [], referenceNote, htmlBlocks, previousVerdict, lang = 'en' } = data;
+  const compositionText = Array.isArray(composition.reasonItems)
+    ? composition.reasonItems.map((i) => t(lang, SEQUENCE_REASONS[i.code], i.params))
+    : composition.reasons;
   const rows = [
-    ['состав блоков', composition.equal ? 'совпало' : 'не совпало', `${composition.equal ? `${composition.expected.length} блоков в том же порядке` : composition.reasons.join('; ')}${composition.hidden ? `; скрытых блоков на приёмнике ${composition.hidden} (на публикации не видны)` : ''}`],
-    ['разметка (reference compare)', markup ? `${pct(markup.meanScore)} признаков` : '—', markup ? `в паре ${markup.pairs}, не собрано ${markup.refOnly}, лишних ${markup.builtOnly}; доклад ${rel(markup.report)}` : 'сверка разметки не выполнена'],
+    [t(lang, 'report.transfer.rowComposition'), t(lang, composition.equal ? 'report.transfer.equal' : 'report.transfer.notEqual'), `${composition.equal ? t(lang, 'report.transfer.compositionSame', { n: composition.expected.length }) : compositionText.join('; ')}${composition.hidden ? t(lang, 'report.transfer.compositionHidden', { n: composition.hidden }) : ''}`],
+    [t(lang, 'report.transfer.rowMarkup'), markup ? t(lang, 'report.transfer.markupScore', { score: pct(markup.meanScore) }) : '—', markup ? t(lang, 'report.transfer.markupPairs', { pairs: markup.pairs, refOnly: markup.refOnly, builtOnly: markup.builtOnly, report: rel(markup.report) }) : t(lang, 'report.transfer.markupNotRun')],
   ];
   for (const h of heights) {
     const same = h.built != null && h.reference != null && h.built === h.reference;
-    rows.push([`высота ${h.width}`, h.reference == null ? 'справочно' : same ? 'совпало' : 'отличается', `сборка ${h.built ?? '—'} px, референс ${h.reference ?? '—'} px${h.reference == null ? ` (${referenceNote ?? 'кадр референса не снимался'})` : ''}`]);
+    rows.push([t(lang, 'report.transfer.rowHeight', { width: h.width }), h.reference == null ? t(lang, 'report.transfer.heightReference') : t(lang, same ? 'report.transfer.equal' : 'report.transfer.heightDiffers'), `${t(lang, 'report.transfer.heightDetail', { built: h.built ?? '—', reference: h.reference ?? '—' })}${h.reference == null ? ` (${referenceNote ?? t(lang, 'report.transfer.noReferenceShot')})` : ''}`]);
   }
-  rows.push(['кадры', shots.built?.length ? 'сняты' : 'нет', `сборка: ${(shots.built ?? []).map(rel).join(', ') || '—'}; референс: ${shots.reference ? rel(shots.reference) : (referenceNote ?? 'не снимался')}`]);
-  if (styleSkipped.length) rows.push(['не перенесено: настройки проекта', 'пропущено', `${styleSkipped.map((s) => s.key).join(', ')} — ${[...new Set(styleSkipped.map((s) => s.reason))].join('; ')}`]);
+  rows.push([t(lang, 'report.transfer.rowShots'), t(lang, shots.built?.length ? 'report.transfer.shotsTaken' : 'report.transfer.shotsNone'), t(lang, 'report.transfer.shotsDetail', { built: (shots.built ?? []).map(rel).join(', ') || '—', reference: shots.reference ? rel(shots.reference) : (referenceNote ?? t(lang, 'report.transfer.shotsNotTaken')) })]);
+  if (styleSkipped.length) rows.push([t(lang, 'report.transfer.rowStyle'), t(lang, 'report.transfer.styleSkipped'), `${styleSkipped.map((s) => s.key).join(', ')} — ${[...new Set(styleSkipped.map((s) => styleReasonText(s, lang)))].join('; ')}`]);
+  const widthsTable = [
+    TABLE_WIDTHS,
+    t(lang, 'report.transfer.verdictHead'),
+    '| --- | --- | --- | --- |',
+    ...heights.map((h) => `| ${h.width} | | | |`),
+  ];
   const lines = [
-    `# Сверка переноса ${label}`,
+    t(lang, 'report.transfer.title', { label }),
     '',
-    `Снято: ${at}. Машинная часть приёмки; вердикт по кадрам даёт агент, владелец подтверждает вывод.`,
+    `${t(lang, 'report.takenAt', { at })} ${t(lang, 'report.transfer.intro')}`,
+    `<!-- taken-at: ${at} -->`,
     '',
-    '| Проверка | Итог | Причина |',
+    t(lang, 'report.transfer.tableHead'),
     '| --- | --- | --- |',
     ...rows.map((r) => `| ${r[0]} | ${r[1]} | ${String(r[2]).replace(/\|/g, '\\|')} |`),
     '',
-    '## Известные артефакты предпросмотра',
+    t(lang, 'report.transfer.artifactsTitle'),
     '',
-    ...artifacts.map((a) => `- ${a}`),
+    ...artifacts.map((a) => `- ${PREVIEW_ARTIFACT_KEYS[a] ? t(lang, PREVIEW_ARTIFACT_KEYS[a]) : a}`),
     '',
-    '## HTML-блоки',
+    t(lang, 'report.transfer.htmlTitle'),
     '',
-    ...renderHtmlBlocks(htmlBlocks),
+    ...renderHtmlBlocks(htmlBlocks, lang),
     '',
-    VERDICT_HEADING,
+    t(lang, 'report.transfer.verdictTitle'),
     '',
+    VERDICT_START,
     // Повторная сверка — обычный шаг (после donor links, после исправлений): заполненный вердикт
-    // переносится с пометкой, агент перепроверяет его по новым кадрам.
+    // переносится, агент перепроверяет его по новым кадрам; пометка о переносе стоит вне меток вердикта.
+    ...(previousVerdict?.filled ? [previousVerdict.text] : [t(lang, 'report.transfer.verdictTemplate'), '', ...widthsTable]),
+    VERDICT_END,
+    '',
     ...(previousVerdict?.filled
-      ? [
-        previousVerdict.text,
-        '',
-        `${VERDICT_CARRIED} ${previousVerdict.at ?? 'неизвестной даты'}; кадры сняты заново ${at} — перепроверить, если состав или высоты изменились.`,
-        '',
-      ]
-      : [
-        VERDICT_TEMPLATE,
-        '',
-        '| Ширина | Совпало | Не совпало | Причина |',
-        '| --- | --- | --- | --- |',
-        ...heights.map((h) => `| ${h.width} | | | |`),
-        '',
-      ]),
+      ? [t(lang, 'report.transfer.verdictCarried', { from: previousVerdict.at ?? t(lang, 'report.transfer.unknownDate'), at }), '']
+      : []),
   ];
   return lines.join('\n');
 }
@@ -227,13 +311,13 @@ export function renderTransferReport(data) {
  * Внутри сессии редактора приёмника: сверка разметки, состав, кадры сборки.
  * driver: { listRecords(), pageRawHtml(), shot({ widths }), readRecord(recordid)? } — readRecord даёт снимок записи для HTML-блоков.
  */
-export async function collectTransferData(driver, { slug, label, pageid, widths, baseDir, catalogDir, now = new Date().toISOString() }) {
+export async function collectTransferData(driver, { slug, label, pageid, widths, baseDir, catalogDir, now = new Date().toISOString(), lang = 'en' }) {
   // Замены шаблонов из site.json относятся к сборке по референсу; перенос через буфер несёт
   // исходные шаблоны донора — замены нейтрализуются тождественными парами.
   const site = readSite(slug, baseDir ? { baseDir } : undefined);
   const identity = Object.fromEntries(Object.keys(site?.substitutes ?? {}).map((k) => [k, k]));
   const { resolved, structure } = prepareReferencePlan({ slug, source: label, baseDir, catalogDir, substitutes: identity });
-  const cmp = await compareReferencePage(driver, { slug, label, baseDir, catalogDir, substitutes: identity, now });
+  const cmp = await compareReferencePage(driver, { slug, label, baseDir, catalogDir, substitutes: identity, now, lang });
   // Структура слепка снята с публикации — скрытых блоков (off=y) там нет; в редактор они переносятся как есть.
   const records = await driver.listRecords();
   const hiddenCount = records.filter((r) => r.hidden === true || r.hidden === 'y').length;
@@ -264,8 +348,11 @@ export async function collectTransferData(driver, { slug, label, pageid, widths,
   };
 }
 
-/** Кадр референса снят (или нет) — доклад и данные пишутся в слепок. */
-export function finishTransferReport(data, referenceShots, { slug, baseDir, referenceNote } = {}) {
+/**
+ * Кадр референса снят (или нет) — доклад и данные пишутся в слепок. Доклад пишется на языке `lang`.
+ * `referenceNote` — строка или `Message`: в данные слепка идёт английский текст, в доклад — на `lang`.
+ */
+export function finishTransferReport(data, referenceShots, { slug, baseDir, referenceNote, lang = 'en' } = {}) {
   const style = readDonorStyle(slug, baseDir ? { baseDir } : undefined);
   const styleSkipped = Array.isArray(style?.skipped) ? style.skipped : [];
   const refWidths = referenceShots?.widths ?? [];
@@ -280,8 +367,9 @@ export function finishTransferReport(data, referenceShots, { slug, baseDir, refe
     shots: { built: data.built.files, reference: referenceShots ? rel(referenceShots.dir) : null },
     artifacts: PREVIEW_ARTIFACTS,
     styleSkipped,
-    referenceNote: referenceShots ? null : referenceNote ?? null,
+    referenceNote: referenceShots || referenceNote == null ? null : messageText(referenceNote),
   };
+  const noteForReport = referenceShots || referenceNote == null ? null : (isMessage(referenceNote) ? render(lang, referenceNote) : referenceNote);
   const root = refPaths(slug, baseDir ? { baseDir } : undefined).root;
   mkdirSync(join(root, 'transfer'), { recursive: true });
   mkdirSync(join(root, 'reports'), { recursive: true });
@@ -292,6 +380,7 @@ export function finishTransferReport(data, referenceShots, { slug, baseDir, refe
   if (existsSync(report)) {
     try {
       const prev = readFileSync(report, 'utf8');
+      if (!hasVerdictSection(prev)) log.warn('extractVerdict', 'verdict not found in previous report', { file: rel(report) });
       previousVerdict = { ...extractVerdict(prev), at: reportTakenAt(prev) };
     } catch (e) {
       log.warn('finishTransferReport', 'прежний доклад не прочитан — вердикт пишется пустым', { label: data.label, error: e.message });
@@ -299,7 +388,8 @@ export function finishTransferReport(data, referenceShots, { slug, baseDir, refe
   }
   full.verdictCarried = Boolean(previousVerdict?.filled);
   writeFileSync(path, `${JSON.stringify(full, null, 2)}\n`, 'utf8');
-  writeFileSync(report, renderTransferReport({ ...full, previousVerdict }), 'utf8');
+  log.debug('finishTransferReport', 'report language', { lang, file: rel(report) });
+  writeFileSync(report, renderTransferReport({ ...full, referenceNote: noteForReport, previousVerdict, lang }), 'utf8');
   const exitCode = data.composition.equal ? 0 : 1;
   log.info('finishTransferReport', 'доклад записан', { label: data.label, report: rel(report), equal: data.composition.equal, verdictCarried: full.verdictCarried, exitCode });
   return { ...full, path: rel(path), report: rel(report), exitCode };
@@ -308,5 +398,5 @@ export function finishTransferReport(data, referenceShots, { slug, baseDir, refe
 /** Полный цикл, когда кадр референса уже снят (или не нужен): собрать данные и записать доклад. */
 export async function verifyTransferredPage(driver, params) {
   const data = await collectTransferData(driver, params);
-  return finishTransferReport(data, params.referenceShots ?? null, { slug: params.slug, baseDir: params.baseDir, referenceNote: params.referenceNote });
+  return finishTransferReport(data, params.referenceShots ?? null, { slug: params.slug, baseDir: params.baseDir, referenceNote: params.referenceNote, lang: params.lang });
 }

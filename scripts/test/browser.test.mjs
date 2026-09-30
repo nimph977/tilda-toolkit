@@ -5,11 +5,12 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import vm from 'node:vm';
 import {
-  BrowserError, buildCallExpression, isRetryable, isSessionLost, retryDelayMs,
+  BrowserError, LOGIN_HINTS, buildCallExpression, call, isRetryable, isSessionLost, layerErrorCode, retryDelayMs, sessionLostMessage,
   projectSettingsUrl, editorUrl, profileDir, sessionProject, setDaemonWindow, stripCookies, wrapLayer,
   openProject, openProjectSettings,
 } from '../lib/browser.mjs';
 import { ConfigError } from '../lib/config.mjs';
+import { messageText, msg } from '../lib/i18n.mjs';
 import { repoRoot } from '../lib/paths.mjs';
 import { setLogLevel } from '../lib/log.mjs';
 
@@ -241,4 +242,61 @@ test('a lost donor session names the donor holder login, a lost test session doe
       else process.env[k] = v;
     }
   }
+});
+
+test('layerErrorCode takes the layer code from the start of a page error', () => {
+  assert.deepEqual(layerErrorCode('SAVE_FAILED: x'), { code: 'SAVE_FAILED', detail: 'x' });
+  assert.deepEqual(layerErrorCode('page.evaluate: Error: SESSION_LOST without data'), { code: 'SESSION_LOST', detail: 'without data' });
+  assert.deepEqual(layerErrorCode('WRONG_PAGE_SETTINGS 123 instead of 456'), { code: 'WRONG_PAGE_SETTINGS', detail: '123 instead of 456' });
+  assert.deepEqual(layerErrorCode('NO_API'), { code: 'NO_API', detail: '' });
+  assert.equal(layerErrorCode('plain text'), null);
+  assert.equal(layerErrorCode('Error: ab'), null);
+});
+
+test('layerErrorCode drops the Playwright stack from the detail', () => {
+  const parsed = layerErrorCode('page.evaluate: Error: SAVE_FAILED: no response\n    at eval (eval at evaluate)\n    at <anonymous>:3:1');
+  assert.deepEqual(parsed, { code: 'SAVE_FAILED', detail: 'no response' });
+});
+
+test('BrowserError takes a Message: English text in message, key and params next to it', () => {
+  const error = new BrowserError('CALL_FAILED', msg('browser.lib.wrongProject', { onPage: '100002', wanted: '100001' }));
+  assert.equal(error.code, 'CALL_FAILED');
+  assert.equal(error.key, 'browser.lib.wrongProject');
+  assert.equal(error.message, 'project 100002 is open instead of 100001');
+  assert.equal(new BrowserError('TIMEOUT', 'plain').key, undefined);
+});
+
+test('session lost message names the holder to sign in to, by role', () => {
+  assert.match(messageText(sessionLostMessage('donor')), /session --donor/);
+  assert.match(messageText(sessionLostMessage()), /test holder: session/);
+  assert.equal(sessionLostMessage('donor').key, 'browser.lib.sessionLostRole');
+  assert.equal(LOGIN_HINTS.test.key, 'browser.lib.loginHintTest');
+});
+
+/** Страница-заглушка: evaluate бросает заданную ошибку, url — обычная страница проекта. */
+const failingPage = (message) => ({ url: () => 'https://tilda.cc/projects/', evaluate: async () => { throw new Error(message); } });
+
+test('call: a layer error becomes CALL_FAILED with the layer code key and layerCode in data', async () => {
+  const error = await call(failingPage('page.evaluate: Error: SAVE_FAILED: no response from the server'), 'saveField', [], { attempts: 1 })
+    .then(() => null, (e) => e);
+  assert.ok(error instanceof BrowserError);
+  assert.equal(error.code, 'CALL_FAILED');
+  assert.equal(error.key, 'browser.code.SAVE_FAILED');
+  assert.deepEqual(error.params, { fn: 'saveField', detail: 'no response from the server' });
+  assert.equal(error.data.layerCode, 'SAVE_FAILED');
+  assert.match(error.message, /^SAVE_FAILED in saveField: /);
+});
+
+test('call: an error without a known layer code gets the general text', async () => {
+  const unknown = await call(failingPage('page.evaluate: Error: WEIRD_CODE: x'), 'f', [], { attempts: 1 }).then(() => null, (e) => e);
+  assert.equal(unknown.key, 'browser.lib.callFailed');
+  const plain = await call(failingPage('boom'), 'f', [], { attempts: 1 }).then(() => null, (e) => e);
+  assert.equal(plain.key, 'browser.lib.callFailed');
+  assert.equal(plain.message, 'f: boom');
+});
+
+test('call: a lost session keeps the SESSION_LOST code and its own message key', async () => {
+  const error = await call(failingPage('SESSION_LOST: login page'), 'f', [], { attempts: 1 }).then(() => null, (e) => e);
+  assert.equal(error.code, 'SESSION_LOST');
+  assert.equal(error.key, 'browser.lib.sessionLost');
 });

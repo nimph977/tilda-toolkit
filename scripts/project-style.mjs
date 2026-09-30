@@ -17,17 +17,19 @@ import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
 import { baselineDir } from './lib/paths.mjs';
 import { readManifest, refPaths, snapshotFile } from './lib/reference-store.mjs';
-import { projectCssUrl, PROJECT_REASONS, PROJECT_STYLE_KEYS, weightFromLabel } from './lib/project-style.mjs';
+import { attachMessage, messageText, msg } from './lib/i18n.mjs';
+import { projectCssUrl, PROJECT_STYLE_KEYS, weightFromLabel } from './lib/project-style.mjs';
 import { diffFingerprints } from './page-role.mjs';
 
 const log = createLogger('project-style');
 
 /** Слово подтверждения записи оформления проекта. */
-export const STYLE_CONFIRM = 'оформить';
+export const STYLE_CONFIRM = 'apply-style';
 
 export class ProjectStyleError extends Error {
   constructor(code, message, extra = {}) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
     this.name = 'ProjectStyleError';
     this.code = code;
     this.exitCode = 1;
@@ -47,18 +49,18 @@ export function projectStylePaths(slug, opts = {}) {
  */
 export async function fetchProjectCss(session, { slug }, opts = {}, deps = {}) {
   const manifest = readManifest(slug, opts);
-  if (!manifest) throw new ProjectStyleError('NO_MANIFEST', `слепок ${slug} не найден: сначала reference fetch`);
+  if (!manifest) throw new ProjectStyleError('NO_MANIFEST', msg('projectStyle.noManifest', { slug }));
   const first = (manifest.pages ?? []).find((p) => p.status === 'ok' && p.file);
-  if (!first) throw new ProjectStyleError('NO_PAGES', `в слепке ${slug} нет снятых страниц`);
+  if (!first) throw new ProjectStyleError('NO_PAGES', msg('projectStyle.noPages', { slug }));
   const html = readFileSync(snapshotFile(refPaths(slug, opts), first.file), 'utf8');
   const url = projectCssUrl(html);
-  if (!url) throw new ProjectStyleError('NO_CSS', PROJECT_REASONS.noCss);
+  if (!url) throw new ProjectStyleError('NO_CSS', msg('projectStyle.noCss'));
   const browser = deps.browser || (await import('./lib/browser.mjs'));
   const page = await browser.openBackgroundPage(session.context);
   let css;
   try {
     const resp = await page.goto(url, { waitUntil: 'load' });
-    if (!resp || !resp.ok()) throw new ProjectStyleError('CSS_UNAVAILABLE', `CSS проекта референса недоступен: HTTP ${resp ? resp.status() : '—'}`);
+    if (!resp || !resp.ok()) throw new ProjectStyleError('CSS_UNAVAILABLE', msg('projectStyle.cssUnavailable', { status: resp ? resp.status() : '—' }));
     css = await resp.text();
   } finally {
     await page.close().catch(() => {});
@@ -85,7 +87,7 @@ function recordPath(projectid, now, opts = {}) {
 export async function applyProjectStyle(driver, { desired, confirmed = false, confirm, projectid, now = new Date().toISOString() }, opts = {}) {
   if (!confirmed || confirm !== STYLE_CONFIRM) {
     log.warn('applyProjectStyle', 'запись оформления без подтверждения — отказ до браузера');
-    throw new ProjectStyleError('STYLE_NOT_CONFIRMED', 'оформление проекта меняет вид всех его страниц: нужен --confirm');
+    throw new ProjectStyleError('STYLE_NOT_CONFIRMED', msg('projectStyle.notConfirmed'));
   }
   const before = await driver.readProjectStyle();
   const requested = {};
@@ -105,7 +107,7 @@ export async function applyProjectStyle(driver, { desired, confirmed = false, co
   log.info('applyProjectStyle', 'запись для отката сохранена', { record, keys: changedKeys });
   const res = await driver.setProjectStyle(requested);
   if (String(res?.text ?? '').trim() !== 'OK') {
-    throw new ProjectStyleError('SAVE_FAILED', `настройки не сохранены: ответ ${String(res?.text ?? '').slice(0, 60)}; запись для отката ${record}`, { record });
+    throw new ProjectStyleError('SAVE_FAILED', msg('projectStyle.saveFailed', { text: String(res?.text ?? '').slice(0, 60), record }), { record });
   }
   await driver.reload();
   const after = await driver.readProjectStyle();
@@ -120,7 +122,7 @@ export async function applyProjectStyle(driver, { desired, confirmed = false, co
   writeFileSync(record, JSON.stringify(entry, null, 2) + '\n', 'utf8');
   log.info('applyProjectStyle', 'оформление записано', { changed: changedKeys, notApplied, otherChanged: otherChanged.length });
   if (notApplied.length) {
-    throw new ProjectStyleError('STYLE_NOT_APPLIED', `после записи не совпали: ${notApplied.join(', ')}; запись для отката ${record}`, { record, notApplied, otherChanged });
+    throw new ProjectStyleError('STYLE_NOT_APPLIED', msg('projectStyle.notApplied', { notApplied: notApplied.join(', '), record }), { record, notApplied, otherChanged });
   }
   return { changed: changedKeys, otherChanged, record, fonts: 'C′', notApplied };
 }
@@ -168,7 +170,7 @@ export function playwrightStyleUi(page, browser) {
             b.click();
             return true;
           }, preset);
-          if (!clicked) throw new ProjectStyleError('NO_PRESET', `пресета шрифта «${preset}» нет на вкладке «Шрифты»`);
+          if (!clicked) throw new ProjectStyleError('NO_PRESET', msg('projectStyle.noPreset', { preset }));
           await page.waitForTimeout(1000);
           submitted.push(...fontKeys);
         }
@@ -177,10 +179,10 @@ export function playwrightStyleUi(page, browser) {
             const el = document.getElementById(id);
             return el ? [...el.options].map((o) => ({ value: o.value, label: o.textContent.trim() })) : null;
           }, key);
-          if (!options) throw new ProjectStyleError('NO_CONTROL', `элемента ${key} нет на вкладке «Шрифты»`);
+          if (!options) throw new ProjectStyleError('NO_CONTROL', msg('projectStyle.noControl', { key }));
           const want = String(values[key]);
           const hit = options.find((o) => o.value === want) ?? options.find((o) => String(weightFromLabel(o.label) ?? '') === want) ?? options.find((o) => o.label.replace(/px$/, '') === want.replace(/px$/, ''));
-          if (!hit) throw new ProjectStyleError('NO_OPTION', PROJECT_REASONS.noOption(key, want));
+          if (!hit) throw new ProjectStyleError('NO_OPTION', msg('projectStyle.noOption', { key, want }));
           await page.locator(`#${key}`).selectOption(hit.value);
           chosen[key] = hit.value;
           submitted.push(key);

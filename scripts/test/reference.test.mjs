@@ -226,7 +226,7 @@ test('fetchReference does not need TILDA_PROTECTED_PAGES', () =>
   }));
 
 test('fetchReference rejects non-http urls and bad slugs', async () => {
-  await assert.rejects(fetchReference({ url: 'ftp://x', slug: 'demo' }, { browser: makeFake().browser }), (e) => e.code === 'BAD_URL' && e.exitCode === 2);
+  await assert.rejects(fetchReference({ url: 'ftp://x', slug: 'demo' }, { browser: makeFake().browser }), (e) => e.code === 'BAD_URL' && e.key === 'reference.urlNotHttp' && e.params.protocol === 'ftp:' && e.exitCode === 2);
   await assert.rejects(fetchReference({ url: BASE, slug: 'Bad Slug' }, { browser: makeFake().browser }), (e) => e.code === 'BAD_SLUG');
 });
 

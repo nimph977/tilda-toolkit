@@ -27,6 +27,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
+import { attachMessage, isMessage, messageText, msg } from './lib/i18n.mjs';
 import { baselineDir, protectedPages, unprotectForThisRun } from './lib/paths.mjs';
 import { decodeEntities } from './lib/entities.mjs';
 import { recordFields } from './apply-plan.mjs';
@@ -75,7 +76,8 @@ export const LIST_VOLATILE_KEYS = new Set(['lid']);
 
 export class PromoteError extends Error {
   constructor(code, message, data = {}) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
     this.name = 'PromoteError';
     this.code = code;
     Object.assign(this, data);
@@ -163,7 +165,7 @@ export function alignPages(backup, working, expected = expectedChanges()) {
   const baseOrder = (expected.sortFrom || current).filter((id) => !expected.created.has(id));
   const live = backup.inventory || [];
   if (baseOrder.length !== live.length) {
-    problems.push({ problem: 'число блоков не совпало', live: live.length, working: baseOrder.length, created: [...expected.created] });
+    problems.push({ problem: msg('promote.problem.blockCountMismatch'), live: live.length, working: baseOrder.length, created: [...expected.created] });
     log.error('alignPages', 'число блоков не совпало', { live: live.length, working: baseOrder.length });
     return { pairs: [], problems };
   }
@@ -172,10 +174,10 @@ export function alignPages(backup, working, expected = expectedChanges()) {
   live.forEach((row, i) => {
     const work = byId.get(baseOrder[i]);
     if (!work) {
-      problems.push({ pos: i + 1, problem: 'блока рабочей копии нет в инвентаре', recordid: baseOrder[i] });
+      problems.push({ pos: i + 1, problem: msg('promote.problem.workingBlockMissing'), recordid: baseOrder[i] });
       return;
     }
-    if (String(row.tplid) !== String(work.tplid)) problems.push({ pos: i + 1, problem: 'тип блока не совпал', live: `${row.recordid}/tpl${row.tplid}`, working: `${work.recordid}/tpl${work.tplid}` });
+    if (String(row.tplid) !== String(work.tplid)) problems.push({ pos: i + 1, problem: msg('promote.problem.blockTypeMismatch'), live: `${row.recordid}/tpl${row.tplid}`, working: `${work.recordid}/tpl${work.tplid}` });
     pairs.push({ pos: i + 1, live: row, work });
   });
   log.debug('alignPages', 'блоки совмещены', { pairs: pairs.length, problems: problems.length });
@@ -214,7 +216,7 @@ function compareZero(pos, a, b, exp, out) {
     const vb = sb.get(key);
     if (JSON.stringify(va) === JSON.stringify(vb)) continue;
     if (explains(e.service.get(key), va, vb)) out.explained.push({ pos, kind: 'zero', key });
-    else out.problems.push({ pos, kind: 'zero', problem: 'служебное поле блока отличается', key, live: String(va ?? '').slice(0, 60), working: String(vb ?? '').slice(0, 60) });
+    else out.problems.push({ pos, kind: 'zero', problem: msg('promote.problem.serviceFieldDiffers'), key, live: String(va ?? '').slice(0, 60), working: String(vb ?? '').slice(0, 60) });
   }
   const ea = elemMap(a);
   const eb = elemMap(b);
@@ -223,12 +225,12 @@ function compareZero(pos, a, b, exp, out) {
     const xb = eb.get(id);
     if (!xa) {
       if (e.added.has(id)) out.explained.push({ pos, kind: 'zero', elem_id: id, added: true });
-      else out.problems.push({ pos, kind: 'zero', problem: 'элемент есть только на рабочей копии', elem_id: id, type: xb.type });
+      else out.problems.push({ pos, kind: 'zero', problem: msg('promote.problem.elementOnlyOnWorking'), elem_id: id, type: xb.type });
       continue;
     }
     if (!xb) {
       if (e.removed.has(id)) out.explained.push({ pos, kind: 'zero', elem_id: id, removed: true });
-      else out.problems.push({ pos, kind: 'zero', problem: 'элемент есть только на живой', elem_id: id, type: xa.type });
+      else out.problems.push({ pos, kind: 'zero', problem: msg('promote.problem.elementOnlyOnLive'), elem_id: id, type: xa.type });
       continue;
     }
     for (const field of new Set([...Object.keys(xa), ...Object.keys(xb)])) {
@@ -236,7 +238,7 @@ function compareZero(pos, a, b, exp, out) {
       const fb = xb[field];
       if (JSON.stringify(fa) === JSON.stringify(fb)) continue;
       if (explains(e.fields.get(`${id}|${field}`), fa, fb)) out.explained.push({ pos, kind: 'zero', elem_id: id, field });
-      else out.problems.push({ pos, kind: 'zero', problem: 'поле элемента отличается', elem_id: id, field, live: String(fa ?? '').slice(0, 60), working: String(fb ?? '').slice(0, 60) });
+      else out.problems.push({ pos, kind: 'zero', problem: msg('promote.problem.elementFieldDiffers'), elem_id: id, field, live: String(fa ?? '').slice(0, 60), working: String(fb ?? '').slice(0, 60) });
     }
   }
 }
@@ -257,7 +259,7 @@ function compareRecord(pos, a, b, expFields, isList, out) {
       continue;
     }
     if (explains(expFields && expFields.get(field), fa[field], fb[field])) out.explained.push({ pos, kind: 'record', field });
-    else out.problems.push({ pos, kind: 'record', problem: 'поле блока отличается', field, live: String(va ?? '').slice(0, 60), working: String(vb ?? '').slice(0, 60) });
+    else out.problems.push({ pos, kind: 'record', problem: msg('promote.problem.blockFieldDiffers'), field, live: String(va ?? '').slice(0, 60), working: String(vb ?? '').slice(0, 60) });
   }
 }
 
@@ -276,13 +278,13 @@ export function comparePages(backup, working, expected = expectedChanges()) {
     const hw = work.hidden ? 'y' : 'n';
     if (hl !== hw) {
       if (explains(expected.hidden.get(String(work.recordid)), hl, hw)) out.explained.push({ pos, kind: 'block', hidden: true });
-      else out.problems.push({ pos, kind: 'block', problem: 'видимость блока отличается', live: hl, working: hw });
+      else out.problems.push({ pos, kind: 'block', problem: msg('promote.problem.visibilityDiffers'), live: hl, working: hw });
     }
     if (String(live.tplid) === '396') {
       const a = (backup.zero || {})[String(live.recordid)];
       const b = (working.zero || {})[String(work.recordid)];
       if (!a || !b) {
-        out.problems.push({ pos, kind: 'zero', problem: 'нет модели Zero Block в снимке', live: Boolean(a), working: Boolean(b) });
+        out.problems.push({ pos, kind: 'zero', problem: msg('promote.problem.zeroModelMissing'), live: Boolean(a), working: Boolean(b) });
         continue;
       }
       compareZero(pos, a, b, expected.zero.get(String(work.recordid)), out);
@@ -290,7 +292,7 @@ export function comparePages(backup, working, expected = expectedChanges()) {
       const a = (backup.records || {})[String(live.recordid)];
       const b = (working.records || {})[String(work.recordid)];
       if (!a || !b) {
-        out.problems.push({ pos, kind: 'record', problem: 'нет снимка стандартного блока', live: Boolean(a), working: Boolean(b) });
+        out.problems.push({ pos, kind: 'record', problem: msg('promote.problem.recordSnapshotMissing'), live: Boolean(a), working: Boolean(b) });
         continue;
       }
       compareRecord(pos, a, b, expected.record.get(String(work.recordid)), expected.list.has(String(work.recordid)), out);
@@ -310,7 +312,7 @@ export function remapPlan(plan, to, mapping) {
   const map = (id, where) => {
     if (id === undefined || id === null || id === '') return id;
     const hit = mapping.get(String(id));
-    if (!hit) throw new PromoteError('REMAP_FAILED', `${where}: recordid ${id} рабочей копии не найден на живой странице`, { recordid: String(id) });
+    if (!hit) throw new PromoteError('REMAP_FAILED', msg('promote.remapFailed', { where, id }), { recordid: String(id) });
     return hit;
   };
   const ops = (plan.ops || []).map((op, i) => {
@@ -326,9 +328,12 @@ export function remapPlan(plan, to, mapping) {
   return out;
 }
 
-function writeJson(path, data) {
+/** Сообщения (`Message`) в файле данных пишутся английским текстом: отчёт и планы читают не по языку запуска. */
+const englishMessages = (key, value) => (isMessage(value) ? messageText(value) : value);
+
+export function writeJson(path, data) {
   mkdirSync(join(path, '..'), { recursive: true });
-  writeFileSync(path, JSON.stringify(data, null, 2) + '\n', 'utf8');
+  writeFileSync(path, JSON.stringify(data, englishMessages, 2) + '\n', 'utf8');
   return path;
 }
 
@@ -342,7 +347,7 @@ async function snapshotWholePage(driver, pageid, { baseDir, source, pace = SNAPS
   }
   if (complete.errors.some((e) => /SESSION_LOST/.test(String(e.error)))) {
     log.error('snapshotWholePage', 'сессия Тильды потеряна во время снимка', { pageid: String(pageid), read: complete.errors.length });
-    throw new PromoteError('SESSION_LOST', `Сессии Тильды нет (потеряна во время снимка ${pageid}): войдите в открытом окне браузера и повторите команду`, { pageid: String(pageid) });
+    throw new PromoteError('SESSION_LOST', msg('promote.sessionLost', { pageid }), { pageid: String(pageid) });
   }
   writeJson(join(baseDir, 'records', String(pageid), '_inventory.json'), snap.inventory);
   for (const [recordid, data] of Object.entries(snap.zero || {})) saveSnapshot({ kind: 'zero', pageid, recordid, data, source }, { baseDir });
@@ -380,16 +385,20 @@ export async function promote(ctx, opts) {
     report.analysis = analyzeCapture(records);
     log.info('promote', 'перехват завершён', { calls: report.analysis.calls, spanSec: report.analysis.spanSec, maxPerMinute: report.analysis.maxPerMinute, firstLost: report.analysis.firstLost ? `#${report.analysis.firstLost.index} ${report.analysis.firstLost.marker || 'html'} после ${report.analysis.firstLost.sinceStartSec} с, за 60 с до него ${report.analysis.firstLost.inLast60s}` : null, file: capturePath });
   };
+  // message — строка или Message; в отчёте (JSON-файл) хранится английский текст.
   const stop = async (code, message, data) => {
+    const text = messageText(message);
     report.stoppedAt = code;
-    report.error = message;
+    report.error = text;
     Object.assign(report, data || {});
     await finishCapture();
     report.reportPath = writeJson(reportPath, report);
-    log.error('promote', `останов: ${message}`, { code, report: reportPath });
+    log.error('promote', `останов: ${text}`, { code, report: reportPath });
     throw new PromoteError(code, message, { report });
   };
-  if (from === to) await stop('BAD_ARGS', 'рабочая копия и живая страница совпадают');
+  // Сообщение пойманной ошибки: с ключом — как Message, иначе её текст.
+  const messageOf = (e) => (e.key ? msg(e.key, e.params) : e.message);
+  if (from === to) await stop('BAD_ARGS', msg('promote.sameArgs'));
 
   // Шаг 1. План проверен на рабочей копии.
   const journal = listRecords(from, { baseDir });
@@ -397,7 +406,7 @@ export async function promote(ctx, opts) {
   for (const { path, plan } of opts.plans) {
     const name = planSlug(path, plan);
     const rec = findVerifiedRecord(journal, name);
-    if (!rec) await stop('PLAN_NOT_VERIFIED', `план ${name} не имеет записи журнала с verify = 0 на рабочей копии ${from} — сначала apply на копии`, { plan: name });
+    if (!rec) await stop('PLAN_NOT_VERIFIED', msg('promote.planNotVerified', { name, from }), { plan: name });
     verified.push(rec);
     report.plans.push({ name, path, verifiedAt: rec.at, journal: rec.file });
     log.info('promote', `шаг 1: план ${name} проверен на ${from}`, { at: rec.at });
@@ -415,10 +424,10 @@ export async function promote(ctx, opts) {
   try {
     backup = await snapshotWholePage(backupDriver, dup.pageid, { baseDir, source: `promote backup of ${to}`, pace });
   } catch (e) {
-    if (e.code === 'SESSION_LOST') await stop('SESSION_LOST', e.message, { pageid: dup.pageid });
+    if (e.code === 'SESSION_LOST') await stop('SESSION_LOST', messageOf(e), { pageid: dup.pageid });
     throw e;
   }
-  if (!backup.complete.ok) await stop('BACKUP_INCOMPLETE', `бэкап ${dup.pageid} снялся не целиком: не прочитано ${backup.complete.missing.length}, ошибок ${backup.complete.errors.length}`, { missing: backup.complete.missing, errors: backup.complete.errors });
+  if (!backup.complete.ok) await stop('BACKUP_INCOMPLETE', msg('promote.backupIncomplete', { pageid: dup.pageid, missing: backup.complete.missing.length, errors: backup.complete.errors.length }), { missing: backup.complete.missing, errors: backup.complete.errors });
   log.info('promote', 'шаг 2: снимок бэкапа полный', { blocks: backup.snap.inventory.length });
 
   // Шаг 3. Сверка бэкапа с рабочей копией. Пауза перед вторым снимком — см. SNAPSHOT_PACE.
@@ -430,19 +439,19 @@ export async function promote(ctx, opts) {
   try {
     working = await snapshotWholePage(workDriver, from, { baseDir, source: 'promote working copy', pace });
   } catch (e) {
-    if (e.code === 'SESSION_LOST') await stop('SESSION_LOST', e.message, { pageid: from });
+    if (e.code === 'SESSION_LOST') await stop('SESSION_LOST', messageOf(e), { pageid: from });
     throw e;
   }
-  if (!working.complete.ok) await stop('WORKING_INCOMPLETE', `рабочая копия ${from} снялась не целиком`, { missing: working.complete.missing, errors: working.complete.errors });
+  if (!working.complete.ok) await stop('WORKING_INCOMPLETE', msg('promote.workingIncomplete', { from }), { missing: working.complete.missing, errors: working.complete.errors });
   const expected = expectedChanges(verified);
   const cmp = comparePages(backup.snap, working.snap, expected);
   report.compare = { blocks: cmp.blocks, explained: cmp.explained.length, problems: cmp.problems };
-  if (cmp.problems.length) await stop('DRIFT', `живая главная расходится с рабочей копией сверх плана: ${cmp.problems.length} расхождений — главную правили руками после снятия копии`, { problems: cmp.problems });
+  if (cmp.problems.length) await stop('DRIFT', msg('promote.drift', { count: cmp.problems.length }), { problems: cmp.problems });
   log.info('promote', `шаг 3: сверка чиста — ${cmp.blocks} блоков, ожидаемых различий ${cmp.explained.length}`);
 
   // Шаг 4. Накат заменой page. Защита снимается на этот вызов явным флагом.
   if (protectedPages().includes(to)) {
-    if (!opts.unprotect) await stop('PROTECTED_PAGE', `страница ${to} защищена (TILDA_PROTECTED_PAGES): накат требует явного --unprotect на этот вызов`);
+    if (!opts.unprotect) await stop('PROTECTED_PAGE', msg('promote.protectedPage', { to }));
     const rest = unprotectForThisRun(to);
     log.warn('promote', `защита страницы ${to} снята на этот вызов по флагу --unprotect`, { at: new Date().toISOString(), remainingProtected: rest });
   }
@@ -452,7 +461,7 @@ export async function promote(ctx, opts) {
   const liveInv = await cycle.inventory(liveDriver, to, { baseDir });
   const current = working.snap.inventory.map((r) => String(r.recordid));
   const baseOrder = (expected.sortFrom || current).filter((id) => !expected.created.has(id));
-  if (liveInv.length !== baseOrder.length) await stop('LIVE_CHANGED', `живая страница изменилась между бэкапом и накатом: блоков ${liveInv.length}, ожидалось ${baseOrder.length}`);
+  if (liveInv.length !== baseOrder.length) await stop('LIVE_CHANGED', msg('promote.liveChanged', { live: liveInv.length, expected: baseOrder.length }));
   const mapping = new Map(baseOrder.map((id, i) => [id, String(liveInv[i].recordid)]));
   for (const [k, rec] of verified.entries()) {
     const { path, plan } = opts.plans[k];
@@ -462,7 +471,7 @@ export async function promote(ctx, opts) {
     log.info('promote', `шаг 4: накат плана ${k + 1}/${opts.plans.length} на ${to}`, { ops: remapped.ops.length, plan: remappedPath });
     const r = await cycle.apply(liveDriver, remapped, { baseDir, planPath: remappedPath, dryRun: Boolean(opts.dryRun), noShot: opts.noShot });
     report.applied.push({ plan: planSlug(path, plan), written: r.written, verify: r.verify.length, created: r.created, journal: r.journal, dryRun: r.dryRun });
-    if (r.verify.length) await stop('VERIFY_FAILED', `накат плана ${planSlug(path, plan)} на ${to}: verify ${r.verify.length} расхождений`, { verify: r.verify.slice(0, 10) });
+    if (r.verify.length) await stop('VERIFY_FAILED', msg('promote.verifyFailed', { name: planSlug(path, plan), to, count: r.verify.length }), { verify: r.verify.slice(0, 10) });
     // Созданные планом блоки: recordid на копии (из журнала) → recordid на живой (из apply).
     const createdOnCopy = (rec.ops || []).filter((o) => o.kind === 'create');
     for (const c of r.created || []) {
@@ -480,9 +489,9 @@ export async function promote(ctx, opts) {
 /** Читает планы для promote: --plan и позиционные пути. */
 export function readPlans(paths) {
   return paths.map((path) => {
-    if (!existsSync(path)) throw new PromoteError('PLAN_NOT_FOUND', `план не найден: ${path}`);
+    if (!existsSync(path)) throw new PromoteError('PLAN_NOT_FOUND', msg('promote.planNotFound', { path }));
     const plan = JSON.parse(readFileSync(path, 'utf8'));
-    if (!plan.page) throw new PromoteError('BAD_PLAN', `план ${path}: нет поля page`);
+    if (!plan.page) throw new PromoteError('BAD_PLAN', msg('promote.planNoPage', { path }));
     return { path, plan };
   });
 }

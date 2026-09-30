@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setLogLevel } from '../lib/log.mjs';
 import { captureWidths, chunks, parseWidths, scaleMismatch } from '../shot.mjs';
+import { messageText } from '../lib/i18n.mjs';
 
 setLogLevel('ERROR');
 
@@ -64,14 +65,18 @@ test('chunks and parseWidths', () => {
   assert.deepEqual(chunks(7000), [{ y: 0, height: 6000 }, { y: 6000, height: 1000 }]);
   assert.deepEqual(parseWidths('1440,320'), [1440, 320]);
   assert.deepEqual(parseWidths(undefined), [1440, 320]);
-  assert.throws(() => parseWidths('10'), /BAD_WIDTHS/);
+  assert.throws(() => parseWidths('10'), (e) => e.code === 'BAD_WIDTHS' && e.key === 'shot.badWidths' && e.params.value === '10');
 });
 
 test('scaleMismatch accepts a scrollbar-wide viewport at scale 100% and refuses a zoomed frame', () => {
   assert.equal(scaleMismatch({ width: 1440, innerWidth: 1440, dpr: 1 }), null);
   assert.equal(scaleMismatch({ width: 1440, innerWidth: 1425, dpr: 1 }), null);
   const zoomed = scaleMismatch({ width: 1440, innerWidth: 1800, dpr: 0.8 });
-  assert.match(zoomed, /1800/);
-  assert.match(zoomed, /0\.8/);
-  assert.match(scaleMismatch({ width: 320, innerWidth: 400, dpr: 0.8 }), /400/);
+  assert.equal(zoomed.key, 'shot.scaleBoth');
+  assert.deepEqual(zoomed.params, { innerWidth: 1800, width: 1440, dpr: 0.8 });
+  assert.match(messageText(zoomed), /1800/);
+  assert.match(messageText(zoomed), /0\.8/);
+  assert.equal(scaleMismatch({ width: 320, innerWidth: 400, dpr: 1 }).key, 'shot.scaleWidth');
+  assert.equal(scaleMismatch({ width: 1440, innerWidth: 1440, dpr: 0.8 }).key, 'shot.scaleDpr');
+  assert.match(messageText(scaleMismatch({ width: 320, innerWidth: 400, dpr: 0.8 })), /400/);
 });

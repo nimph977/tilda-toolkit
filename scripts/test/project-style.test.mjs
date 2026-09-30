@@ -4,7 +4,8 @@ import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setLogLevel } from '../lib/log.mjs';
-import { desiredProjectSettings, fontBaseName, projectCssUrl, projectStyleFromCss, PROJECT_REASONS, weightFromLabel } from '../lib/project-style.mjs';
+import { msg } from '../lib/i18n.mjs';
+import { desiredProjectSettings, fontBaseName, projectCssUrl, projectReasonMessage, projectStyleFromCss, PROJECT_REASONS, weightFromLabel } from '../lib/project-style.mjs';
 import { applyProjectStyle, sameValue, STYLE_CONFIRM } from '../project-style.mjs';
 
 setLogLevel('ERROR');
@@ -35,10 +36,21 @@ test('desiredProjectSettings maps a custom font to a Tilda preset by font file n
   const d = desiredProjectSettings(projectStyleFromCss(CSS), { presets: ['Tilda Sans', 'Roboto', 'Montserrat'] });
   assert.deepEqual(d.values, { headlinefont: 'Montserrat', textfont: 'Montserrat', headlinefontweight: '600', headlinecolor: '#000000', textfontweight: '300', textcolor: '#000000', linkcolor: '#ff8562' });
   assert.deepEqual(d.fontAliases, { monserat: 'Montserrat' });
-  assert.ok(d.undecided.some((u) => u.key === 'myfonts_json' && u.reason === PROJECT_REASONS.fontsNotTransferred));
+  assert.ok(d.undecided.some((u) => u.key === 'myfonts_json' && u.code === 'fontsNotTransferred'));
   const none = desiredProjectSettings(projectStyleFromCss(CSS), { presets: ['Roboto'] });
   assert.equal(none.values.headlinefont, undefined);
-  assert.ok(none.undecided.some((u) => u.key === 'headlinefont' && u.reason === PROJECT_REASONS.noPreset('monserat')));
+  const noPreset = none.undecided.find((u) => u.key === 'headlinefont' && u.code === 'noPreset');
+  assert.deepEqual(noPreset.params, { family: 'monserat' });
+  assert.equal(noPreset.reason, 'font monserat: there is no Tilda preset with the same typeface — the project font stays', 'в файл идёт английский текст');
+  assert.deepEqual(projectReasonMessage(noPreset), msg(PROJECT_REASONS.noPreset, { family: 'monserat' }), 'для итога — Message');
+});
+
+test('a CSS without the rules gives named reasons in the result', () => {
+  const s = projectStyleFromCss('.other{color:red}');
+  assert.deepEqual(s.undecided, ['absentHeadline', 'absentText', 'absentLink']);
+  const d = desiredProjectSettings(s, { presets: [] });
+  assert.deepEqual(d.undecided.map((u) => u.code), ['absentHeadline', 'absentText', 'absentLink']);
+  assert.ok(d.undecided.every((u) => u.key === null && !/[А-Яа-яЁё]/.test(u.reason)));
 });
 
 test('weight labels and value comparison follow the settings form', () => {
@@ -75,8 +87,8 @@ function fakeDriver({ text = 'OK', drift = false, options = null } = {}) {
 test('applyProjectStyle refuses without confirmation, writes the rollback record first and reports other changes', async () => {
   const baseDir = mkdtempSync(join(tmpdir(), 'project-style-'));
   const desired = { values: { headlinefont: 'Montserrat', headlinecolor: '#000000' } };
-  await assert.rejects(applyProjectStyle(fakeDriver(), { desired, confirmed: false, projectid: '1' }, { baseDir }), /STYLE_NOT_CONFIRMED|нужен --confirm/);
-  await assert.rejects(applyProjectStyle(fakeDriver(), { desired, confirmed: true, confirm: 'нет', projectid: '1' }, { baseDir }), /нужен --confirm/);
+  await assert.rejects(applyProjectStyle(fakeDriver(), { desired, confirmed: false, projectid: '1' }, { baseDir }), { code: 'STYLE_NOT_CONFIRMED', key: 'projectStyle.notConfirmed' });
+  await assert.rejects(applyProjectStyle(fakeDriver(), { desired, confirmed: true, confirm: 'нет', projectid: '1' }, { baseDir }), { code: 'STYLE_NOT_CONFIRMED' });
 
   const d = fakeDriver();
   const r = await applyProjectStyle(d, { desired, confirmed: true, confirm: STYLE_CONFIRM, projectid: '1', now: '2026-01-01T00:00:00.000Z' }, { baseDir });
@@ -92,7 +104,7 @@ test('applyProjectStyle refuses without confirmation, writes the rollback record
   assert.ok(!same.calls.some((c) => Array.isArray(c)), 'нет изменений — нет записи');
 
   const bad = fakeDriver({ text: 'ERROR' });
-  await assert.rejects(applyProjectStyle(bad, { desired, confirmed: true, confirm: STYLE_CONFIRM, projectid: '1', now: '2026-01-01T00:00:01.000Z' }, { baseDir }), /SAVE_FAILED|не сохранены/);
+  await assert.rejects(applyProjectStyle(bad, { desired, confirmed: true, confirm: STYLE_CONFIRM, projectid: '1', now: '2026-01-01T00:00:01.000Z' }, { baseDir }), { code: 'SAVE_FAILED', key: 'projectStyle.saveFailed' });
   assert.ok(readdirSync(join(baseDir, 'project-settings', '1')).length >= 2, 'запись отката есть и при отказе');
 
   const drift = await applyProjectStyle(fakeDriver({ drift: true }), { desired, confirmed: true, confirm: STYLE_CONFIRM, projectid: '1', now: '2026-01-01T00:00:02.000Z' }, { baseDir });

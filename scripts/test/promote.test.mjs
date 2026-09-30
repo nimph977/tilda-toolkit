@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { comparePages, expectedChanges, remapPlan } from '../promote.mjs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { alignPages, comparePages, expectedChanges, remapPlan, writeJson } from '../promote.mjs';
 import { setLogLevel } from '../lib/log.mjs';
 
 setLogLevel('ERROR');
@@ -41,5 +44,20 @@ test('promotion remaps plan block identifiers to the target page and rejects unk
   const target = remapPlan(plan, '200001', mapping);
   assert.deepEqual([target.page, target.startAfter, target.ops[0].block.recordid, target.ops[1].moveBlock.recordid, target.ops[1].moveBlock.after, target.ops[2].setOrder], ['200001', '9001', '9001', '9002', '9001', ['9001', '9002']]);
   assert.equal(plan.page, '200002');
-  assert.throws(() => remapPlan({ page: '200002', ops: [{ block: { recordid: 'nope' } }] }, '200001', mapping), (error) => error.code === 'REMAP_FAILED');
+  assert.throws(() => remapPlan({ page: '200002', ops: [{ block: { recordid: 'nope' } }] }, '200001', mapping), (error) => error.code === 'REMAP_FAILED' && error.key === 'promote.remapFailed' && error.params.id === 'nope');
+});
+
+test('promotion problems are messages with a key, and the report file gets their English text', () => {
+  const backup = snapshot('300003', '8001');
+  const working = snapshot('200002', '7001', 'After');
+  const problem = comparePages(backup, working).problems[0];
+  assert.equal(problem.problem.key, 'promote.problem.elementFieldDiffers');
+  assert.equal(alignPages({ inventory: [] }, working).problems[0].problem.key, 'promote.problem.blockCountMismatch');
+  const dir = mkdtempSync(join(tmpdir(), 'promote-report-'));
+  try {
+    const file = writeJson(join(dir, 'report.json'), { problems: [problem] });
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).problems[0].problem, 'an element field differs');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

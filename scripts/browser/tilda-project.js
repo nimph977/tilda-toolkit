@@ -58,7 +58,7 @@
   const LOG = (level, fn, msg, data) => console[level](`[tilda-project.${fn}] ${msg}`, data === undefined ? '' : JSON.stringify(data));
 
   /** Маркер подтверждения публикации — тот же, что в scripts/page-ops.mjs (PUBLISH_CONFIRM). */
-  T.PUBLISH_CONFIRM = 'опубликовать';
+  T.PUBLISH_CONFIRM = 'publish';
   T.BLANK_EXAMPLE_PAGE = '1231';
 
   const looksLikeHtml = (text) => /^\s*<|<html|<!doctype/i.test(text.slice(0, 300));
@@ -71,18 +71,18 @@
    */
   const csrf = (fn) => {
     if (typeof getCSRF !== 'function') {
-      LOG('error', fn, 'getCSRF() нет на странице — это не редактор Тильды?');
+      LOG('error', fn, 'getCSRF() is missing on the page, is this a Tilda editor?');
       throw new Error(`NO_CSRF ${fn}`);
     }
     const value = String(getCSRF());
-    LOG('debug', fn, 'csrf', { kind: /^err\.|^notset$/.test(value) ? `заглушка «${value.trim()}» (meta#csrf пуста, как у самого редактора)` : 'токен', length: value.length });
+    LOG('debug', fn, 'csrf', { kind: /^err\.|^notset$/.test(value) ? `stub "${value.trim()}" (meta#csrf is empty, as in the editor itself)` : 'token', length: value.length });
     return value;
   };
 
   /** logHead=false — не писать начало ответа в консоль: в нём служебные ключи (listPages). */
   const post = async (url, params, fn, { logHead = true, logBody = true } = {}) => {
     const body = new URLSearchParams(params).toString();
-    LOG('debug', fn, 'запрос', { url, ...(logBody ? { body } : { bodyBytes: body.length }) });
+    LOG('debug', fn, 'request', { url, ...(logBody ? { body } : { bodyBytes: body.length }) });
     const r = await fetch(url, {
       method: 'POST',
       credentials: 'include',
@@ -91,10 +91,10 @@
     });
     const text = await r.text();
     if (looksLikeHtml(text)) {
-      LOG('error', fn, 'SESSION_LOST: вместо данных пришёл HTML (страница логина?)', { url, status: r.status });
+      LOG('error', fn, 'SESSION_LOST: got HTML instead of data (login page?)', { url, status: r.status });
       throw new Error(`SESSION_LOST ${url} status=${r.status}`);
     }
-    LOG('debug', fn, 'ответ', { status: r.status, bytes: text.length, ...(logHead ? { head: text.slice(0, 200) } : {}) });
+    LOG('debug', fn, 'response', { status: r.status, bytes: text.length, ...(logHead ? { head: text.slice(0, 200) } : {}) });
     return { status: r.status, text };
   };
 
@@ -107,17 +107,17 @@
    */
   T.listPages = async (projectid) => {
     projectid = String(projectid || window.projectid);
-    LOG('debug', 'listPages', 'запрос', { projectid });
+    LOG('debug', 'listPages', 'request', { projectid });
     const r = await post('/projects/get/getprojects/', { comm: 'getprojectslist', projectid }, 'listPages', { logHead: false });
     const emptyMarker = Boolean(document.querySelector('.td-project-nopages'));
-    LOG('info', 'listPages', 'ответ получен', { status: r.status, bytes: r.text.length, emptyMarker });
+    LOG('info', 'listPages', 'response received', { status: r.status, bytes: r.text.length, emptyMarker });
     return { source: 'api', status: r.status, text: r.text, emptyMarker };
   };
 
   /** В сессии с allow-списком записи (донор) операции уровня проекта запрещены целиком: у них нет pageid для проверки. */
   const assertProjectWritable = (fn) => {
     if (Array.isArray(T.writablePages)) {
-      LOG('error', fn, 'операция уровня проекта запрещена в сессии с allow-списком записи', { writablePages: T.writablePages });
+      LOG('error', fn, 'project-level operation is forbidden in a session with a write allowlist', { writablePages: T.writablePages });
       throw new Error(`WRITE_NOT_ALLOWED project (${fn})`);
     }
   };
@@ -127,7 +127,7 @@
     assertProjectWritable('duplicatePage');
     pageid = String(pageid || window.pageid);
     const r = await post('/projects/submit/', { comm: 'dublicatepage', pageid, csrf: csrf('duplicatePage') }, 'duplicatePage');
-    LOG('info', 'duplicatePage', 'ответ получен', { pageid, status: r.status, text: r.text.slice(0, 120) });
+    LOG('info', 'duplicatePage', 'response received', { pageid, status: r.status, text: r.text.slice(0, 120) });
     return { source: pageid, status: r.status, text: r.text };
   };
 
@@ -137,7 +137,7 @@
     projectid = String(projectid || window.projectid);
     examplepageid = String(examplepageid || T.BLANK_EXAMPLE_PAGE);
     const r = await post('/projects/submit/', { comm: 'addnewpagedublicateexample', projectid, examplepageid, folderid: '', csrf: csrf('createPage') }, 'createPage');
-    LOG('info', 'createPage', 'ответ получен', { projectid, examplepageid, status: r.status, text: r.text.slice(0, 120) });
+    LOG('info', 'createPage', 'response received', { projectid, examplepageid, status: r.status, text: r.text.slice(0, 120) });
     return { projectid, status: r.status, text: r.text };
   };
 
@@ -148,18 +148,18 @@
   T.publishPage = async (pageid, confirm) => {
     assertProjectWritable('publishPage');
     pageid = String(pageid || '');
-    if (!pageid) throw new Error('PUBLISH_NO_PAGE: страница не указана');
+    if (!pageid) throw new Error('PUBLISH_NO_PAGE: the page is not specified');
     if (confirm !== T.PUBLISH_CONFIRM) {
-      LOG('warn', 'publishPage', 'публикация без подтверждения — отказ до отправки запроса', { pageid });
+      LOG('warn', 'publishPage', 'publish without confirmation: refused before sending the request', { pageid });
       throw new Error(`PUBLISH_NOT_CONFIRMED ${pageid}`);
     }
     const r = await post('/page/publish/', { comm: 'pagepublish', pageid, csrf: csrf('publishPage'), returnjson: 'yes' }, 'publishPage');
-    LOG('info', 'publishPage', 'ответ получен', { pageid, status: r.status, text: r.text.slice(0, 200) });
+    LOG('info', 'publishPage', 'response received', { pageid, status: r.status, text: r.text.slice(0, 200) });
     return { pageid, status: r.status, text: r.text };
   };
 
   /** Маркер подтверждения назначения шапки/подвала — тот же, что в scripts/page-role.mjs (ROLE_CONFIRM). */
-  T.ROLE_CONFIRM = 'назначить';
+  T.ROLE_CONFIRM = 'assign';
   const ROLE_FIELDS = ['headerpageid', 'footerpageid', 'indexpageid'];
   /** Вкладка настроек, на которой есть select роли (проба 2026-09-24). */
   const ROLE_TAB = { headerpageid: 'ss_menu_header', footerpageid: 'ss_menu_header', indexpageid: 'ss_menu_index' };
@@ -185,10 +185,10 @@
     try {
       project = JSON.parse(r.text).project;
     } catch (e) {
-      LOG('error', 'readProjectSettings', 'ответ не JSON', { status: r.status, bytes: r.text.length });
+      LOG('error', 'readProjectSettings', 'response is not JSON', { status: r.status, bytes: r.text.length });
       throw new Error(`SETTINGS_PARSE_FAILED status=${r.status}`);
     }
-    if (!project || typeof project !== 'object') throw new Error('SETTINGS_PARSE_FAILED: нет project');
+    if (!project || typeof project !== 'object') throw new Error('SETTINGS_PARSE_FAILED: no project in the response');
     const fingerprints = {};
     for (const [name, value] of Object.entries(project)) {
       fingerprints[name] = await fingerprint(typeof value === 'string' ? value : JSON.stringify(value));
@@ -207,7 +207,7 @@
       footerOptions: options('footerpageid'),
       indexOptions: options('indexpageid'),
     };
-    LOG('info', 'readProjectSettings', 'настройки прочитаны', { count: result.count, headerpageid: result.headerpageid, footerpageid: result.footerpageid, indexpageid: result.indexpageid });
+    LOG('info', 'readProjectSettings', 'settings read', { count: result.count, headerpageid: result.headerpageid, footerpageid: result.footerpageid, indexpageid: result.indexpageid });
     return result;
   };
 
@@ -220,7 +220,7 @@
   T.setPageRoles = async ({ headerpageid, footerpageid, indexpageid, confirm } = {}) => {
     assertProjectWritable('setPageRoles');
     if (confirm !== T.ROLE_CONFIRM) {
-      LOG('warn', 'setPageRoles', 'назначение без подтверждения — отказ до изменения формы');
+      LOG('warn', 'setPageRoles', 'assignment without confirmation: refused before changing the form');
       throw new Error('ROLE_NOT_CONFIRMED');
     }
     const wanted = { headerpageid, footerpageid, indexpageid };
@@ -228,7 +228,7 @@
       const value = wanted[name];
       if (value === undefined || value === null) continue;
       const el = document.getElementById(name);
-      if (!el) throw new Error(`NO_CONTROL ${name}: откройте вкладку #tab=${ROLE_TAB[name]}`);
+      if (!el) throw new Error(`NO_CONTROL ${name}: open the tab #tab=${ROLE_TAB[name]}`);
       if (![...el.options].some((o) => o.value === String(value))) throw new Error(`NOT_IN_OPTIONS ${name} ${value}`);
     }
     for (const name of ROLE_FIELDS) {
@@ -241,8 +241,8 @@
     }
     const button = [...document.querySelectorAll('button[type="submit"]')]
       .find((b) => /Сохранить изменения/.test(b.textContent || '') && (b.offsetWidth || b.offsetHeight));
-    if (!button) throw new Error('NO_SAVE_BUTTON: кнопка «Сохранить изменения» не найдена');
-    LOG('info', 'setPageRoles', 'роли выставлены, сохранение', { headerpageid, footerpageid, indexpageid });
+    if (!button) throw new Error('NO_SAVE_BUTTON: the Save changes button was not found');
+    LOG('info', 'setPageRoles', 'roles set, saving', { headerpageid, footerpageid, indexpageid });
     button.click();
     return { clicked: true };
   };
@@ -260,10 +260,10 @@
     try {
       project = JSON.parse(r.text).project;
     } catch (e) {
-      LOG('error', 'readProjectStyle', 'ответ не JSON', { status: r.status, bytes: r.text.length });
+      LOG('error', 'readProjectStyle', 'response is not JSON', { status: r.status, bytes: r.text.length });
       throw new Error(`SETTINGS_PARSE_FAILED status=${r.status}`);
     }
-    if (!project || typeof project !== 'object') throw new Error('SETTINGS_PARSE_FAILED: нет project');
+    if (!project || typeof project !== 'object') throw new Error('SETTINGS_PARSE_FAILED: no project in the response');
     const values = {};
     for (const k of T.PROJECT_STYLE_KEYS) {
       const v = project[k];
@@ -275,7 +275,7 @@
       .filter((b) => /Выбрать|Выбрано/.test(b.textContent || ''))
       .map((b) => ((b.parentElement?.parentElement?.innerText || '').replace(/\s+/g, ' ').match(/Заголовки: (.+?) Текст: (.+?) Выбра/) || [])[1])
       .filter(Boolean);
-    LOG('info', 'readProjectStyle', 'оформление прочитано', { count: Object.keys(fingerprints).length, presets: presets.length });
+    LOG('info', 'readProjectStyle', 'style read', { count: Object.keys(fingerprints).length, presets: presets.length });
     return { values, fingerprints, count: Object.keys(fingerprints).length, presets };
   };
 
@@ -291,7 +291,7 @@
   T.uploadProjectFont = async ({ projectid, name, files, asHeadline = false, asText = false } = {}) => {
     assertProjectWritable('uploadProjectFont');
     projectid = String(projectid || window.projectid);
-    if (!name || !files || typeof files !== 'object' || !Object.keys(files).length) throw new Error('FONT_NO_FILES: нужны имя шрифта и хотя бы один файл');
+    if (!name || !files || typeof files !== 'object' || !Object.keys(files).length) throw new Error('FONT_NO_FILES: a font name and at least one file are required');
     const params = { comm: 'editprojectfontsupload', projectid };
     for (const w of T.FONT_WEIGHTS) {
       params[`myfont_${w}`] = String(files[w] || '');
@@ -302,7 +302,7 @@
     if (asText) params.set_ff_to_t = 'on';
     params.csrf = csrf('uploadProjectFont');
     const r = await post('/projects/submit/', params, 'uploadProjectFont', { logHead: true, logBody: false });
-    LOG('info', 'uploadProjectFont', 'ответ получен', { name, weights: Object.keys(files).length, asHeadline, asText, status: r.status, head: r.text.slice(0, 80) });
+    LOG('info', 'uploadProjectFont', 'response received', { name, weights: Object.keys(files).length, asHeadline, asText, status: r.status, head: r.text.slice(0, 80) });
     return { name, status: r.status, text: r.text };
   };
 
@@ -323,8 +323,8 @@
    */
   const submitPageSetting = async (fn, pageid, selectors, value, { timeoutMs, missingCode }) => {
     const opener = typeof td__showform__EditPageSettings === 'function' ? td__showform__EditPageSettings : typeof showformEditPageSettings === 'function' ? showformEditPageSettings : null;
-    if (!opener) throw new Error('NO_PAGE_SETTINGS: на странице нет обработчика окна настроек страницы');
-    LOG('debug', fn, 'открываю окно настроек', { pageid, length: value.length });
+    if (!opener) throw new Error('NO_PAGE_SETTINGS: the page has no handler for the page settings window');
+    LOG('debug', fn, 'opening the settings window', { pageid, length: value.length });
     opener(pageid);
     const deadline = Date.now() + timeoutMs;
     let input = null;
@@ -335,16 +335,16 @@
       input = selectors.map((s) => popup.querySelector(s)).find(Boolean) || null;
       if (input) break;
     }
-    if (!input) throw new Error(`${missingCode}: окно настроек страницы не открылось за отведённое время`);
+    if (!input) throw new Error(`${missingCode}: the page settings window did not open in time`);
     const pageInput = document.querySelector('#formpageedit [name="pageid"]');
-    if (pageInput && String(pageInput.value) !== pageid) throw new Error(`WRONG_PAGE_SETTINGS ${pageInput.value} вместо ${pageid}`);
+    if (pageInput && String(pageInput.value) !== pageid) throw new Error(`WRONG_PAGE_SETTINGS ${pageInput.value} instead of ${pageid}`);
     const previous = input.value;
     input.value = value;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
     const form = document.getElementById('formpageedit');
-    if (!form) throw new Error('NO_PAGE_FORM: формы formpageedit нет');
-    LOG('info', fn, 'форма заполнена, сохранение', { pageid, previousLength: previous.length, length: value.length });
+    if (!form) throw new Error('NO_PAGE_FORM: the formpageedit form is missing');
+    LOG('info', fn, 'form filled, saving', { pageid, previousLength: previous.length, length: value.length });
     if (typeof form.requestSubmit === 'function') form.requestSubmit();
     else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     return previous;
@@ -354,7 +354,7 @@
     assertProjectWritable('setPageTitle');
     pageid = String(pageid);
     title = String(title ?? '');
-    if (!title.trim()) throw new Error('TITLE_EMPTY: пустой заголовок');
+    if (!title.trim()) throw new Error('TITLE_EMPTY: the title is empty');
     if (title.length > T.TITLE_MAX) throw new Error(`TITLE_TOO_LONG ${title.length} > ${T.TITLE_MAX}`);
     if (typeof T.assertWritable === 'function') T.assertWritable(pageid, 'setPageTitle');
     const previous = await submitPageSetting('setPageTitle', pageid, ['#modalinputtitle', 'input[name="title"]'], title, { timeoutMs, missingCode: 'NO_TITLE_INPUT' });
@@ -369,7 +369,7 @@
     assertProjectWritable('setPageAlias');
     pageid = String(pageid);
     alias = String(alias ?? '');
-    if (!alias.trim()) throw new Error('ALIAS_EMPTY: пустой адрес');
+    if (!alias.trim()) throw new Error('ALIAS_EMPTY: the address is empty');
     if (typeof T.assertWritable === 'function') T.assertWritable(pageid, 'setPageAlias');
     const previous = await submitPageSetting('setPageAlias', pageid, ['#popup-ps-input-alias', 'input[name="alias"]'], alias, { timeoutMs, missingCode: 'NO_ALIAS_INPUT' });
     return { pageid, submitted: true, previous };
@@ -379,12 +379,12 @@
   T.clickSaveSettings = () => {
     assertProjectWritable('clickSaveSettings');
     const button = [...document.querySelectorAll('button')].find((b) => /Сохранить изменения/.test(b.textContent || '') && (b.offsetWidth || b.offsetHeight));
-    if (!button) throw new Error('NO_SAVE_BUTTON: кнопка «Сохранить изменения» не найдена');
+    if (!button) throw new Error('NO_SAVE_BUTTON: the Save changes button was not found');
     button.click();
     return { clicked: true };
   };
 
-  LOG('info', 'install', 'API установлен', { pageid: window.pageid, projectid: window.projectid });
+  LOG('info', 'install', 'API installed', { pageid: window.pageid, projectid: window.projectid });
   return {
     installed: ['duplicatePage', 'createPage', 'publishPage', 'listPages', 'readProjectSettings', 'setPageRoles', 'readProjectStyle', 'clickSaveSettings', 'uploadProjectFont', 'setPageTitle', 'setPageAlias'],
     pageid: window.pageid,

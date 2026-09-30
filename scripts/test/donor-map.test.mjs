@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setLogLevel } from '../lib/log.mjs';
+import { msg } from '../lib/i18n.mjs';
 import { MAP_REASONS, mapDonorPages, matchDonorPages, normalizeAlias, referencePath } from '../donor-map.mjs';
 
 setLogLevel('ERROR');
@@ -53,19 +54,19 @@ test('matchDonorPages matches by role, index and alias and names every reason', 
     ['HDR', '300001', 'role'], ['FTR', '300002', 'role'], ['P00', '300003', 'index'], ['P01', '300004', 'alias'],
   ]);
   assert.deepEqual(r.unmatched, [
-    { label: 'P02', reason: MAP_REASONS.noMatch('/nope') },
-    { label: 'P03', reason: MAP_REASONS.ambiguous('/dup', 2) },
-    { label: 'P04', reason: MAP_REASONS.missing },
-    { label: 'P05', reason: MAP_REASONS.noUrl },
+    { label: 'P02', code: 'noMatch', reason: msg(MAP_REASONS.noMatch, { path: '/nope' }) },
+    { label: 'P03', code: 'ambiguous', reason: msg(MAP_REASONS.ambiguous, { path: '/dup', n: 2 }) },
+    { label: 'P04', code: 'missing', reason: msg(MAP_REASONS.missing) },
+    { label: 'P05', code: 'noUrl', reason: msg(MAP_REASONS.noUrl) },
   ]);
   const p01 = r.site.pages.find((p) => p.label === 'P01');
   assert.equal(p01.donorTitle, 'About us');
   assert.equal(p01.pageid, '200003', 'pageid тестовой страницы не тронут');
   const byId = matchDonorPages({ pages: [{ label: 'P06', role: 'content', url: 'https://ref.test/page300004.html' }, { label: 'P07', role: 'content', url: 'https://ref.test/page300099.html' }] }, donorPages());
   assert.deepEqual(byId.matched.map((m) => [m.label, m.donorPageid, m.by]), [['P06', '300004', 'pageid']]);
-  assert.equal(byId.unmatched[0].reason, MAP_REASONS.noMatch('/page300099.html'));
+  assert.deepEqual(byId.unmatched[0].reason, msg(MAP_REASONS.noMatch, { path: '/page300099.html' }));
   const noHeader = matchDonorPages(site(), donorPages().filter((p) => p.role !== 'header'));
-  assert.equal(noHeader.unmatched.find((u) => u.label === 'HDR').reason, MAP_REASONS.noRole('header'));
+  assert.deepEqual(noHeader.unmatched.find((u) => u.label === 'HDR').reason, msg(MAP_REASONS.noRole, { role: 'header' }));
 });
 
 test('matchDonorPages removes a stale donorPageid when the donor page is gone', () => {
@@ -74,7 +75,7 @@ test('matchDonorPages removes a stale donorPageid when the donor page is gone', 
   const p01 = again.site.pages.find((p) => p.label === 'P01');
   assert.equal(p01.donorPageid, undefined);
   assert.equal(p01.donorTitle, undefined);
-  assert.equal(again.unmatched.find((u) => u.label === 'P01').reason, MAP_REASONS.noMatch('/About'));
+  assert.deepEqual(again.unmatched.find((u) => u.label === 'P01').reason, msg(MAP_REASONS.noMatch, { path: '/About' }));
 });
 
 test('mapDonorPages reads both files, writes site.json and refuses without the donor list', () => {

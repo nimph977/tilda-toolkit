@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
+import { msg } from './lib/i18n.mjs';
 import { catalogRoot } from './lib/paths.mjs';
 import { recordFields } from './lib/record-fields.mjs';
 import { refPaths } from './lib/reference-store.mjs';
@@ -181,11 +182,11 @@ export async function captureCatalog(
     const tplid = list[i];
     const last = i === list.length - 1;
     if (tplid === ZERO_TPLID) {
-      result.skipped.push({ tplid, reason: 'Zero Block не каталогизируется' });
+      result.skipped.push({ tplid, reason: msg('catalog.reason.zeroBlock') });
       continue;
     }
     if (!force && existsSync(catalogPath(tplid, opts))) {
-      result.skipped.push({ tplid, reason: 'уже снят' });
+      result.skipped.push({ tplid, reason: msg('catalog.reason.alreadyCaptured') });
       continue;
     }
 

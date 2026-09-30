@@ -95,7 +95,7 @@ export function find(pageid, needle, opts = {}) {
   // quiet — повторный поиск по той же странице (ссылки по ID донора): предупреждения уже сказаны первым поиском.
   const note = opts.quiet ? log.debug : log.warn;
   const live = opts.recordids ? new Set([...opts.recordids].map(String)) : liveRecordIds(baseDir, pageid);
-  if (!live) note('find', 'find: инвентаря нет — снимки не сверены с составом страницы (snapshot/inventory)', { pageid: String(pageid) });
+  if (!live) note('find', 'find: no inventory — snapshots were not checked against the page composition (snapshot/inventory)', { pageid: String(pageid) });
   const stale = [];
   const isLive = (recordid) => {
     if (!live || live.has(recordid)) return true;
@@ -115,7 +115,7 @@ export function find(pageid, needle, opts = {}) {
         if (typeof value !== 'string' || !containsNormalized(value, needle)) continue;
         if (isFormField(field)) {
           skippedForm.push({ kind: 'zero', recordid, key, field });
-          note('find', 'вхождение в поле формы пропущено', { recordid, key, field });
+          note('find', 'hit in a form field skipped', { recordid, key, field });
           continue;
         }
         hits.push({ kind: 'zero', recordid, key, elem_id: String(el.elem_id), elem_type: el.elem_type, field, value });
@@ -134,7 +134,7 @@ export function find(pageid, needle, opts = {}) {
       if (RECORD_SKIP.has(field) || typeof value !== 'string' || !containsNormalized(value, needle)) continue;
       if (isFormField(field)) {
         skippedForm.push({ kind: 'record', recordid, field });
-        note('find', 'вхождение в поле формы пропущено', { recordid, field });
+        note('find', 'hit in a form field skipped', { recordid, field });
         continue;
       }
       hits.push({ kind: 'record', recordid, tplid: String(rec.tplid || ''), field, value: decodeEntities(value) });
@@ -157,11 +157,11 @@ export function find(pageid, needle, opts = {}) {
     }
   }
   if (stale.length) {
-    note('find', `пропущено ${stale.length} снимков удалённых блоков (нет в инвентаре)`, { pageid: String(pageid) });
+    note('find', `skipped ${stale.length} snapshots of deleted blocks (not in the inventory)`, { pageid: String(pageid) });
     log.debug('find', 'снимки удалённых блоков', { recordids: stale });
   }
   const byBlock = new Set(hits.map((h) => h.recordid)).size;
-  (opts.quiet ? log.debug : log.info)('find', `найдено ${hits.length} вхождений в ${byBlock} блоках`, { pageid: String(pageid), blocks, skippedForm: skippedForm.length, skippedStale: stale.length });
+  (opts.quiet ? log.debug : log.info)('find', `found ${hits.length} hits in ${byBlock} blocks`, { pageid: String(pageid), blocks, skippedForm: skippedForm.length, skippedStale: stale.length });
   return { hits, skippedForm, blocks, skippedStale: stale.length };
 }
 

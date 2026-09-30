@@ -7,17 +7,23 @@
  * Чистые функции без сети и файловой системы.
  */
 import { createLogger } from './log.mjs';
+import { t } from './i18n.mjs';
 import { diffFeatures, shapeOf } from './markup-features.mjs';
 
 const log = createLogger('block-compare');
 
+/**
+ * Причины расхождения: имя → английский текст (данные в JSON сверки). В докладе причина
+ * переводится по ключу `report.compareReason.<имя>` на язык запуска; подстановки в словаре:
+ * `undecided` {field}, `substituted` {from, to}.
+ */
 export const COMPARE_REASONS = {
-  valueDiffers: 'значение настройки отличается',
-  undecided: (f) => `настройка ${f} не распознана картой`,
-  substituted: (a, b) => `шаблон ${a} заменён на ${b}`,
-  noMap: 'шаблон не откалиброван',
-  markupDiffers: 'разметка отличается — возможно, версия шаблона',
-  notBuilt: 'блок не собран',
+  valueDiffers: 'the setting value differs',
+  undecided: (f) => `setting ${f} is not recognized by the map`,
+  substituted: (a, b) => `template ${a} is replaced by ${b}`,
+  noMap: 'the template is not calibrated',
+  markupDiffers: 'the markup differs, possibly a template version',
+  notBuilt: 'the block is not built',
 };
 
 /**
@@ -86,50 +92,72 @@ export function compareBlock(ref, built, { map = null, substituted = null } = {}
   const common = refF.length - refOnly.length;
   const score = common / Math.max(1, refF.length);
   const counts = new Map();
-  const add = (reason) => counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  // Причина — имя из COMPARE_REASONS и подстановки; одинаковые (имя и подстановки) считаются вместе.
+  const add = (code, params = {}, text = COMPARE_REASONS[code]) => {
+    const id = `${code}|${JSON.stringify(params)}`;
+    const item = counts.get(id) ?? { code, params, text, count: 0 };
+    item.count += 1;
+    counts.set(id, item);
+  };
   if (refOnly.length) {
-    if (substituted) add(COMPARE_REASONS.substituted(substituted.from, substituted.to));
-    else if (!map) add(COMPARE_REASONS.noMap);
+    if (substituted) add('substituted', { from: substituted.from, to: substituted.to }, COMPARE_REASONS.substituted(substituted.from, substituted.to));
+    else if (!map) add('noMap');
     const builtShapes = new Set(builtOnly.map((f) => shapeOf(f).shape));
     for (const f of refOnly) {
       if (substituted || !map) continue;
       if (builtShapes.has(shapeOf(f).shape)) {
-        add(COMPARE_REASONS.valueDiffers);
+        add('valueDiffers');
         continue;
       }
       const field = fieldOfFeature(f, map);
-      add(field ? COMPARE_REASONS.undecided(field) : COMPARE_REASONS.markupDiffers);
+      if (field) add('undecided', { field }, COMPARE_REASONS.undecided(field));
+      else add('markupDiffers');
     }
   }
-  const reasons = [...counts.entries()].map(([r, c]) => (c > 1 ? `${r} ×${c}` : r));
-  return { common, refOnly, builtOnly, score, reasons };
+  const items = [...counts.values()];
+  const reasons = items.map((i) => (i.count > 1 ? `${i.text} ×${i.count}` : i.text));
+  return {
+    common, refOnly, builtOnly, score, reasons,
+    reasonCodes: items.map((i) => i.code),
+    reasonItems: items.map((i) => ({ code: i.code, params: i.params, count: i.count })),
+  };
 }
 
 const cell = (s) => String(s).replace(/\|/g, '\\|');
 const pct = (x) => `${Math.round(x * 100)}%`;
 
+/** Причина строки на языке доклада: по `reasonItems`, а строка без них — как записана. */
+function rowReasons(row, lang) {
+  if (!Array.isArray(row.reasonItems)) return row.reasons ?? [];
+  return row.reasonItems.map((i) => {
+    const text = t(lang, 'report.compareReason.' + i.code, i.params);
+    return i.count > 1 ? `${text} ×${i.count}` : text;
+  });
+}
+
 /**
- * Доклад сверки в Markdown.
- * @param {{ label: string, rows: Array<{order, tplid, common?, refOnly?, builtOnly?, score?, reasons?, notBuilt?: string}>, builtOnly?: object[], at?: string }} input
+ * Доклад сверки в Markdown на языке `lang`.
+ * @param {{ label: string, rows: Array<{order, tplid, common?, refOnly?, builtOnly?, score?, reasons?, reasonItems?, notBuilt?: string}>, builtOnly?: object[], at?: string, lang?: string }} input
  */
-export function renderCompareReport({ label, rows, builtOnly = [], at = '' }) {
+export function renderCompareReport({ label, rows, builtOnly = [], at = '', lang = 'en' }) {
   const paired = rows.filter((r) => !r.notBuilt);
   const mean = paired.length ? paired.reduce((s, r) => s + r.score, 0) / paired.length : 0;
   const lines = [
-    `# Сверка разметки ${label}`,
+    t(lang, 'report.compare.title', { label }),
     '',
-    `${at ? `Снято: ${at}. ` : ''}Блоков референса: ${rows.length}, собрано в пару: ${paired.length}, не собрано: ${rows.length - paired.length}, лишних у сборки: ${builtOnly.length}. Средняя доля совпавших признаков: ${pct(mean)}.`,
+    ...(at ? [t(lang, 'report.takenAt', { at }), `<!-- taken-at: ${at} -->`, ''] : []),
+    t(lang, 'report.compare.summary', { blocks: rows.length, paired: paired.length, notBuilt: rows.length - paired.length, extra: builtOnly.length, mean: pct(mean) }),
     '',
-    '| # | Шаблон | Совпало | Только у референса | Только у сборки | Причины |',
+    t(lang, 'report.compare.tableHead'),
     '| --- | --- | --- | --- | --- | --- |',
   ];
   for (const r of rows) {
-    if (r.notBuilt) lines.push(`| ${r.order} | ${r.tplid} | — | — | — | ${cell(`${COMPARE_REASONS.notBuilt}${r.notBuilt === true ? '' : `: ${r.notBuilt}`}`)} |`);
-    else lines.push(`| ${r.order} | ${r.tplid} | ${pct(r.score)} (${r.common}) | ${r.refOnly} | ${r.builtOnly} | ${cell(r.reasons.join('; ') || '—')} |`);
+    if (r.notBuilt) lines.push(`| ${r.order} | ${r.tplid} | — | — | — | ${cell(`${t(lang, 'report.compareReason.notBuilt')}${r.notBuilt === true ? '' : `: ${r.notBuilt}`}`)} |`);
+    else lines.push(`| ${r.order} | ${r.tplid} | ${pct(r.score)} (${r.common}) | ${r.refOnly} | ${r.builtOnly} | ${cell(rowReasons(r, lang).join('; ') || '—')} |`);
   }
   if (builtOnly.length) {
-    lines.push('', `Лишние блоки сборки (шаблоны): ${builtOnly.map((b) => b.tplid).join(', ')}.`);
+    lines.push('', t(lang, 'report.compare.builtOnly', { tplids: builtOnly.map((b) => b.tplid).join(', ') }));
   }
-  lines.push('', 'Причины «разметка отличается» и «настройка не распознана картой» — кандидаты на ручную проверку по снимкам 1440 и 320.', '');
+  lines.push('', t(lang, 'report.compare.candidates'), '');
   return lines.join('\n');
 }

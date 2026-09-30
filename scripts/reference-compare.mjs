@@ -13,6 +13,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
+import { msg } from './lib/i18n.mjs';
+import { ToolError } from './lib/tool-error.mjs';
 import { splitRecords } from './lib/html-blocks.mjs';
 import { extractFeatures } from './lib/markup-features.mjs';
 import { ownChunk, recordZones } from './lib/reference-structure.mjs';
@@ -24,10 +26,7 @@ import { prepareReferencePlan } from './reference-plan.mjs';
 const log = createLogger('reference-compare');
 
 function compareError(message, code, exitCode = 1) {
-  const e = new Error(message);
-  e.code = code;
-  e.exitCode = exitCode;
-  return e;
+  return new ToolError(code, message, { exitCode });
 }
 
 /** Блоки HTML собранной страницы зоны `content` с признаками. */
@@ -40,15 +39,15 @@ export function builtBlocksFromHtml(html) {
 
 /**
  * @param {{ pageRawHtml: Function, publishedHtml?: Function }} driver
- * @param {{ slug: string, label: string, published?: boolean, url?: string, baseDir?: string, catalogDir?: string, now?: string }} params
+ * @param {{ slug: string, label: string, published?: boolean, url?: string, baseDir?: string, catalogDir?: string, now?: string, lang?: string }} params — `lang`: язык доклада в файл (передаёт граница CLI)
  */
-export async function compareReferencePage(driver, { slug, label, published = false, url, baseDir, catalogDir, substitutes = {}, now = new Date().toISOString() }) {
-  if (published && !url) throw compareError('reference compare --published: нужен --url <адрес опубликованной страницы> (адрес даёт владелец)', 'NEED_PUBLISHED_URL', 2);
+export async function compareReferencePage(driver, { slug, label, published = false, url, baseDir, catalogDir, substitutes = {}, now = new Date().toISOString(), lang = 'en' }) {
+  if (published && !url) throw compareError(msg('referenceCompare.needPublishedUrl'), 'NEED_PUBLISHED_URL', 2);
   // `substitutes` поверх site.json: donor verify передаёт тождественные пары — перенос через буфер несёт исходные шаблоны.
   const { built: plan, resolved, structure } = prepareReferencePlan({ slug, source: label, baseDir, catalogDir, substitutes });
   const refBlocks = (structure.blocks ?? []).filter((b) => (b.zone ?? 'content') === resolved.zone);
   if (refBlocks.some((b) => !Array.isArray(b.features))) {
-    throw compareError(`в структуре ${label} нет признаков разметки — сначала reference structure --slug ${slug}`, 'NO_FEATURES', 1);
+    throw compareError(msg('referenceCompare.noFeatures', { label, slug }), 'NO_FEATURES', 1);
   }
   const { html } = published ? await driver.publishedHtml(url) : await driver.pageRawHtml();
   const builtBlocks = builtBlocksFromHtml(html);
@@ -59,15 +58,19 @@ export async function compareReferencePage(driver, { slug, label, published = fa
     if (!(tplid in maps)) maps[tplid] = loadSettingsMap(tplid, { baseDir: catalogDir });
     return maps[tplid];
   };
-  const skippedByOrder = new Map((plan.skipped ?? []).map((s) => [s.order, s.reason]));
+  const skippedByOrder = new Map((plan.skipped ?? []).map((s) => [s.order, s]));
   const rows = [];
   for (const { ref, built } of pairs) {
     const from = String(ref.tplid);
     const to = String(subs[from] ?? from);
     const c = compareBlock(ref, built, { map: from === to ? mapOf(from) : null, substituted: from !== to ? { from, to } : null });
-    rows.push({ order: ref.order, tplid: from === to ? from : `${from}→${to}`, common: c.common, refOnly: c.refOnly.length, builtOnly: c.builtOnly.length, score: c.score, reasons: c.reasons });
+    rows.push({ order: ref.order, tplid: from === to ? from : `${from}→${to}`, common: c.common, refOnly: c.refOnly.length, builtOnly: c.builtOnly.length, score: c.score, reasons: c.reasons, reasonCodes: c.reasonCodes, reasonItems: c.reasonItems });
   }
-  for (const ref of refOnly) rows.push({ order: ref.order, tplid: String(ref.tplid), notBuilt: skippedByOrder.get(ref.order) ?? true });
+  // Причина пропуска блока плана — английский текст (данные) и код; в сверке они идут в строку как есть.
+  for (const ref of refOnly) {
+    const skip = skippedByOrder.get(ref.order);
+    rows.push({ order: ref.order, tplid: String(ref.tplid), notBuilt: skip?.reason ?? true, ...(skip?.code ? { notBuiltCode: skip.code } : {}) });
+  }
   rows.sort((a, b) => a.order - b.order);
   const paired = rows.filter((r) => !r.notBuilt);
   const meanScore = paired.length ? paired.reduce((s, r) => s + r.score, 0) / paired.length : 0;
@@ -78,7 +81,8 @@ export async function compareReferencePage(driver, { slug, label, published = fa
   const report = join(root, 'reports', `${label}.auto.md`);
   const data = { label, at: now, source: published ? 'published' : 'preview', blocks: refBlocks.length, pairs: pairs.length, meanScore, rows, builtOnly: builtOnly.map((b) => b.tplid) };
   writeFileSync(path, JSON.stringify(data, null, 2) + '\n', 'utf8');
-  writeFileSync(report, renderCompareReport({ label, rows, builtOnly, at: now }), 'utf8');
+  writeFileSync(report, renderCompareReport({ label, rows, builtOnly, at: now, lang }), 'utf8');
+  log.debug('compareReferencePage', 'report language', { lang, file: report.replace(/\\/g, '/') });
   log.info('compareReferencePage', 'сверка', { label, pairs: pairs.length, notBuilt: refOnly.length, extra: builtOnly.length, meanScore: Math.round(meanScore * 100) / 100 });
   return { label, blocks: refBlocks.length, pairs: pairs.length, meanScore, refOnly: refOnly.length, builtOnly: builtOnly.length, path, report, rows };
 }

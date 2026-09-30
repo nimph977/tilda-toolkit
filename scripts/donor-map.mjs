@@ -13,23 +13,25 @@ import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
 import { baselineDir } from './lib/paths.mjs';
 import { readSite, writeSite } from './lib/reference-store.mjs';
+import { messageText, msg } from './lib/i18n.mjs';
+import { ToolError } from './lib/tool-error.mjs';
 
 const log = createLogger('donor-map');
 
+/**
+ * Причины несопоставления: имя → ключ словаря. Подстановки: `noRole` {role}, `noMatch` {path},
+ * `ambiguous` {path, n}. В результате причина — `Message` и рядом её имя в поле `code`.
+ */
 export const MAP_REASONS = {
-  noUrl: 'у метки нет адреса референса (шапка/подвал сопоставляются по роли)',
-  noRole: (role) => `у донора нет страницы с ролью ${role}`,
-  noMatch: (path) => `у донора нет страницы с адресом ${path}`,
-  ambiguous: (path, n) => `адресу ${path} соответствует ${n} страниц донора`,
-  missing: 'страница пропала из слепка (missing)',
+  noUrl: 'donorMap.reason.noUrl',
+  noRole: 'donorMap.reason.noRole',
+  noMatch: 'donorMap.reason.noMatch',
+  ambiguous: 'donorMap.reason.ambiguous',
+  missing: 'donorMap.reason.missing',
 };
 
-function mapError(message, code, exitCode = 1) {
-  const err = new Error(message);
-  err.code = code;
-  err.exitCode = exitCode;
-  return err;
-}
+/** Несопоставленная метка: причина по имени из `MAP_REASONS` с подстановками. */
+const unmatchedBy = (code, params) => ({ code, reason: msg(MAP_REASONS[code], params) });
 
 /** Путь страницы референса для сопоставления: pathname без завершающего "/", "" для главной; null если url нет или битый. */
 export function referencePath(url) {
@@ -58,27 +60,27 @@ export function normalizeAlias(alias) {
 const byRole = (donorPages, role) => donorPages.filter((p) => p.role === role);
 
 function matchOne(entry, donorPages) {
-  if (entry.missing) return { reason: MAP_REASONS.missing };
+  if (entry.missing) return unmatchedBy('missing');
   if (entry.role === 'header' || entry.role === 'footer') {
     const found = byRole(donorPages, entry.role);
-    return found.length ? { page: found[0], by: 'role' } : { reason: MAP_REASONS.noRole(entry.role) };
+    return found.length ? { page: found[0], by: 'role' } : unmatchedBy('noRole', { role: entry.role });
   }
   const path = referencePath(entry.url);
-  if (path === null) return { reason: MAP_REASONS.noUrl };
+  if (path === null) return unmatchedBy('noUrl');
   if (path === '') {
     const found = byRole(donorPages, 'index');
-    return found.length ? { page: found[0], by: 'index' } : { reason: MAP_REASONS.noRole('index') };
+    return found.length ? { page: found[0], by: 'index' } : unmatchedBy('noRole', { role: 'index' });
   }
   // Страница без alias живёт по адресу /page<pageid>.html — ID донора прямо в пути.
   const byId = path.match(/^\/page(\d+)\.html$/i);
   if (byId) {
     const found = donorPages.filter((p) => String(p.pageid) === byId[1]);
-    return found.length ? { page: found[0], by: 'pageid' } : { reason: MAP_REASONS.noMatch(path) };
+    return found.length ? { page: found[0], by: 'pageid' } : unmatchedBy('noMatch', { path });
   }
   const wanted = normalizeAlias(path);
   const candidates = donorPages.filter((p) => normalizeAlias(p.alias) === wanted);
-  if (candidates.length === 0) return { reason: MAP_REASONS.noMatch(path) };
-  if (candidates.length > 1) return { reason: MAP_REASONS.ambiguous(path, candidates.length) };
+  if (candidates.length === 0) return unmatchedBy('noMatch', { path });
+  if (candidates.length > 1) return unmatchedBy('ambiguous', { path, n: candidates.length });
   return { page: candidates[0], by: 'alias' };
 }
 
@@ -101,8 +103,8 @@ export function matchDonorPages(site, donorPages) {
     } else {
       delete entry.donorPageid;
       delete entry.donorTitle;
-      unmatched.push({ label: entry.label, reason: r.reason });
-      log.warn('matchDonorPages', 'метка без пары', { label: entry.label, reason: r.reason });
+      unmatched.push({ label: entry.label, code: r.code, reason: r.reason });
+      log.warn('matchDonorPages', 'метка без пары', { label: entry.label, reason: messageText(r.reason) });
     }
   }
   log.info('matchDonorPages', 'сопоставлено', { matched: matched.length, unmatched: unmatched.length });
@@ -112,7 +114,7 @@ export function matchDonorPages(site, donorPages) {
 /** Перечень страниц донора из файла `donor pages` (`pages/<donorProjectId>.json`). */
 export function readDonorPages(donorProjectId, { pagesDir } = {}) {
   const file = join(pagesDir ?? join(baselineDir(), 'pages'), `${donorProjectId}.json`);
-  if (!existsSync(file)) throw mapError(`перечня страниц донора нет (${file.replace(/\\/g, '/')}): сначала donor pages`, 'NO_DONOR_PAGES', 1);
+  if (!existsSync(file)) throw new ToolError('NO_DONOR_PAGES', msg('donorMap.noDonorPages', { file: file.replace(/\\/g, '/') }));
   const data = JSON.parse(readFileSync(file, 'utf8'));
   const pages = Array.isArray(data.pages) ? data.pages : [];
   log.debug('readDonorPages', 'перечень донора прочитан', { file: file.replace(/\\/g, '/'), pages: pages.length, captured: data.captured });
@@ -122,7 +124,7 @@ export function readDonorPages(donorProjectId, { pagesDir } = {}) {
 /** Файловая: читает site.json и перечень донора, пишет site.json, возвращает итог matchDonorPages + path. */
 export function mapDonorPages({ slug, donorProjectId, baseDir, pagesDir }) {
   const site = readSite(slug, { baseDir });
-  if (!site) throw mapError(`карты сайта ${slug} нет: сначала reference pages --slug ${slug}`, 'NO_SITE', 1);
+  if (!site) throw new ToolError('NO_SITE', msg('donorMap.noSite', { slug }));
   const donorPages = readDonorPages(donorProjectId, { pagesDir });
   const result = matchDonorPages(site, donorPages);
   const path = writeSite(slug, result.site, { baseDir });

@@ -8,6 +8,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
+import { msg } from './lib/i18n.mjs';
+import { ToolError } from './lib/tool-error.mjs';
 import { baselineDir } from './lib/paths.mjs';
 import { cliHint } from './lib/site.mjs';
 import { assertSlug, assignLabels, isLabel, newSite, readManifest, readSite, refPaths, resolveSource, writeSite } from './lib/reference-store.mjs';
@@ -16,10 +18,7 @@ import { collectUrls } from './link-check.mjs';
 const log = createLogger('reference-site');
 
 function siteError(message, code, exitCode) {
-  const err = new Error(message);
-  err.code = code;
-  err.exitCode = exitCode;
-  return err;
+  return new ToolError(code, message, { exitCode });
 }
 
 /** Есть ли в структурах слепка блоки шапки и подвала (`counts.zones`). */
@@ -52,17 +51,17 @@ const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function createSitePages(driver, { slug, projectid, delayMs = SITE_CREATE_DELAY_MS, sleep = defaultSleep, baseDir } = {}) {
   assertSlug(slug);
   const site = readSite(slug, { baseDir });
-  if (!site) throw siteError(`карты сайта ${slug} нет: сначала reference pages --slug ${slug}`, 'NO_SITE', 1);
+  if (!site) throw siteError(msg('referenceSite.noSite', { slug }), 'NO_SITE', 1);
   const pid = String(projectid);
   if (site.projectid && String(site.projectid) !== pid) {
     log.error('createSitePages', 'карта сайта создана для другого проекта', { slug, siteProject: String(site.projectid), projectid: pid });
-    throw siteError(`карта сайта ${slug} создана для другого проекта (${site.projectid}), а не для ${pid}`, 'SITE_PROJECT_MISMATCH', 1);
+    throw siteError(msg('referenceSite.projectMismatch', { slug, projectid: site.projectid, pid }), 'SITE_PROJECT_MISMATCH', 1);
   }
   const todo = site.pages.filter((p) => !p.pageid && !p.missing);
   const skipped = site.pages.filter((p) => p.pageid).map((p) => p.label);
   if (todo.length > SITE_CREATE_GUARD) {
     log.error('createSitePages', 'страниц к созданию больше предохранителя', { todo: todo.length, guard: SITE_CREATE_GUARD });
-    throw siteError(`к созданию ${todo.length} страниц — больше предохранителя ${SITE_CREATE_GUARD} (лимит Tilda 100 в сутки)`, 'SITE_CREATE_GUARD', 1);
+    throw siteError(msg('referenceSite.createGuard', { count: todo.length, guard: SITE_CREATE_GUARD }), 'SITE_CREATE_GUARD', 1);
   }
   site.projectid = pid;
   let path = writeSite(slug, site, { baseDir });
@@ -102,12 +101,25 @@ export async function createSitePages(driver, { slug, projectid, delayMs = SITE_
 
 /** Виды нарушений проверки ссылок собранной страницы. */
 export const AUDIT_KINDS = {
-  referenceDomain: 'ссылка на домен референса',
-  unknownPage: 'ссылка на страницу, которой нет в проекте',
-  previewNoPage: 'ссылка предпросмотра без pageid',
-  noAliasPage: 'относительный адрес без страницы в проекте',
-  donorPage: 'ссылка на страницу донора по ID — donor links',
+  referenceDomain: 'referenceDomain',
+  unknownPage: 'unknownPage',
+  previewNoPage: 'previewNoPage',
+  noAliasPage: 'noAliasPage',
+  donorPage: 'donorPage',
 };
+
+/**
+ * Сообщение с названием вида нарушения для итога и докладов; неизвестный вид возвращается
+ * как есть.
+ */
+export function auditKindMessage(kind) {
+  if (kind === AUDIT_KINDS.referenceDomain) return msg('referenceSite.auditKind.referenceDomain');
+  if (kind === AUDIT_KINDS.unknownPage) return msg('referenceSite.auditKind.unknownPage');
+  if (kind === AUDIT_KINDS.previewNoPage) return msg('referenceSite.auditKind.previewNoPage');
+  if (kind === AUDIT_KINDS.noAliasPage) return msg('referenceSite.auditKind.noAliasPage');
+  if (kind === AUDIT_KINDS.donorPage) return msg('referenceSite.auditKind.donorPage');
+  return kind;
+}
 
 /** Адрес страницы для сверки: без ведущих и завершающих "/", нижний регистр, с ведущим "/". */
 const aliasPath = (alias) => `/${String(alias ?? '').trim().replace(/^\/+|\/+$/g, '').toLowerCase()}`;
@@ -191,16 +203,16 @@ export function auditLinks(html, { baseUrl, referenceHost, knownPageIds, knownAl
  */
 export async function auditPage(driver, { slug, label, projectid, baseDir, pagesFile }) {
   assertSlug(slug);
-  if (!isLabel(label)) throw siteError(`reference audit: нужна метка карты сайта, получено ${JSON.stringify(label)}`, 'LABEL_REQUIRED', 2);
+  if (!isLabel(label)) throw siteError(msg('referenceSite.labelRequired', { label: JSON.stringify(label) }), 'LABEL_REQUIRED', 2);
   const site = readSite(slug, { baseDir });
-  if (!site) throw siteError(`карты сайта ${slug} нет: сначала reference pages --slug ${slug}`, 'NO_SITE', 1);
+  if (!site) throw siteError(msg('referenceSite.noSite', { slug }), 'NO_SITE', 1);
   const entry = resolveSource(site, label);
-  if (!entry) throw siteError(`метки ${label} нет в карте сайта ${slug}`, 'UNKNOWN_LABEL', 2);
-  if (!entry.pageid) throw siteError(`у метки ${label} нет pageid: сначала reference pages --slug ${slug} --create`, 'NO_PAGEID', 1);
+  if (!entry) throw siteError(msg('referenceSite.unknownLabel', { label, slug }), 'UNKNOWN_LABEL', 2);
+  if (!entry.pageid) throw siteError(msg('referenceSite.noPageid', { label, slug }), 'NO_PAGEID', 1);
   const manifest = readManifest(slug, { baseDir });
-  if (!manifest) throw siteError(`слепок ${slug} не найден: сначала reference fetch`, 'NO_MANIFEST', 1);
+  if (!manifest) throw siteError(msg('referenceSite.noManifest', { slug }), 'NO_MANIFEST', 1);
   const file = pagesFile || join(baselineDir(), 'pages', `${projectid}.json`);
-  if (!existsSync(file)) throw siteError(`перечня страниц проекта нет: сначала ${cliHint('page list')}`, 'NO_PAGE_LIST', 1);
+  if (!existsSync(file)) throw siteError(msg('referenceSite.noPageList', { hint: cliHint('page list') }), 'NO_PAGE_LIST', 1);
   const list = JSON.parse(readFileSync(file, 'utf8'));
   const knownPageIds = (list.pages ?? []).map((p) => String(p.pageid));
   const knownAliases = (list.pages ?? []).filter((p) => String(p.alias ?? '').trim()).map((p) => aliasPath(p.alias));
@@ -220,7 +232,7 @@ export async function auditPage(driver, { slug, label, projectid, baseDir, pages
 export function syncSite({ slug, baseDir }) {
   assertSlug(slug);
   const manifest = readManifest(slug, { baseDir });
-  if (!manifest) throw siteError(`слепок ${slug} не найден: сначала reference fetch`, 'NO_MANIFEST', 1);
+  if (!manifest) throw siteError(msg('referenceSite.noManifest', { slug }), 'NO_MANIFEST', 1);
   const paths = refPaths(slug, { baseDir });
   const { header, footer } = zonesPresent(paths);
   const site = readSite(slug, { baseDir }) || newSite(slug);

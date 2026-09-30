@@ -23,11 +23,11 @@ export const MAP_VERSION = 1;
 
 /** Причины пропуска поля калибровкой. */
 export const CALIBRATION_REASONS = {
-  unknownType: (t) => `тип поля «${t || 'пусто'}» неизвестен словарю калибровки`,
-  jsonKeyUntyped: (k) => `ключ JSON «${k}» без вида в JSON_KEY_KIND`,
-  noSignal: 'значение не меняет разметку предпросмотра',
-  unstable: 'пробы дали разные признаки',
-  previewFailed: (e) => `предпросмотр не получен: ${e}`,
+  unknownType: (t) => ({ code: 'calibrationUnknownType', reason: `field type "${t || 'empty'}" is unknown to the calibration dictionary` }),
+  jsonKeyUntyped: (k) => ({ code: 'calibrationJsonKeyUntyped', reason: `JSON key "${k}" has no kind in JSON_KEY_KIND` }),
+  noSignal: { code: 'calibrationNoSignal', reason: 'the value does not change the preview markup' },
+  unstable: { code: 'calibrationUnstable', reason: 'the probes gave different features' },
+  previewFailed: (e) => ({ code: 'calibrationPreviewFailed', reason: `no preview received: ${e}` }),
 };
 
 /** Пробные значения по виду поля. */
@@ -99,7 +99,7 @@ export function probeVariants(schema, current = {}) {
         for (const key of spec.jsonFields || []) {
           const kind = jsonKeyKind(key);
           if (!kind) {
-            skipped.push({ field, key, reason: CALIBRATION_REASONS.jsonKeyUntyped(key) });
+            skipped.push({ field, key, ...CALIBRATION_REASONS.jsonKeyUntyped(key) });
             continue;
           }
           const curKey = String(base[key] ?? '');
@@ -108,7 +108,7 @@ export function probeVariants(schema, current = {}) {
         break;
       }
       default:
-        skipped.push({ field, reason: CALIBRATION_REASONS.unknownType(spec.type) });
+        skipped.push({ field, ...CALIBRATION_REASONS.unknownType(spec.type) });
     }
   }
   log.debug('probeVariants', 'варианты', { variants: variants.length, skipped: skipped.length });
@@ -249,7 +249,7 @@ export function buildSettingsMap({ tplid, schema, baseFeatures = [], observation
   const B = baseFeatures.filter((f) => !noise.has(f));
   const fields = {};
   const skipped = [...preSkipped];
-  for (const f of failed) skipped.push({ field: f.field, ...(f.key ? { key: f.key } : {}), reason: CALIBRATION_REASONS.previewFailed(f.error) });
+  for (const f of failed) skipped.push({ field: f.field, ...(f.key ? { key: f.key } : {}), ...CALIBRATION_REASONS.previewFailed(f.error) });
   const groups = new Map();
   for (const o of observations) {
     const id = o.key ? `${o.field}\u0000${o.key}` : o.field;
@@ -267,7 +267,7 @@ export function buildSettingsMap({ tplid, schema, baseFeatures = [], observation
       d.added.forEach((f) => V.add(f));
       d.removed.forEach((f) => V.add(f));
     }
-    const miss = () => skipped.push({ field, ...(key ? { key } : {}), reason: CALIBRATION_REASONS.noSignal });
+    const miss = () => skipped.push({ field, ...(key ? { key } : {}), ...CALIBRATION_REASONS.noSignal });
     if (!V.size) {
       miss();
       continue;

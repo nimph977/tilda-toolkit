@@ -35,9 +35,9 @@ export function labelText(rec) {
 
 /** Причина, по которой блок не подписан на карте. */
 export function unrenderedReason(rec, rect) {
-  if (rec.hidden) return 'скрыт в редакторе';
-  if (!rect) return 'нет на виде страницы';
-  if (rect.height < MIN_VISIBLE_HEIGHT) return `высота ${Math.round(rect.height)} px (pop-up или служебный блок)`;
+  if (rec.hidden) return 'hidden in the editor';
+  if (!rect) return 'not on the page view';
+  if (rect.height < MIN_VISIBLE_HEIGHT) return `height ${Math.round(rect.height)} px (pop-up or service block)`;
   return null;
 }
 

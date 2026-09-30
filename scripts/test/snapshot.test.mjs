@@ -25,8 +25,8 @@ test('synthetic snapshots round-trip and preserve a backup before overwrite', ()
 test('snapshot rejects missing records and unknown kinds', () => {
   const baseDir = mkdtempSync(join(tmpdir(), 'tilda-snapshot-test-'));
   try {
-    assert.throws(() => load({ kind: 'zero', pageid: '200002', recordid: '7001' }, { baseDir }), /NO_SNAPSHOT/);
-    assert.throws(() => snapshotPath({ kind: 'unknown', pageid: '200002', recordid: '7001' }, { baseDir }), /kind/);
+    assert.throws(() => load({ kind: 'zero', pageid: '200002', recordid: '7001' }, { baseDir }), (e) => e.code === 'NO_SNAPSHOT' && e.key === 'snapshot.noSnapshot');
+    assert.throws(() => snapshotPath({ kind: 'unknown', pageid: '200002', recordid: '7001' }, { baseDir }), (e) => e.code === 'BAD_KIND' && e.key === 'snapshot.unknownKind');
   } finally {
     rmSync(baseDir, { recursive: true, force: true });
   }

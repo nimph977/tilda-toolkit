@@ -4,9 +4,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setLogLevel } from '../lib/log.mjs';
+import { isMessage } from '../lib/i18n.mjs';
 import { STYLE_CONFIRM } from '../project-style.mjs';
 import {
-  DonorStyleError, STYLE_REASONS, applyDonorFonts, applyDonorStyle, captureDonorStyle, desiredFromDonor,
+  DonorStyleError, applyDonorFonts, applyDonorStyle, captureDonorStyle, desiredFromDonor,
   fontsToUpload, parseFontUploadResponse, parseMyFonts, readDonorStyle, writeDonorStyle,
 } from '../donor-style.mjs';
 
@@ -33,7 +34,7 @@ test('fontsToUpload and parseFontUploadResponse decide idempotent uploads', () =
   assert.deepEqual(fontsToUpload([f], [{ name: 'f', files: { 400: 'u', 700: 'v' } }]).upload.map((x) => x.name), ['f']);
   assert.deepEqual(parseFontUploadResponse('OK'), { ok: true, message: 'OK' });
   assert.equal(parseFontUploadResponse('{"error":"x"}').ok, false);
-  assert.match(parseFontUploadResponse('<html>').message, /страница вместо ответа/);
+  assert.equal(parseFontUploadResponse('<html>').message.key, 'donorStyle.fontUploadHtml');
 });
 
 test('desiredFromDonor keeps only form keys and skips fonts assigned at upload', () => {
@@ -42,12 +43,12 @@ test('desiredFromDonor keeps only form keys and skips fonts assigned at upload',
   assert.equal('textfont' in r.values, false);
   assert.equal(r.values.headlinecolor, '');
   assert.equal(r.values.linkcolor, '#ff8562');
-  assert.deepEqual(r.skipped.filter((s) => s.reason === STYLE_REASONS.assignedAtUpload).map((s) => s.key), ['headlinefont', 'textfont']);
-  assert.deepEqual(r.skipped.filter((s) => s.reason === STYLE_REASONS.formCannot).map((s) => s.key), ['linkfontweight', 'linklinecolor', 'linklineheight']);
+  assert.deepEqual(r.skipped.filter((s) => s.code === 'assignedAtUpload').map((s) => s.key), ['headlinefont', 'textfont']);
+  assert.deepEqual(r.skipped.filter((s) => s.code === 'formCannot').map((s) => s.key), ['linkfontweight', 'linklinecolor', 'linklineheight']);
   assert.equal(desiredFromDonor(donorValues(), { uploadedFonts: [] }).values.headlinefont, 'myfont');
   const only = desiredFromDonor({ linklinecolor: '#000000', linkfontweight: '700', linklineheight: '1' });
   assert.deepEqual(Object.values(only.values).filter(Boolean), []);
-  assert.equal(only.skipped.filter((s) => s.reason === STYLE_REASONS.formCannot).length, 3);
+  assert.equal(only.skipped.filter((s) => s.code === 'formCannot').length, 3);
 });
 
 function fakeDriver({ testValues, uploadText = 'OK', afterFonts } = {}) {
@@ -118,7 +119,10 @@ test('applyDonorStyle refuses without confirmation, then uploads, writes the for
     assert.deepEqual(r.notMatched, ['headlinefont', 'textfont'], 'поддельная загрузка не назначает шрифт — расхождение только по назначенным ключам');
     assert.equal(r.skipped.length, 5);
     assert.ok(existsSync(join(baseDir, 'demo', 'donor-style.json')));
-    assert.equal(JSON.parse(readFileSync(join(baseDir, 'demo', 'donor-style.json'), 'utf8')).skipped.length, 5);
+    const written = JSON.parse(readFileSync(join(baseDir, 'demo', 'donor-style.json'), 'utf8')).skipped;
+    assert.equal(written.length, 5);
+    assert.deepEqual(written.find((x) => x.key === 'headlinefont'), { key: 'headlinefont', code: 'assignedAtUpload', reason: 'the font is assigned at upload (set_ff_to_h/set_ff_to_t)' }, 'в файл слепка причина идёт английским текстом');
+    assert.ok(r.skipped.every((x) => isMessage(x.reason)), 'в итоге причина — Message');
     // Повтор на проекте, где всё уже как у донора (кроме ключей вне формы): без изменений, notMatched пуст.
     const same = fakeDriver({ testValues: { ...donorValues(), linklinecolor: '#ff0000' } });
     const again = await applyDonorStyle(same, { slug: 'demo', projectid: '100001', confirmed: true, confirm: STYLE_CONFIRM, baseDir });

@@ -15,8 +15,8 @@
   const requireApi = (names, fn) => {
     const missing = names.filter((n) => typeof T[n] !== 'function');
     if (missing.length) {
-      LOG('error', fn, 'не установлены части браузерного слоя', { missing });
-      throw new Error(`NO_API ${missing.join(',')}: установите tilda-zero.js и tilda-page.js`);
+      LOG('error', fn, 'browser layer parts are not installed', { missing });
+      throw new Error(`NO_API ${missing.join(',')}: install tilda-zero.js and tilda-page.js`);
     }
   };
 
@@ -35,10 +35,10 @@
     const answer = (await r.text()).trim();
     const hidden = answer === 'y' || answer === 'off' || answer === '' ? 'y' : 'n';
     if (hidden !== want) {
-      LOG('error', 'copyBlock', 'видимость после переключения не совпала с ожидаемой', { recordid, want, answer: answer.slice(0, 60) });
-      throw new Error(`HIDE_FAILED ${recordid}: хотели ${want}, ответ ${answer.slice(0, 60)}`);
+      LOG('error', 'copyBlock', 'visibility after toggling does not match the expected one', { recordid, want, answer: answer.slice(0, 60) });
+      throw new Error(`HIDE_FAILED ${recordid}: wanted ${want}, response ${answer.slice(0, 60)}`);
     }
-    LOG('info', 'copyBlock', 'видимость блока переключена', { recordid, from: current, to: hidden });
+    LOG('info', 'copyBlock', 'block visibility toggled', { recordid, from: current, to: hidden });
     return hidden;
   };
 
@@ -55,30 +55,30 @@
 
     if (spec.mode === 'new') {
       requireApi(['addRecord', 'saveRecordFull', 'deleteRecord'], 'copyBlock(new)');
-      if (tplid === '396') throw new Error('NEW_ZERO_UNSUPPORTED: Zero Block из полей не собирается');
-      if (!Array.isArray(spec.fields)) throw new Error('NEW_FIELDS_REQUIRED: у режима new нужен массив fields');
-      if (spec.code !== undefined && tplid !== '131') throw new Error('NEW_CODE_TPLID: код пишется только в HTML-блок 131');
+      if (tplid === '396') throw new Error('NEW_ZERO_UNSUPPORTED: a Zero Block cannot be built from fields');
+      if (!Array.isArray(spec.fields)) throw new Error('NEW_FIELDS_REQUIRED: the new mode needs a fields array');
+      if (spec.code !== undefined && tplid !== '131') throw new Error('NEW_CODE_TPLID: code can be written only into the HTML block 131');
       const { recordid } = await T.addRecord(dstPageid, tplid, afterid);
       try {
         // Код HTML-блока пишется своим запросом без onlythisfield, остальное — полной записью.
         if (spec.code !== undefined) {
           requireApi(['saveT123Code'], 'copyBlock(new, code)');
           await T.saveT123Code(dstPageid, window.projectid, recordid, String(spec.code));
-          LOG('info', 'copyBlock', 'код T123 записан', { recordid, bytes: String(spec.code).length });
+          LOG('info', 'copyBlock', 'T123 code written', { recordid, bytes: String(spec.code).length });
         }
         if (spec.fields.length) await T.saveRecordFull(dstPageid, recordid, spec.fields, { allowFormContent: spec.formContent === 'reference' });
       } catch (e) {
-        LOG('error', 'copyBlock', 'поля не записались — новый блок удаляется', { recordid, tplid, error: String(e.message).slice(0, 160) });
+        LOG('error', 'copyBlock', 'fields were not written, deleting the new block', { recordid, tplid, error: String(e.message).slice(0, 160) });
         try {
           await T.deleteRecord(dstPageid, recordid);
         } catch (e2) {
-          LOG('error', 'copyBlock', 'блок не удалён после ошибки', { recordid, error: String(e2.message).slice(0, 160) });
+          LOG('error', 'copyBlock', 'block was not deleted after the error', { recordid, error: String(e2.message).slice(0, 160) });
         }
         throw e;
       }
       let hidden = 'n';
       if (want === 'y') hidden = await toggleHidden(dstPageid, recordid, 'y', 'n');
-      LOG('info', 'copyBlock', 'блок собран из полей', { recordid, tplid, fields: spec.fields.length, hidden });
+      LOG('info', 'copyBlock', 'block built from fields', { recordid, tplid, fields: spec.fields.length, hidden });
       return { recordid, tplid, kind: 'record', hidden, written: spec.fields.length, skipped: [] };
     }
 
@@ -115,11 +115,11 @@
   T.buildBlocks = async (dstPageid, blocks, opts = {}) => {
     requireApi(['copyBlock'], 'buildBlocks');
     dstPageid = String(dstPageid || window.pageid);
-    if (!Array.isArray(blocks) || blocks.length === 0) throw new Error('buildBlocks: пустой список блоков');
+    if (!Array.isArray(blocks) || blocks.length === 0) throw new Error('BAD_ARGUMENT: buildBlocks needs a non-empty list of blocks');
     const continueOnError = opts.continueOnError === true;
     let afterid = opts.startAfter === undefined ? '' : String(opts.startAfter || '');
     const built = [];
-    LOG('info', 'buildBlocks', 'старт сборки', { dstPageid, blocks: blocks.length, startAfter: afterid || '(в конец)' });
+    LOG('info', 'buildBlocks', 'build started', { dstPageid, blocks: blocks.length, startAfter: afterid || '(at end)' });
 
     for (let i = 0; i < blocks.length; i++) {
       const spec = blocks[i];
@@ -130,13 +130,13 @@
         const res = await T.copyBlock(spec, dstPageid, afterid);
         afterid = res.recordid;
         built.push({ index: i, id, ...src, tplid: res.tplid, recordid: res.recordid, kind: res.kind, hidden: res.hidden, status: 'ok', skipped: res.skipped || [] });
-        LOG('info', 'buildBlocks', `блок ${i + 1}/${blocks.length} готов`, { id, source: spec.srcRecordid ?? spec.tplid, recordid: res.recordid, tplid: res.tplid });
+        LOG('info', 'buildBlocks', `block ${i + 1}/${blocks.length} done`, { id, source: spec.srcRecordid ?? spec.tplid, recordid: res.recordid, tplid: res.tplid });
       } catch (e) {
         const error = String(e.message).slice(0, 200);
         built.push({ index: i, id, ...src, tplid: String(spec.tplid), recordid: null, status: 'error', error });
-        LOG('error', 'buildBlocks', `блок ${i + 1}/${blocks.length} не собран`, { id, source: spec.srcRecordid ?? spec.tplid, error });
+        LOG('error', 'buildBlocks', `block ${i + 1}/${blocks.length} not built`, { id, source: spec.srcRecordid ?? spec.tplid, error });
         if (!continueOnError) {
-          LOG('error', 'buildBlocks', 'остановка после первой ошибки', { done: built.filter((b) => b.status === 'ok').length, lastRecordid: afterid });
+          LOG('error', 'buildBlocks', 'stopping after the first error', { done: built.filter((b) => b.status === 'ok').length, lastRecordid: afterid });
           break;
         }
       }
@@ -144,7 +144,7 @@
 
     const ok = built.filter((b) => b.status === 'ok').length;
     const failed = built.filter((b) => b.status === 'error').length;
-    LOG('info', 'buildBlocks', 'сборка завершена', { dstPageid, ok, failed, lastRecordid: afterid });
+    LOG('info', 'buildBlocks', 'build finished', { dstPageid, ok, failed, lastRecordid: afterid });
     return { pageid: dstPageid, built, ok, failed, lastRecordid: afterid };
   };
 
@@ -175,11 +175,11 @@
     const errors = [];
     const timeline = [];
     const t0 = Date.now();
-    LOG('info', 'snapshotPage', 'старт', { pageid, blocks: inventory.length, delayMs, batch, pauseMs });
+    LOG('info', 'snapshotPage', 'started', { pageid, blocks: inventory.length, delayMs, batch, pauseMs });
     for (const [i, rec] of inventory.entries()) {
       if (i > 0) {
         if (i % batch === 0 && pauseMs > 0) {
-          LOG('info', 'snapshotPage', 'пауза между пачками', { read: i, of: inventory.length, pauseMs });
+          LOG('info', 'snapshotPage', 'pause between batches', { read: i, of: inventory.length, pauseMs });
           await sleep(pauseMs);
         } else if (delayMs > 0) await sleep(delayMs);
       }
@@ -192,17 +192,17 @@
         const error = String(e.message).slice(0, 200);
         errors.push({ recordid: rec.recordid, tplid: rec.tplid, error });
         timeline.push({ i, recordid: rec.recordid, at: new Date(started).toISOString(), ms: Date.now() - started, ok: false, error: error.slice(0, 120) });
-        LOG('error', 'snapshotPage', 'блок не прочитан', { recordid: rec.recordid, tplid: rec.tplid, error: error.slice(0, 120) });
+        LOG('error', 'snapshotPage', 'block was not read', { recordid: rec.recordid, tplid: rec.tplid, error: error.slice(0, 120) });
         if (/SESSION_LOST/.test(error)) {
-          LOG('error', 'snapshotPage', 'сессия потеряна — снимок прерван', { read: i, of: inventory.length, ms: Date.now() - t0 });
+          LOG('error', 'snapshotPage', 'session lost, snapshot aborted', { read: i, of: inventory.length, ms: Date.now() - t0 });
           break;
         }
       }
     }
-    LOG('info', 'snapshotPage', 'готово', { pageid, zero: Object.keys(zero).length, records: Object.keys(records).length, errors: errors.length, ms: Date.now() - t0 });
+    LOG('info', 'snapshotPage', 'done', { pageid, zero: Object.keys(zero).length, records: Object.keys(records).length, errors: errors.length, ms: Date.now() - t0 });
     return { pageid, at: new Date().toISOString(), inventory, zero, records, errors, timeline, pace: { delayMs, batch, pauseMs } };
   };
 
-  LOG('info', 'install', 'API установлен', { pageid: window.pageid });
+  LOG('info', 'install', 'API installed', { pageid: window.pageid });
   return { installed: ['copyBlock', 'buildBlocks', 'snapshotPage'], pageid: window.pageid, needs: ['tilda-zero.js', 'tilda-page.js'] };
 }

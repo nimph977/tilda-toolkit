@@ -17,11 +17,11 @@ import { alignBlocks } from './block-compare.mjs';
 const log = createLogger('plan-update');
 
 export const UPDATE_REASONS = {
-  extraBlock: 'на странице лишний блок — не удаляется',
-  codeManual: 'код HTML-блока отличается — перенос вручную',
-  imageKept: 'картинка уже на странице — не перезаливается',
-  cardsCount: 'число карточек отличается от референса — карточки не переписаны',
-  placement: (after) => `новый блок встанет после предыдущего нового — переставьте после блока ${after}`,
+  extraBlock: { code: 'updateExtraBlock', reason: 'the page has an extra block — it is not deleted' },
+  codeManual: { code: 'updateCodeManual', reason: 'the HTML block code differs — transfer it by hand' },
+  imageKept: { code: 'updateImageKept', reason: 'the image is already on the page — it is not uploaded again' },
+  cardsCount: { code: 'updateCardsCount', reason: 'the number of cards differs from the reference — the cards are not rewritten' },
+  placement: (after) => ({ code: 'updatePlacement', reason: `the new block will be placed after the previous new one — move it after block ${after}` }),
 };
 
 const IMAGE_FIELD_RE = /-(uploadmethod|tuinfo-[a-z]+|del)$/;
@@ -84,13 +84,13 @@ export function buildUpdateOps(planOps, live, { normalize = (s) => s } = {}) {
       stats.fields += 1;
     }
     if (spec.code !== undefined && differs(String(spec.code).trim(), String(blk.fields.code ?? '').trim(), (s) => s)) {
-      unmapped.push({ id: op.id, recordid: block.recordid, field: 'code', reason: UPDATE_REASONS.codeManual });
+      unmapped.push({ id: op.id, recordid: block.recordid, field: 'code', ...UPDATE_REASONS.codeManual });
     }
-    for (const im of spec.images ?? []) unmapped.push({ id: op.id, recordid: block.recordid, field: im.field, ...(im.card !== undefined ? { card: im.card } : {}), reason: UPDATE_REASONS.imageKept });
+    for (const im of spec.images ?? []) unmapped.push({ id: op.id, recordid: block.recordid, field: im.field, ...(im.card !== undefined ? { card: im.card } : {}), ...UPDATE_REASONS.imageKept });
     if ((spec.cards ?? []).length) {
       const have = decodeCards(blk.fields.list);
       if (have.length !== spec.cards.length) {
-        unmapped.push({ id: op.id, recordid: block.recordid, field: 'list', reason: UPDATE_REASONS.cardsCount, text: `${have.length}→${spec.cards.length}` });
+        unmapped.push({ id: op.id, recordid: block.recordid, field: 'list', ...UPDATE_REASONS.cardsCount, text: `${have.length}→${spec.cards.length}` });
       } else {
         const set = [];
         spec.cards.forEach((c, index) => {
@@ -122,12 +122,12 @@ export function buildUpdateOps(planOps, live, { normalize = (s) => s } = {}) {
       startAfter = prev ? String(prev.recordid) : '';
       firstGroupEnd = prev ? prev.order : -1;
     } else if ((prev ? prev.order : -1) !== firstGroupEnd) {
-      unmapped.push({ id: op.id, field: null, reason: UPDATE_REASONS.placement(prev ? prev.recordid : '(начало страницы)') });
+      unmapped.push({ id: op.id, field: null, ...UPDATE_REASONS.placement(prev ? prev.recordid : '(page start)') });
     }
     ops.push(created);
     stats.created += 1;
   }
-  for (const blk of builtOnly) unmapped.push({ recordid: String(blk.recordid), tplid: blk.tplid, field: null, reason: UPDATE_REASONS.extraBlock });
+  for (const blk of builtOnly) unmapped.push({ recordid: String(blk.recordid), tplid: blk.tplid, field: null, ...UPDATE_REASONS.extraBlock });
   log.debug('buildUpdateOps', 'дописывание', { ...stats, extra: builtOnly.length, unmapped: unmapped.length });
   return { ops, unmapped, startAfter, stats };
 }

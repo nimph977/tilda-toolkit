@@ -9,10 +9,10 @@
 import { FILE_LINK_RE } from './reference-structure.mjs';
 
 export const LINK_REASONS = {
-  unknownPage: 'ссылка на страницу референса, которой нет в карте сайта — оставлен адрес референса',
-  notCreated: (label) => `страница ${label} ещё не создана (reference pages --create) — оставлен адрес референса`,
-  file: 'файл на домене референса — не переносится, оставлен адрес референса',
-  outsideFields: 'ссылка вне полей блока — не переносится',
+  unknownPage: { code: 'linkUnknownPage', reason: 'link to a reference page that is not in the site map — the reference address is kept' },
+  notCreated: (label) => ({ code: 'linkPageNotCreated', reason: `page ${label} is not created yet (reference pages --create) — the reference address is kept` }),
+  file: { code: 'linkFile', reason: 'file on the reference domain — not transferred, the reference address is kept' },
+  outsideFields: { code: 'linkOutsideFields', reason: 'link outside the block fields — not transferred' },
 };
 
 const KEEP_RE = /^(#|tel:|mailto:|javascript:)/i;
@@ -48,7 +48,7 @@ export function buildLinkIndex(site) {
  * Решение по одному адресу.
  * @param {string} href       адрес из структуры (абсолютный или '#…', 'tel:' и т.п.)
  * @param {{ origin: string, pageUrl: string, index: Map }} ctx
- * @returns {{ value: string, changed: boolean, reason?: string, text?: string }}
+ * @returns {{ value: string, changed: boolean, code?: string, reason?: string, text?: string }}
  */
 export function rewriteReferenceUrl(href, ctx) {
   if (typeof href !== 'string' || !href) return { value: href, changed: false };
@@ -63,9 +63,9 @@ export function rewriteReferenceUrl(href, ctx) {
   const text = u.pathname.slice(0, 40);
   const key = pageKey(href);
   if (u.hash && ctx.pageUrl && key === pageKey(ctx.pageUrl)) return { value: u.hash, changed: true };
-  if (FILE_LINK_RE.test(u.pathname)) return { value: href, changed: false, reason: LINK_REASONS.file, text };
+  if (FILE_LINK_RE.test(u.pathname)) return { value: href, changed: false, ...LINK_REASONS.file, text };
   const hit = ctx.index?.get(key);
   if (hit && hit.pageid) return { value: `/page${hit.pageid}.html${u.hash}`, changed: true };
-  if (hit) return { value: href, changed: false, reason: LINK_REASONS.notCreated(hit.label), text };
-  return { value: href, changed: false, reason: LINK_REASONS.unknownPage, text };
+  if (hit) return { value: href, changed: false, ...LINK_REASONS.notCreated(hit.label), text };
+  return { value: href, changed: false, ...LINK_REASONS.unknownPage, text };
 }

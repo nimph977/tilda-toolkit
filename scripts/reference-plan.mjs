@@ -14,6 +14,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createLogger } from './lib/log.mjs';
+import { messageText, msg } from './lib/i18n.mjs';
+import { ToolError } from './lib/tool-error.mjs';
 import { plansDir } from './lib/paths.mjs';
 import { isLabel, readManifest, readSite, refPaths, resolveSource } from './lib/reference-store.mjs';
 import { buildLinkIndex, LINK_REASONS, rewriteReferenceUrl } from './lib/reference-links.mjs';
@@ -75,15 +77,15 @@ export function linkAllowedFor(cat, allowed) {
 
 /** Причины по кнопкам блока. */
 export const BUTTON_REASONS = {
-  noField: (slot) => `кнопка ${slot || '1'}: у шаблона нет поля текста кнопки`,
-  noLinkField: (slot) => `кнопка ${slot || '1'}: шаблон не хранит ссылку кнопки — текст перенесён, адрес нет`,
-  noText: (slot) => `кнопка ${slot || '1'}: у референса кнопка без текста — не переносится`,
+  noField: (slot) => ({ code: 'buttonNoField', reason: `button ${slot || '1'}: the template has no button text field` }),
+  noLinkField: (slot) => ({ code: 'buttonNoLinkField', reason: `button ${slot || '1'}: the template does not store the button link — the text is transferred, the address is not` }),
+  noText: (slot) => ({ code: 'buttonNoText', reason: `button ${slot || '1'}: the reference button has no text — not transferred` }),
 };
 
 /** Причины по фон-видео обложки. */
 export const VIDEO_REASONS = {
-  noField: 'фон-видео: у шаблона нет поля видео',
-  notTransferable: 'фон-видео: адрес видео со страницы референса не получен (проба)',
+  noField: { code: 'videoNoField', reason: 'background video: the template has no video field' },
+  notTransferable: { code: 'videoNotTransferable', reason: 'background video: the video address was not obtained from the reference page (probe)' },
 };
 
 /**
@@ -102,9 +104,9 @@ export const VIDEO_FIELD_BY_KIND = {
 
 /** Причины пропуска для карточек списка. */
 export const CARD_REASONS = {
-  noLink: 'ссылка карточки: шаблон не хранит li_link',
-  oneLink: (used) => `вторая ссылка карточки: у карточки один адрес, перенесён из ${used}`,
-  noButton: 'кнопка карточки: у шаблона нет li_buttontitle',
+  noLink: { code: 'cardNoLink', reason: 'card link: the template does not store li_link' },
+  oneLink: (used) => ({ code: 'cardOneLink', reason: `second card link: a card has one address, taken from ${used}` }),
+  noButton: { code: 'cardNoButton', reason: 'card button: the template has no li_buttontitle' },
 };
 
 /**
@@ -125,8 +127,8 @@ export const SOCIAL_HOST_RE = /(^|\.)(wa\.me|t\.me|telegram\.me|instagram\.com|v
 
 /** Причины пропуска меню. */
 export const MENU_REASONS = {
-  noTarget: 'меню: у шаблона нет menuitems или списка li_title/li_link',
-  duplicate: (title) => `пункт меню «${title}» повторяется: у меню одна строка на подпись, адрес не перенесён`,
+  noTarget: { code: 'menuNoTarget', reason: 'menu: the template has no menuitems or li_title/li_link list' },
+  duplicate: (title) => ({ code: 'menuDuplicate', reason: `menu item "${title}" is repeated: the menu has one row per title, the address is not transferred` }),
 };
 
 /**
@@ -163,7 +165,7 @@ export function menuItems(block) {
     if (host && SOCIAL_HOST_RE.test(host)) continue;
     seen.add(title);
     const item = { title, link: l.href };
-    if (l.linkReason) Object.assign(item, { linkReason: l.linkReason, linkText: l.linkText });
+    if (l.linkReason) Object.assign(item, { linkCode: l.linkCode, linkReason: l.linkReason, linkText: l.linkText });
     items.push(item);
   }
   return { items, duplicates };
@@ -182,11 +184,11 @@ export function menuFields(block, cat, miss, { substituted = false } = {}) {
   // Причины по отброшенным дублям пишутся только когда меню собирается: иначе они сыпались бы
   // и для блоков, которые целиком уходят в пропуски.
   const reportDuplicates = () => {
-    for (const d of duplicates) miss({ field: 'menuitems', reason: MENU_REASONS.duplicate(d.title), text: String(d.link ?? '').slice(0, 40) });
+    for (const d of duplicates) miss({ field: 'menuitems', ...MENU_REASONS.duplicate(d.title), text: String(d.link ?? '').slice(0, 40) });
   };
   // Адрес пункта, оставшийся на референсе, получает причину только в собранном меню.
   const reportLinks = (field) => {
-    for (const i of items) if (i.linkReason) miss({ field, reason: i.linkReason, text: i.linkText });
+    for (const i of items) if (i.linkReason) miss({ field, code: i.linkCode, reason: i.linkReason, text: i.linkText });
   };
 
   if (content.has('menuitems')) {
@@ -200,21 +202,21 @@ export function menuFields(block, cat, miss, { substituted = false } = {}) {
     reportDuplicates();
     result.cards = items.map((i) => ({ li_title: i.title, li_descr: '', li_img: '', 'li-tubutton': '', li_imgalt: '', ...(withLink ? { li_link: i.link } : {}) }));
     if (withLink) reportLinks('li_link');
-    else miss({ field: 'li_link', reason: CARD_REASONS.noLink, text: String(items.length) });
+    else miss({ field: 'li_link', ...CARD_REASONS.noLink, text: String(items.length) });
     return result;
   }
   // Причина пишется только там, где меню ожидалось: у подменённого блока. Для обычных блоков
   // ссылки меню не считаются содержимым, и поведение остаётся прежним.
-  if (substituted) miss({ field: 'menuitems', reason: MENU_REASONS.noTarget, text: String(items.length) });
+  if (substituted) miss({ field: 'menuitems', ...MENU_REASONS.noTarget, text: String(items.length) });
   return result;
 }
 
 /** Причины пропуска соцссылок — по каталогу: наличие поля и форма первого элемента `defaults.soclinks`. */
 export const SOCLINKS_REASONS = {
-  noField: 'соцссылки: нет поля soclinks в каталоге',
-  shape: 'соцссылки: формат soclinks шаблона не поддерживается',
-  messenger: (service) => `мессенджер ${service}: адрес не переводится в элемент soclinks`,
-  messengerQuery: (service) => `мессенджер ${service}: параметры адреса (готовое сообщение ?text=) элемент не хранит`,
+  noField: { code: 'soclinksNoField', reason: 'social links: there is no soclinks field in the catalog' },
+  shape: { code: 'soclinksShape', reason: 'social links: the soclinks format of the template is not supported' },
+  messenger: (service) => ({ code: 'messengerUnsupported', reason: `messenger ${service}: the address is not converted into a soclinks element` }),
+  messengerQuery: (service) => ({ code: 'messengerQuery', reason: `messenger ${service}: the element does not store address parameters (a ready message ?text=)` }),
 };
 
 /**
@@ -244,11 +246,11 @@ export function messengerField(block, cat, miss) {
   if (!items.length) return null;
   const services = items.map((i) => i.service);
   if (!new Set(cat.tabs?.content ?? []).has('soclinks')) {
-    miss({ field: 'soclinks', reason: SOCLINKS_REASONS.noField, text: services.join(',') });
+    miss({ field: 'soclinks', ...SOCLINKS_REASONS.noField, text: services.join(',') });
     return null;
   }
   if (!messengerShape(cat)) {
-    miss({ field: 'soclinks', reason: SOCLINKS_REASONS.shape, text: services.join(',') });
+    miss({ field: 'soclinks', ...SOCLINKS_REASONS.shape, text: services.join(',') });
     return null;
   }
   let stock = [];
@@ -262,10 +264,10 @@ export function messengerField(block, cat, miss) {
     const rule = MESSENGER_LINK_RULES.find((r) => r.service === m.service);
     const hit = rule ? String(m.href).match(rule.hrefPattern) : null;
     if (!hit) {
-      miss({ field: 'soclinks', reason: SOCLINKS_REASONS.messenger(m.service), text: m.service });
+      miss({ field: 'soclinks', ...SOCLINKS_REASONS.messenger(m.service), text: m.service });
       continue;
     }
-    if (/\?./.test(String(m.href))) miss({ field: 'soclinks', reason: SOCLINKS_REASONS.messengerQuery(m.service), text: m.service });
+    if (/\?./.test(String(m.href))) miss({ field: 'soclinks', ...SOCLINKS_REASONS.messengerQuery(m.service), text: m.service });
     const title = stock.find((s) => s.service === m.service)?.title ?? m.service;
     const el = { service: m.service, title };
     if (rule.type) el.type = rule.type;
@@ -294,11 +296,11 @@ export function soclinksField(block, cat, miss) {
   if (!items.length) return null;
   const services = items.map((i) => i.service).join(',');
   if (!new Set(cat.tabs?.content ?? []).has('soclinks')) {
-    miss({ field: 'soclinks', reason: SOCLINKS_REASONS.noField, text: services });
+    miss({ field: 'soclinks', ...SOCLINKS_REASONS.noField, text: services });
     return null;
   }
   if (!soclinksShapeSupported(cat)) {
-    miss({ field: 'soclinks', reason: SOCLINKS_REASONS.shape, text: services });
+    miss({ field: 'soclinks', ...SOCLINKS_REASONS.shape, text: services });
     return null;
   }
   return { name: 'soclinks', value: JSON.stringify(items.map((i) => ({ service: i.service, link: i.href }))) };
@@ -306,26 +308,26 @@ export function soclinksField(block, cat, miss) {
 
 /** Причины `unmapped` для оформления — по составу вкладки «Настройки» каталога. */
 export const STYLE_REASONS = {
-  margin: 'отступ: поля margintop/marginbottom нет в каталоге',
-  background: 'фон: нет поля фона в каталоге',
-  typo: (family) => `типографика: поля ${family}_typo нет в каталоге`,
+  margin: { code: 'spacing', reason: 'spacing: the margintop/marginbottom fields are not in the catalog' },
+  background: { code: 'background', reason: 'background: there is no background field in the catalog' },
+  typo: (family) => ({ code: 'typography', reason: `typography: the ${family}_typo field is not in the catalog` }),
 };
 
 /** [FIX] Причины по форме разделителя 796. */
 export const SHAPE_REASONS = {
-  unknown: 'форма разделителя не распознана — останется стоковая шаблона',
-  noField: 'форма разделителя: поля shapedividerstyle нет в каталоге',
+  unknown: { code: 'shapeUnknown', reason: 'divider shape not recognized — the stock shape of the template stays' },
+  noField: { code: 'shapeNoField', reason: 'divider shape: the shapedividerstyle field is not in the catalog' },
 };
 
 /** [FIX] Настройка формы разделителя по `block.shape` (стиль из пути SVG референса). */
 function shapeFields(b, allowed, miss) {
   if (!b.shape) return [];
   if (!b.shape.style) {
-    miss({ field: 'shapedividerstyle', reason: SHAPE_REASONS.unknown, text: b.shape.path ?? '' });
+    miss({ field: 'shapedividerstyle', ...SHAPE_REASONS.unknown, text: b.shape.path ?? '' });
     return [];
   }
   if (!allowed.has('shapedividerstyle')) {
-    miss({ field: 'shapedividerstyle', reason: SHAPE_REASONS.noField, text: b.shape.style });
+    miss({ field: 'shapedividerstyle', ...SHAPE_REASONS.noField, text: b.shape.style });
     return [];
   }
   log.debug('shapeFields', '[FIX] форма разделителя', { order: b.order, style: b.shape.style });
@@ -347,17 +349,17 @@ export function styleFields(block, cat, miss) {
   for (const [name, value] of [['margintop', styles.paddingTop], ['marginbottom', styles.paddingBottom]]) {
     if (!value) continue;
     if (settings.has(name)) out.push({ name, value });
-    else miss({ field: name, reason: STYLE_REASONS.margin, text: value });
+    else miss({ field: name, ...STYLE_REASONS.margin, text: value });
   }
   if (styles.bgColor) {
     const bgField = BACKGROUND_FIELDS.find((n) => settings.has(n));
     if (bgField) out.push({ name: bgField, value: styles.bgColor });
-    else miss({ field: 'background', reason: STYLE_REASONS.background, text: styles.bgColor });
+    else miss({ field: 'background', ...STYLE_REASONS.background, text: styles.bgColor });
   }
   for (const [family, typo] of Object.entries(styles.typo ?? {})) {
     const name = `${family}_typo`;
     if (settings.has(name)) out.push({ name, value: JSON.stringify(typo) });
-    else miss({ field: name, reason: STYLE_REASONS.typo(family), text: Object.keys(typo).join(',') });
+    else miss({ field: name, ...STYLE_REASONS.typo(family), text: Object.keys(typo).join(',') });
   }
   return out;
 }
@@ -367,18 +369,18 @@ export const T123_CODE_LIMIT = 25 * 1024;
 
 /** Причины по коду HTML-блока. */
 export const CODE_REASONS = {
-  tooLarge: 'HTML-блок: код больше 25 КБ',
-  scriptsRemoved: 'HTML-блок: скрипты вырезаны — их запись сбрасывает сессию Tilda',
+  tooLarge: { code: 'codeTooLarge', reason: 'HTML block: the code is larger than 25 KB' },
+  scriptsRemoved: { code: 'codeScriptsRemoved', reason: 'HTML block: scripts are removed — writing them resets the Tilda session' },
 };
 
 /** Причины по форме блока. */
 export const FORM_REASONS = {
-  receivers: 'форма: получатели заявок — настройка проекта-копии, не переносится',
-  noSuccessUrl: 'форма: адрес перехода после отправки не сохраняется Tilda',
-  inputUnknown: (type) => `форма: тип поля ${type} не распознан`,
-  noList: 'форма: у шаблона нет поля forminputs (список полей формы)',
-  noField: (name) => `форма: у шаблона нет поля ${name}`,
-  noForm: 'форма: в структуре нет разбора формы — reference structure',
+  receivers: { code: 'formReceivers', reason: 'form: request recipients are a setting of the copy project, not transferred' },
+  noSuccessUrl: { code: 'formNoSuccessUrl', reason: 'form: Tilda does not keep the redirect address after submitting' },
+  inputUnknown: (type) => ({ code: 'formInputUnknown', reason: `form: field type ${type} is not recognized` }),
+  noList: { code: 'formNoList', reason: 'form: the template has no forminputs field (the list of form fields)' },
+  noField: (name) => ({ code: 'formNoField', reason: `form: the template has no ${name} field` }),
+  noForm: { code: 'formNoForm', reason: 'form: the structure has no form breakdown — reference structure' },
 };
 
 /**
@@ -407,7 +409,7 @@ export function formCards(form, miss) {
   const out = [];
   (form?.inputs ?? []).forEach((x, i) => {
     if (!FORM_INPUT_TYPES.includes(x.type)) {
-      miss({ card: i, field: 'forminputs', reason: FORM_REASONS.inputUnknown(x.type || '?'), text: String(x.name ?? '').slice(0, 40) });
+      miss({ card: i, field: 'forminputs', ...FORM_REASONS.inputUnknown(x.type || '?'), text: String(x.name ?? '').slice(0, 40) });
       return;
     }
     const el = Object.fromEntries(Object.entries(FORM_INPUT_MAP).map(([k, fn]) => [k, String(fn(x) ?? '')]));
@@ -423,11 +425,35 @@ export function formCards(form, miss) {
 
 /** Причины по полям «Настроек», перенесённым картой влияния. */
 export const SETTINGS_REASONS = {
-  noMap: 'настройки: шаблон не откалиброван — catalog calibrate',
-  noFeatures: 'настройки: в структуре нет признаков — reference structure',
-  substituted: (from, to) => `настройки: шаблон ${from} заменён на ${to} — перенесены только отступы, фон и типографика`,
-  undecided: (why) => `настройки: значение не распознано картой (${why})`,
-  unexplained: 'настройки: признаки разметки без поля — число в text',
+  noMap: { code: 'settingsNoMap', reason: 'settings: the template is not calibrated — catalog calibrate' },
+  noFeatures: { code: 'settingsNoFeatures', reason: 'settings: the structure has no features — reference structure' },
+  substituted: (from, to) => ({ code: 'settingsSubstituted', reason: `settings: template ${from} is replaced by ${to} — only spacing, background and typography are transferred` }),
+  undecided: (why) => ({ code: 'settingsUndecided', reason: `settings: the value is not recognized by the map (${why})` }),
+  unexplained: { code: 'settingsUnexplained', reason: 'settings: markup features without a field — the number is in text' },
+};
+
+/** Причины по полям, картинкам и карточкам, которых нет в каталоге шаблона или файла картинки. */
+export const FIELD_REASONS = {
+  notInCatalog: { code: 'fieldNotInCatalog', reason: 'the field is not in the catalog' },
+  linkWithoutField: { code: 'linkWithoutField', reason: 'a link without a link field' },
+  imageNoField: { code: 'imageNoField', reason: 'an image without imgfield' },
+  imageFieldNotInCatalog: { code: 'imageFieldNotInCatalog', reason: 'the image field is not in the catalog' },
+  imageNotFetched: { code: 'imageNotFetched', reason: 'the image file is not downloaded: reference fetch --images' },
+  cardsNoList: { code: 'cardsNoList', reason: 'cards without a list field' },
+  cardFieldNotTransferred: { code: 'cardFieldNotTransferred', reason: 'the card field is not transferred' },
+  cardImageNotFetched: { code: 'cardImageNotFetched', reason: 'the card image file is not downloaded' },
+};
+
+/** Причины пропуска блока целиком (`skipped[]`). */
+export const SKIP_REASONS = {
+  noTplid: { code: 'noTplid', reason: 'block without tplid' },
+  zeroBlock: { code: 'zeroBlock', reason: 'Zero Block is not supported' },
+  catalogMissing: { code: 'catalogMissing', reason: 'catalog not captured: catalog capture' },
+  substituteCatalogMissing: (tplid) => ({ code: 'substituteCatalogMissing', reason: `substitute catalog not captured: catalog capture --tplid ${tplid}` }),
+  templateUnavailable: { code: 'templateUnavailable', reason: 'template is unavailable on the plan — pass --substitute <tplid>=<available one>' },
+  substituteUnavailable: { code: 'substituteUnavailable', reason: 'substitute template is unavailable on the plan' },
+  contentOutsideFields: { code: 'contentOutsideFields', reason: 'content outside field= — not transferred' },
+  noTransferableFields: { code: 'noTransferableFields', reason: 'no transferable fields' },
 };
 
 /**
@@ -464,9 +490,9 @@ const RULE_FALLBACK_FIELDS = new Set(['margintop', 'marginbottom', ...BACKGROUND
  * @returns {{ fields: Array<{name, value}>, byMap: boolean, decoded: number, undecided: number, unexplained: number }}
  */
 export function settingsFields(b, { cat, map, sourceTplid, tplid, isSubstituted, miss, explain = true }) {
-  const reason = isSubstituted ? SETTINGS_REASONS.substituted(sourceTplid, tplid) : !map ? SETTINGS_REASONS.noMap : !Array.isArray(b.features) ? SETTINGS_REASONS.noFeatures : null;
-  if (reason) {
-    if (explain) miss({ field: null, reason });
+  const why = isSubstituted ? SETTINGS_REASONS.substituted(sourceTplid, tplid) : !map ? SETTINGS_REASONS.noMap : !Array.isArray(b.features) ? SETTINGS_REASONS.noFeatures : null;
+  if (why) {
+    if (explain) miss({ field: null, ...why });
     return { fields: styleFields(b, cat, miss), byMap: false, decoded: 0, undecided: 0, unexplained: 0 };
   }
   const decoded = decodeSettings(b.features, map, cat.defaults ?? {});
@@ -480,8 +506,8 @@ export function settingsFields(b, { cat, map, sourceTplid, tplid, isSubstituted,
       taken.add(f.name);
     }
   }
-  for (const u of decoded.undecided) miss({ field: u.field, reason: SETTINGS_REASONS.undecided(u.reason), ...(u.key ? { text: u.key } : {}) });
-  if (decoded.unexplained.length) miss({ field: null, reason: SETTINGS_REASONS.unexplained, text: String(decoded.unexplained.length) });
+  for (const u of decoded.undecided) miss({ field: u.field, ...SETTINGS_REASONS.undecided(u.reason), ...(u.key ? { text: u.key } : {}) });
+  if (decoded.unexplained.length) miss({ field: null, ...SETTINGS_REASONS.unexplained, text: String(decoded.unexplained.length) });
   log.debug('settingsFields', 'настройки по карте', { order: b.order, tplid, decoded: fields.length, undecided: decoded.undecided.length, unexplained: decoded.unexplained.length });
   return { fields, byMap: true, decoded: fields.length, undecided: decoded.undecided.length, unexplained: decoded.unexplained.length };
 }
@@ -555,25 +581,25 @@ export function mapBlockLinks(b, links, miss) {
     return decided.get(href);
   };
   const fields = (b.fields ?? []).map((f) => {
-    const html = rewriteHtmlLinks(f.html, decide, (r) => miss({ field: f.name, reason: r.reason, text: r.text }));
+    const html = rewriteHtmlLinks(f.html, decide, (r) => miss({ field: f.name, code: r.code, reason: r.reason, text: r.text }));
     if (!f.href) return html === f.html ? f : { ...f, html };
     const r = decide(f.href);
-    if (r.reason) miss({ field: f.name, reason: r.reason, text: r.text });
+    if (r.reason) miss({ field: f.name, code: r.code, reason: r.reason, text: r.text });
     return { ...f, html, href: r.value };
   });
   const linkList = (b.links ?? []).map((l) => {
     if (!l.href) return l;
     const r = decide(l.href, 'links');
-    return r.reason ? { ...l, href: r.value, linkReason: r.reason, linkText: r.text } : { ...l, href: r.value };
+    return r.reason ? { ...l, href: r.value, linkCode: r.code, linkReason: r.reason, linkText: r.text } : { ...l, href: r.value };
   });
   const cards = (b.cards ?? []).map((c, i) => {
-    const html = Object.fromEntries(Object.entries(c.html ?? {}).map(([key, value]) => [key, rewriteHtmlLinks(value, decide, (r) => miss({ card: i, field: key, reason: r.reason, text: r.text }))]));
+    const html = Object.fromEntries(Object.entries(c.html ?? {}).map(([key, value]) => [key, rewriteHtmlLinks(value, decide, (r) => miss({ card: i, field: key, code: r.code, reason: r.reason, text: r.text }))]));
     const entries = Object.entries(c.hrefs ?? {});
     if (!entries.length) return c.html ? { ...c, html } : c;
     const hrefs = {};
     entries.forEach(([key, href], n) => {
       const r = decide(href);
-      if (r.reason && n === 0) miss({ card: i, field: 'li_link', reason: r.reason, text: r.text });
+      if (r.reason && n === 0) miss({ card: i, field: 'li_link', code: r.code, reason: r.reason, text: r.text });
       hrefs[key] = r.value;
     });
     return { ...c, ...(c.html ? { html } : {}), hrefs };
@@ -581,7 +607,7 @@ export function mapBlockLinks(b, links, miss) {
   const buttons = (b.buttons ?? []).map((btn) => {
     if (!btn.href) return btn;
     const r = decide(btn.href);
-    if (r.reason && btn.text) miss({ field: 'buttontitle' + btn.slot, reason: r.reason, text: r.text });
+    if (r.reason && btn.text) miss({ field: 'buttontitle' + btn.slot, code: r.code, reason: r.reason, text: r.text });
     return { ...btn, href: r.value };
   });
   const linksOnly = new Set([...decided.keys()].filter((href) => !fromContent.has(href)));
@@ -622,7 +648,7 @@ export function countBlockLinks(record, decided, linksOnly, { menuBuilt = false 
       else kept += 1;
       continue;
     }
-    if (linksOnly.has(href) && !menuBuilt) lost.push({ field: null, reason: LINK_REASONS.outsideFields, text: pathOf(href) });
+    if (linksOnly.has(href) && !menuBuilt) lost.push({ field: null, ...LINK_REASONS.outsideFields, text: pathOf(href) });
   }
   return { rewritten, kept, lost };
 }
@@ -666,7 +692,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
     const sourceTplid = String(b.tplid || '');
     const tplid = substitutes[sourceTplid] ?? sourceTplid;
     const isSubstituted = tplid !== sourceTplid;
-    const skip = (reason) => skipped.push({ order: b.order, tplid, reason });
+    const skip = (why) => skipped.push({ order: b.order, tplid, ...why });
     const miss = (entry) => unmapped.push({ order: b.order, tplid, ...entry });
     // Причины и счётчики переписи ссылок фиксируются, только если блок строится (правило
     // «Choosing one value…»): у блока, ушедшего в пропуски, адреса в план не попадают.
@@ -691,20 +717,20 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
       videosTotal += blockVideos;
     };
     if (!tplid || tplid === '?') {
-      skip('блок без tplid');
+      skip(SKIP_REASONS.noTplid);
       continue;
     }
     if (tplid === ZERO_TPLID) {
-      skip('Zero Block не поддерживается');
+      skip(SKIP_REASONS.zeroBlock);
       continue;
     }
     const cat = catalogs[tplid];
     if (!cat) {
-      skip(isSubstituted ? `каталог замены не снят: catalog capture --tplid ${tplid}` : 'каталог не снят: catalog capture');
+      skip(isSubstituted ? SKIP_REASONS.substituteCatalogMissing(tplid) : SKIP_REASONS.catalogMissing);
       continue;
     }
     if (cat.available === false) {
-      skip(isSubstituted ? 'шаблон замены недоступен на тарифе' : 'шаблон недоступен на тарифе — укажите --substitute <tplid>=<доступный>');
+      skip(isSubstituted ? SKIP_REASONS.substituteUnavailable : SKIP_REASONS.templateUnavailable);
       continue;
     }
     // Замена засчитывается только после того, как шаблон-замена прошёл проверки: иначе итог
@@ -725,7 +751,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
         skip(CODE_REASONS.tooLarge);
         continue;
       }
-      if (b.code.scripts > 0) miss({ field: 'code', reason: CODE_REASONS.scriptsRemoved, text: String(b.code.scripts) });
+      if (b.code.scripts > 0) miss({ field: 'code', ...CODE_REASONS.scriptsRemoved, text: String(b.code.scripts) });
       const t123 = { tplid: '131', fields: [], code: b.code.code };
       ops.push({ id: `b${b.order}`, newRecord: t123, hidden: 'n' });
       commitLinks(t123);
@@ -751,11 +777,11 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
 
     for (const f of block.fields ?? []) {
       if (allowed.has(f.name)) push(f.name, f.html ?? f.text);
-      else miss({ field: f.name, reason: 'поля нет в каталоге', text: String(f.text ?? '').slice(0, 40) });
+      else miss({ field: f.name, ...FIELD_REASONS.notInCatalog, text: String(f.text ?? '').slice(0, 40) });
       if (!f.href) continue;
       const lf = linkFieldFor(f.name, linkAllowed);
       if (lf) push(lf, f.href);
-      else miss({ field: f.name, reason: 'ссылка без поля ссылки', text: String(f.href).slice(0, 40) });
+      else miss({ field: f.name, ...FIELD_REASONS.linkWithoutField, text: String(f.href).slice(0, 40) });
     }
 
     // Кнопки без field=: текст и ссылка в поля кнопки по слоту; поле с field= главнее.
@@ -764,11 +790,11 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
       const title = 'buttontitle' + btn.slot;
       if ((block.fields ?? []).some((f) => f.name === title)) continue;
       if (!btn.text) {
-        miss({ field: title, reason: BUTTON_REASONS.noText(btn.slot) });
+        miss({ field: title, ...BUTTON_REASONS.noText(btn.slot) });
         continue;
       }
       if (!allowed.has(title)) {
-        miss({ field: title, reason: BUTTON_REASONS.noField(btn.slot), text: btn.text.slice(0, 40) });
+        miss({ field: title, ...BUTTON_REASONS.noField(btn.slot), text: btn.text.slice(0, 40) });
         continue;
       }
       push(title, btn.html || btn.text);
@@ -776,7 +802,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
       if (!btn.href) continue;
       const lf = linkFieldFor(title, linkAllowed);
       if (lf) push(lf, btn.href);
-      else miss({ field: title, reason: BUTTON_REASONS.noLinkField(btn.slot), text: String(btn.href).slice(0, 40) });
+      else miss({ field: title, ...BUTTON_REASONS.noLinkField(btn.slot), text: String(btn.href).slice(0, 40) });
     }
     if ((block.buttons ?? []).length) log.debug('buildReferencePlan', 'кнопки блока', { order: b.order, written: buttonsWritten, total: block.buttons.length });
     blockButtons = buttonsWritten;
@@ -788,23 +814,23 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
         push(vf, block.video.url);
         blockVideos = 1;
       } else {
-        miss({ field: vf ?? 'video', reason: VIDEO_REASONS.noField, text: block.video.kind });
+        miss({ field: vf ?? 'video', ...VIDEO_REASONS.noField, text: block.video.kind });
       }
       log.debug('buildReferencePlan', 'видео блока', { order: b.order, kind: block.video.kind, field: vf ?? null });
     }
 
     for (const im of block.images ?? []) {
       if (!im.field) {
-        miss({ field: null, reason: 'картинка без imgfield' });
+        miss({ field: null, ...FIELD_REASONS.imageNoField });
         continue;
       }
       if (!allowed.has(im.field)) {
-        miss({ field: im.field, reason: 'поля картинки нет в каталоге' });
+        miss({ field: im.field, ...FIELD_REASONS.imageFieldNotInCatalog });
         continue;
       }
       const file = imageMap[im.src];
       if (file) images.push({ field: im.field, file });
-      else miss({ field: im.field, reason: 'файл картинки не скачан: reference fetch --images' });
+      else miss({ field: im.field, ...FIELD_REASONS.imageNotFetched });
     }
 
     // Соцссылки — содержимое блока: с ними блок 212 проходит путь создания, а не пропуска.
@@ -825,7 +851,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
 
     if ((block.cards ?? []).length) {
       if (!allowed.has('list')) {
-        miss({ field: 'list', reason: 'карточки без поля list' });
+        miss({ field: 'list', ...FIELD_REASONS.cardsNoList });
       } else {
         const textKeys = cardTextKeys(cat);
         log.debug('buildReferencePlan', 'текстовые ключи карточек', { order: b.order, tplid, textKeys });
@@ -834,7 +860,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
           for (const k of textKeys) card[k] = c.html?.[k] ?? c.fields?.[k] ?? '';
           for (const k of Object.keys(c.fields ?? {})) {
             if (textKeys.includes(k)) continue;
-            miss({ card: i, field: k, reason: k === 'li_buttontitle' ? CARD_REASONS.noButton : 'поле карточки не переносится' });
+            miss({ card: i, field: k, ...(k === 'li_buttontitle' ? CARD_REASONS.noButton : FIELD_REASONS.cardFieldNotTransferred) });
           }
           // Ссылка карточки уходит внутри `list` ключом `li_link` — сервер его сохраняет
           // (проба на черновой, 2026-09-22). Хранит ли его шаблон, знает каталог (`cardKeys`).
@@ -844,14 +870,14 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
           const [usedKey, href] = hrefEntries[0] ?? [];
           if (href) {
             if ((cat.cardKeys ?? []).includes('li_link')) card.li_link = href;
-            else miss({ card: i, field: 'li_link', reason: CARD_REASONS.noLink, text: String(href).slice(0, 40) });
+            else miss({ card: i, field: 'li_link', ...CARD_REASONS.noLink, text: String(href).slice(0, 40) });
           }
           for (const [key, extra] of hrefEntries.slice(1)) {
-            miss({ card: i, field: key, reason: CARD_REASONS.oneLink(usedKey), text: String(extra).slice(0, 40) });
+            miss({ card: i, field: key, ...CARD_REASONS.oneLink(usedKey), text: String(extra).slice(0, 40) });
           }
           const src = c.images?.li_img;
           if (src && imageMap[src]) images.push({ card: i, field: 'li_img', file: imageMap[src] });
-          else if (src) miss({ card: i, field: 'li_img', reason: 'файл картинки карточки не скачан' });
+          else if (src) miss({ card: i, field: 'li_img', ...FIELD_REASONS.cardImageNotFetched });
           cards.push(card);
         });
       }
@@ -863,32 +889,32 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
     if (b.hasForm) {
       const form = b.form ?? null;
       if (!form) {
-        miss({ field: null, reason: FORM_REASONS.noForm });
+        miss({ field: null, ...FORM_REASONS.noForm });
       } else {
         const items = formCards(form, miss);
         if (items.length) {
           if (allowed.has('forminputs')) push('forminputs', JSON.stringify(items));
-          else miss({ field: 'forminputs', reason: FORM_REASONS.noList, text: String(items.length) });
+          else miss({ field: 'forminputs', ...FORM_REASONS.noList, text: String(items.length) });
         }
         for (const [name, value] of [['formtitlesuccess', form.successTitle], ['formmsgsuccess', form.successMessage]]) {
           if (!value) continue;
           if (allowed.has(name)) push(name, value);
-          else miss({ field: name, reason: FORM_REASONS.noField(name), text: String(value).slice(0, 40) });
+          else miss({ field: name, ...FORM_REASONS.noField(name), text: String(value).slice(0, 40) });
         }
         if (form.successUrl) {
           let url = form.successUrl;
           if (links) {
             const r = rewriteReferenceUrl(url, links);
             url = r.value;
-            if (r.reason) miss({ field: 'formmsgurl', reason: r.reason, text: r.text });
+            if (r.reason) miss({ field: 'formmsgurl', code: r.code, reason: r.reason, text: r.text });
           }
           if (allowed.has('formmsgurl')) {
             push('formmsgurl', url);
             formContent = true;
-          } else miss({ field: 'formmsgurl', reason: FORM_REASONS.noField('formmsgurl'), text: pathOf(url) });
+          } else miss({ field: 'formmsgurl', ...FORM_REASONS.noField('formmsgurl'), text: pathOf(url) });
         }
       }
-      miss({ field: 'receivers', reason: FORM_REASONS.receivers });
+      miss({ field: 'receivers', ...FORM_REASONS.receivers });
     }
 
     // Оформление считается до очистки стоковых, но дописывается в поля последним: стили сами по
@@ -944,7 +970,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
         log.debug('buildReferencePlan', '[FIX] разделитель без полей создаётся пустым', { order: b.order, tplid });
         continue;
       }
-      skip(contentFields.length ? 'содержимое вне полей field= — не переносится' : 'нет переносимых полей');
+      skip(contentFields.length ? SKIP_REASONS.contentOutsideFields : SKIP_REASONS.noTransferableFields);
       continue;
     }
     fields.push(...styled, ...hookFields);
@@ -974,10 +1000,7 @@ export function planFileName(slug, source, page) {
 }
 
 function planError(message, code, exitCode) {
-  const err = new Error(message);
-  err.code = code;
-  err.exitCode = exitCode;
-  return err;
+  return new ToolError(code, message, { exitCode });
 }
 
 /**
@@ -986,24 +1009,24 @@ function planError(message, code, exitCode) {
  */
 export function resolveLabelSource({ slug, source, page, zone, substitutes, baseDir }) {
   const site = readSite(slug, { baseDir });
-  if (!site) throw planError(`карты сайта ${slug} нет: сначала reference pages --slug ${slug}`, 'NO_SITE', 1);
+  if (!site) throw planError(msg('referencePlan.noSite', { slug }), 'NO_SITE', 1);
   const entry = resolveSource(site, source);
-  if (!entry) throw planError(`метки ${source} нет в карте сайта ${slug}: reference pages --slug ${slug} покажет метки`, 'UNKNOWN_LABEL', 2);
-  if (entry.missing) throw planError(`страницы ${source} больше нет в слепке ${slug}`, 'LABEL_MISSING', 1);
-  if (zone !== undefined && zone !== null) throw planError('reference plan: зона задаётся ролью метки в site.json — уберите --zone', 'ZONE_WITH_LABEL', 2);
+  if (!entry) throw planError(msg('referencePlan.unknownLabel', { source, slug }), 'UNKNOWN_LABEL', 2);
+  if (entry.missing) throw planError(msg('referencePlan.labelMissing', { source, slug }), 'LABEL_MISSING', 1);
+  if (zone !== undefined && zone !== null) throw planError(msg('referencePlan.zoneWithLabel'), 'ZONE_WITH_LABEL', 2);
   let origin = entry;
   if (entry.role !== 'content') {
     origin = resolveSource(site, 'P00');
     if (!origin || origin.missing || origin.role !== 'content') origin = site.pages.find((p) => p.role === 'content' && !p.missing);
-    if (!origin) throw planError(`в карте сайта ${slug} нет страниц со структурой для ${source}`, 'NO_STRUCTURE', 1);
+    if (!origin) throw planError(msg('referencePlan.noStructureInSite', { slug, source }), 'NO_STRUCTURE', 1);
   }
   const pageid = page ?? entry.pageid;
-  if (!pageid) throw planError(`у метки ${source} нет pageid: сначала reference pages --slug ${slug} --create`, 'NO_PAGEID', 1);
+  if (!pageid) throw planError(msg('referencePlan.noPageid', { source, slug }), 'NO_PAGEID', 1);
   if (page && entry.pageid && String(page) !== String(entry.pageid)) {
-    throw planError(`--page ${page} не совпадает с pageid метки ${source} (${entry.pageid}) в site.json`, 'PAGE_MISMATCH', 2);
+    throw planError(msg('referencePlan.pageMismatch', { page, source, pageid: entry.pageid }), 'PAGE_MISMATCH', 2);
   }
   const manifest = readManifest(slug, { baseDir });
-  if (!manifest) throw planError(`слепок ${slug} не найден: сначала reference fetch`, 'NO_MANIFEST', 1);
+  if (!manifest) throw planError(msg('referencePlan.noManifest', { slug }), 'NO_MANIFEST', 1);
   return {
     structureName: origin.name,
     zone: entry.role,
@@ -1029,8 +1052,8 @@ export function generateReferencePlan(params) {
   let hint;
   const zones = structure.counts?.zones;
   if (!byLabel && resolved.zone === 'all' && (zones?.header || zones?.footer)) {
-    hint = 'в структуре есть шапка/подвал — для сборки сайта используйте метки (reference pages)';
-    log.warn('generateReferencePlan', hint, { header: zones.header, footer: zones.footer });
+    hint = msg('referencePlan.hint.headerFooter');
+    log.warn('generateReferencePlan', messageText(hint), { header: zones.header, footer: zones.footer });
   }
 
   const path = out || join(plansDir(), planFileName(slug, source, resolved.page));
@@ -1061,7 +1084,7 @@ export function prepareReferencePlan({ slug, source, page, startAfter, baseDir, 
   const paths = refPaths(slug, { baseDir });
   const structPath = join(paths.structure, `${resolved.structureName}.json`);
   if (!existsSync(structPath)) {
-    throw planError(`структура страницы ${byLabel ? source : resolved.structureName} не найдена — сначала reference fetch --slug ${slug} или reference structure`, 'NO_STRUCTURE', 1);
+    throw planError(msg('referencePlan.structureNotFound', { name: byLabel ? source : resolved.structureName, slug }), 'NO_STRUCTURE', 1);
   }
   const structure = JSON.parse(readFileSync(structPath, 'utf8'));
   const manifest = readManifest(slug, { baseDir });

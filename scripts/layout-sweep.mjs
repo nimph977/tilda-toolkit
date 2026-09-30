@@ -33,14 +33,14 @@ export function parseWidthSpec(spec) {
   const m = s.match(/^(\d+)-(\d+)(?::(\d+))?$/);
   if (m) {
     const [from, to, step] = [Number(m[1]), Number(m[2]), Number(m[3] || 40)];
-    if (!(from > 0 && to >= from && step > 0)) throw new Error(`widths: неверный диапазон ${s}`);
+    if (!(from > 0 && to >= from && step > 0)) throw new Error(`widths: invalid range ${s}`);
     const out = [];
     for (let w = from; w <= to; w += step) out.push(w);
     if (out[out.length - 1] !== to) out.push(to);
     return out;
   }
   const list = s.split(',').map((x) => Number(x.trim())).filter((x) => x > 0);
-  if (!list.length) throw new Error(`widths: пусто (${s})`);
+  if (!list.length) throw new Error(`widths: empty (${s})`);
   return list;
 }
 
@@ -57,8 +57,8 @@ export function checkBoxes(elems, { innerWidth, blockBottom, scrollWidth }) {
   if (scrollWidth > innerWidth + 1) issues.push({ kind: 'overflow', detail: `scrollWidth ${scrollWidth} > ${innerWidth}` });
   const content = elems.filter((e) => e.visible && e.type !== 'shape');
   for (const e of content) {
-    if (e.box.right > innerWidth + 1 || e.box.left < -1) issues.push({ kind: 'outside', elem: e.id, type: e.type, detail: `left ${Math.round(e.box.left)}, right ${Math.round(e.box.right)} при ширине ${innerWidth}`, text: e.text });
-    if (e.box.bottom > blockBottom + 1) issues.push({ kind: 'below', elem: e.id, type: e.type, detail: `низ ${Math.round(e.box.bottom)} > низ блока ${Math.round(blockBottom)}`, text: e.text });
+    if (e.box.right > innerWidth + 1 || e.box.left < -1) issues.push({ kind: 'outside', elem: e.id, type: e.type, detail: `left ${Math.round(e.box.left)}, right ${Math.round(e.box.right)} at width ${innerWidth}`, text: e.text });
+    if (e.box.bottom > blockBottom + 1) issues.push({ kind: 'below', elem: e.id, type: e.type, detail: `bottom ${Math.round(e.box.bottom)} > block bottom ${Math.round(blockBottom)}`, text: e.text });
     if (e.type === 'text' && e.clipped) issues.push({ kind: 'clipped', elem: e.id, type: e.type, detail: `scrollHeight ${e.scrollHeight} > clientHeight ${e.clientHeight}`, text: e.text });
   }
   for (let i = 0; i < content.length; i++) {
@@ -84,7 +84,7 @@ export function checkBoxes(elems, { innerWidth, blockBottom, scrollWidth }) {
 async function measureBlock(page, recordid) {
   return page.evaluate((rid) => {
     const block = document.getElementById(`rec${rid}`);
-    if (!block) return { error: `блок rec${rid} не найден` };
+    if (!block) return { error: `block rec${rid} not found` };
     const br = block.getBoundingClientRect();
     const sy = window.scrollY;
     const elems = [...block.querySelectorAll('.t396__elem')].map((el) => {
@@ -105,7 +105,7 @@ async function measureBlock(page, recordid) {
 
 export async function sweep({ pageid, recordid, widths, outDir, projectid, settleMs = 700, mode = 'reload' }) {
   const st = daemonStatus();
-  if (!st) throw new Error('держатель браузера не запущен: node scripts/tilda.mjs browser start');
+  if (!st) throw new Error('the browser holder is not running: node scripts/tilda.mjs browser start');
   mkdirSync(outDir, { recursive: true });
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${st.port}`, { timeout: 15_000 });
   const context = browser.contexts()[0];
@@ -124,7 +124,7 @@ export async function sweep({ pageid, recordid, widths, outDir, projectid, settl
       await page.evaluate(() => document.fonts.ready).catch(() => {});
       await page.addStyleTag({ content: '.t-animate, [data-animate-style], .t396__elem { opacity: 1 !important; transform: none !important; }' });
       const records = await page.evaluate(() => document.querySelectorAll('.t-rec').length);
-      if (!records) throw new Error(`на предпросмотре нет блоков — сессия? url ${page.url()}`);
+      if (!records) throw new Error(`no blocks on the preview - is the session alive? url ${page.url()}`);
       const hiddenFixed = await page.evaluate((rid) => {
         const block = document.getElementById(`rec${rid}`);
         let n = 0;
@@ -179,12 +179,12 @@ export async function sweep({ pageid, recordid, widths, outDir, projectid, settl
 }
 
 function printTable(report) {
-  console.log(`\nблок ${report.recordid} на странице ${report.pageid}: ширины ${report.widths.join(', ')}`);
-  console.log('ширина | высота | нарушения');
+  console.log(`\nblock ${report.recordid} on page ${report.pageid}: widths ${report.widths.join(', ')}`);
+  console.log('width | height | issues');
   for (const r of report.results) {
     const kinds = {};
     for (const i of r.issues) kinds[i.kind] = (kinds[i.kind] || 0) + 1;
-    const s = Object.entries(kinds).map(([k, n]) => `${k}×${n}`).join(' ') || 'нет';
+    const s = Object.entries(kinds).map(([k, n]) => `${k}×${n}`).join(' ') || 'none';
     console.log(`${String(r.width).padStart(6)} | ${String(r.blockHeight).padStart(6)} | ${s}`);
     for (const i of r.issues) console.log(`         · ${i.kind} ${i.type || ''} ${i.elem || ''}${i.other ? '+' + i.other : ''}: ${i.detail}${i.text ? ' — «' + i.text + '»' : ''}`);
   }
@@ -194,14 +194,14 @@ const isMain = process.argv[1] && /layout-sweep\.mjs$/.test(process.argv[1].repl
 if (isMain) {
   const { values } = parseArgs({ options: { page: { type: 'string' }, block: { type: 'string' }, widths: { type: 'string' }, out: { type: 'string' }, tag: { type: 'string' }, mode: { type: 'string' } } });
   const mode = values.mode === 'resize' ? 'resize' : 'reload';
-  if (!values.page || !values.block) { console.error('нужно --page <pageid> --block <recordid>'); process.exit(2); }
+  if (!values.page || !values.block) { console.error('--page <pageid> --block <recordid> are required'); process.exit(2); }
   const widths = parseWidthSpec(values.widths);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const outDir = values.out || join(baselineDir(), 'shots', String(values.page), `sweep-${values.block}-${values.tag || stamp}`);
   sweep({ pageid: values.page, recordid: values.block, widths, outDir, mode }).then((report) => {
     printTable(report);
     const total = report.results.reduce((n, r) => n + r.issues.length, 0);
-    console.log(`\nитого нарушений: ${total}; снимки и report.json — ${outDir}`);
+    console.log(`\ntotal issues: ${total}; screenshots and report.json — ${outDir}`);
     process.exit(total ? 1 : 0);
   }).catch((e) => { log.error('main', e.message); console.error(e.stack); process.exit(1); });
 }

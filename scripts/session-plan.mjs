@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createLogger } from './lib/log.mjs';
+import { attachMessage, messageText, msg } from './lib/i18n.mjs';
 import { baselineDir, plansDir, protectedPages } from './lib/paths.mjs';
 import { prepare } from './apply-plan.mjs';
 
@@ -26,7 +27,8 @@ export const OP_KINDS = ['set', 'field', 'listSet', 'blockSet', 'blockHidden', '
 
 export class StageError extends Error {
   constructor(code, message, data = {}) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
     this.name = 'StageError';
     this.code = code;
     Object.assign(this, data);
@@ -44,20 +46,21 @@ export function sessionName(pageid, at = new Date()) {
 /** Вид операции: единственный ключ из OP_KINDS; отсутствие или два сразу — ошибка формы. */
 export function opKind(op) {
   const kinds = OP_KINDS.filter((k) => op && op[k] !== undefined);
-  if (kinds.length !== 1) throw new StageError('BAD_OP', `операция должна содержать ровно один из ${OP_KINDS.join(', ')}, найдено: ${kinds.join(', ') || 'ничего'}`);
+  if (kinds.length === 0) throw new StageError('BAD_OP', msg('stage.opKindNone', { kinds: OP_KINDS.join(', ') }));
+  if (kinds.length > 1) throw new StageError('BAD_OP', msg('stage.opKindMany', { kinds: OP_KINDS.join(', '), found: kinds.join(', ') }));
   return kinds[0];
 }
 
 /** Проверка формы операции до постановки в план (без снимков и сети). */
 export function validateOp(op) {
-  if (!op || typeof op !== 'object' || Array.isArray(op)) throw new StageError('BAD_OP', 'операция должна быть объектом JSON');
+  if (!op || typeof op !== 'object' || Array.isArray(op)) throw new StageError('BAD_OP', msg('stage.opNotObject'));
   const kind = opKind(op);
   const needsBlock = !['setOrder', 'addZero', 'addRecord', 'newRecord'].includes(kind);
-  if (needsBlock && (!op.block || (op.block.recordid === undefined && op.block.zeroIndex === undefined))) throw new StageError('BAD_OP', `${kind}: нужен block с recordid или zeroIndex`);
+  if (needsBlock && (!op.block || (op.block.recordid === undefined && op.block.zeroIndex === undefined))) throw new StageError('BAD_OP', msg('stage.opNeedsBlock', { kind }));
   const needsElem = ['set', 'duplicateElement', 'removeElement', 'gallerySet'].includes(kind);
-  if (needsElem && (!op.elem || typeof op.elem !== 'object')) throw new StageError('BAD_OP', `${kind}: нужен elem (elem_id, text или textIncludes)`);
-  if (kind === 'set' && (typeof op.set !== 'object' || !Object.keys(op.set).length)) throw new StageError('BAD_OP', 'set: нужен объект с полями');
-  if (kind === 'field' && (!op.field || !op.field.name)) throw new StageError('BAD_OP', 'field: нужны name и value');
+  if (needsElem && (!op.elem || typeof op.elem !== 'object')) throw new StageError('BAD_OP', msg('stage.opNeedsElem', { kind }));
+  if (kind === 'set' && (typeof op.set !== 'object' || !Object.keys(op.set).length)) throw new StageError('BAD_OP', msg('stage.opSetNeedsFields'));
+  if (kind === 'field' && (!op.field || !op.field.name)) throw new StageError('BAD_OP', msg('stage.opFieldNeedsName'));
   return kind;
 }
 
@@ -107,7 +110,7 @@ export function listSessions(pageid, opts = {}) {
 /** Текущий незакрытый план страницы либо новый (создаётся при первом stage). */
 export function openSession(pageid, opts = {}) {
   const page = String(pageid);
-  if (protectedPages().includes(page)) throw new StageError('PROTECTED_PAGE', `страница ${page} защищена от записи (TILDA_PROTECTED_PAGES)`);
+  if (protectedPages().includes(page)) throw new StageError('PROTECTED_PAGE', msg('stage.protectedPage', { page }));
   const open = listSessions(page, opts).find((s) => !s.session.applied);
   if (open) {
     log.debug('openSession', 'открытый план найден', { path: open.path, ops: open.session.ops.length });
@@ -138,7 +141,7 @@ export function stageOp(session, op) {
   const prevKind = opKind(prev);
   if (incompatible(prevKind, kind)) {
     log.error('stageOp', 'несовместимые операции по одному адресу', { address, prev: prevKind, next: kind });
-    throw new StageError('STAGE_CONFLICT', `по адресу ${address} уже стоит ${prevKind}, ${kind} с ним несовместим — сначала drop или другая адресация`, { address, prev: prevKind, next: kind });
+    throw new StageError('STAGE_CONFLICT', msg('stage.conflict', { address, prevKind, kind }), { address, prev: prevKind, next: kind });
   }
   if (prevKind === 'set' && kind === 'set') {
     const overwritten = Object.keys(op.set).filter((f) => f in prev.set && JSON.stringify(prev.set[f]) !== JSON.stringify(op.set[f]));
@@ -152,7 +155,7 @@ export function stageOp(session, op) {
   return { action: 'replaced', index: idx, kind, address, overwritten: [prevKind] };
 }
 
-/** Одна строка на изменение — для diff и итога apply. */
+/** Одна строка на изменение — для diff и итога apply: строка-описание или `Message` (для описаний с текстом). */
 export function describePayloads(payloads) {
   return payloads.flatMap((p) =>
     p.kind === 'zero'
@@ -162,12 +165,12 @@ export function describePayloads(payloads) {
         : p.kind === 'list'
           ? (p.changes || []).map((c) => `${p.recordid} list ${c.op}${c.lid ? ` ${c.lid}` : ''}${c.field ? ` .${c.field}` : ''}: ${JSON.stringify(c.from)} → ${JSON.stringify(c.to)}`)
           : p.kind === 'sort'
-            ? (p.moves || []).map((m) => `${m.recordid}: позиция ${m.from} → ${m.to}`)
+            ? (p.moves || []).map((m) => msg('stage.change.position', { recordid: m.recordid, from: m.from, to: m.to }))
             : p.kind === 'block'
               ? [`${p.recordid} blockHidden → ${p.hidden}`]
               : p.mode === 'new'
-                ? [`создать ${p.id} из полей (tpl ${p.tplid}, полей ${(p.fields || []).length})`]
-                : [`создать ${p.id} из ${p.source.page}/${p.source.recordid} (tpl ${p.tplid})`],
+                ? [msg('stage.change.createFromFields', { id: p.id, tplid: p.tplid, fields: (p.fields || []).length })]
+                : [msg('stage.change.createFromSource', { id: p.id, page: p.source.page, recordid: p.source.recordid, tplid: p.tplid })],
   );
 }
 
@@ -192,7 +195,7 @@ export function markApplied(session, at = new Date().toISOString(), opts = {}) {
 }
 
 export function dropSession(path) {
-  if (!existsSync(path)) throw new StageError('NO_SESSION', `план не найден: ${path}`);
+  if (!existsSync(path)) throw new StageError('NO_SESSION', msg('stage.noSession', { path }));
   rmSync(path);
   log.info('dropSession', 'план реплик удалён', { path });
   return path;
@@ -201,16 +204,16 @@ export function dropSession(path) {
 /** Разбор операции из аргумента команды: JSON-строка либо путь к файлу с операцией или планом. */
 export function parseOpArgument(arg) {
   const text = String(arg || '').trim();
-  if (!text) throw new StageError('BAD_OP', 'нужна операция: JSON-строка или путь к файлу');
+  if (!text) throw new StageError('BAD_OP', msg('stage.opRequired'));
   let value;
   if (text.startsWith('{') || text.startsWith('[')) {
     try {
       value = JSON.parse(text);
     } catch (e) {
-      throw new StageError('BAD_OP', `операция не разбирается как JSON: ${e.message}`);
+      throw new StageError('BAD_OP', msg('stage.opBadJson', { error: e.message }));
     }
   } else {
-    if (!existsSync(text)) throw new StageError('BAD_OP', `файл операции не найден: ${text}`);
+    if (!existsSync(text)) throw new StageError('BAD_OP', msg('stage.opFileNotFound', { path: text }));
     value = readJson(text);
   }
   if (Array.isArray(value)) return value;

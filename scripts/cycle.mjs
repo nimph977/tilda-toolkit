@@ -19,6 +19,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
+import { ToolError } from './lib/tool-error.mjs';
+import { msg } from './lib/i18n.mjs';
 import { baselineDir, protectedPages } from './lib/paths.mjs';
 import { save as saveSnapshot, load as loadSnapshot } from './snapshot.mjs';
 import { prepare, verify, resolveBlock, RECORD_SKIP_FIELDS, applyImageUpload, buildBlockSpecs } from './apply-plan.mjs';
@@ -49,7 +51,7 @@ function writeJson(path, data) {
 function assertWritable(pageid, fn) {
   if (protectedPages().includes(String(pageid))) {
     log.error(fn, 'страница защищена от записи (TILDA_PROTECTED_PAGES)', { pageid: String(pageid) });
-    throw new Error(`PROTECTED_PAGE ${pageid}`);
+    throw new ToolError('PROTECTED_PAGE', msg('cycle.protectedPage', { pageid }));
   }
 }
 
@@ -137,7 +139,7 @@ export function planTargets(plan, opts = {}) {
       const spec = op.addZero || op.addRecord;
       const page = String((spec.source && spec.source.page) || (plan.source && plan.source.page) || '');
       const recordid = String((spec.source && spec.source.recordid) || '');
-      if (!page || !recordid) throw new Error(`op#${i}: нужен source.page и source.recordid`);
+      if (!page || !recordid) throw new ToolError('PLAN_INVALID', msg('cycle.sourceRequired', { i }));
       add({ kind: op.addZero ? 'zero' : 'record', page, recordid, role: 'source' });
       return;
     }
@@ -210,7 +212,7 @@ async function writePayload(driver, p, plan) {
   else if (p.kind === 'list') result = await driver.call('saveRecordFull', [p.pageid, p.recordid, p.fields]);
   else if (p.kind === 'sort') result = await driver.call('saveRecordsSort', [p.pageid, p.order]);
   else if (p.kind === 'block') result = await driver.call('setBlockHidden', [p.pageid, p.recordid, p.hidden]);
-  else throw new Error(`неизвестный payload: ${p.kind}`);
+  else throw new Error(`unknown payload: ${p.kind}`);
   log.debug('writePayload', 'записано', { kind: p.kind, recordid: p.recordid, field: p.field, ms: Date.now() - started, result: typeof result === 'string' ? result : JSON.stringify(result).slice(0, 80) });
   return result;
 }
@@ -243,7 +245,7 @@ export function touchesLayout(plan) {
 export async function apply(driver, plan, opts = {}) {
   const pageid = String(plan.page);
   assertWritable(pageid, 'apply');
-  if (!Array.isArray(plan.ops) || plan.ops.length === 0) throw new Error('план без операций');
+  if (!Array.isArray(plan.ops) || plan.ops.length === 0) throw new ToolError('PLAN_INVALID', msg('cycle.noOps'));
   const { baseDir, out, reread } = paths(opts);
   const t0 = Date.now();
   log.info('apply', 'старт цикла', { pageid, ops: plan.ops.length, dryRun: Boolean(opts.dryRun) });
@@ -443,7 +445,7 @@ export async function preview(driver, plan, opts = {}) {
       fields = names.filter((n) => !RECORD_SKIP_FIELDS.has(n)).map((n) => ({ name: n, value: n === p.field ? String(p.value) : decodeEntities(rec[n] ?? '') }));
       if (!fields.some((f) => f.name === p.field)) fields.push({ name: p.field, value: String(p.value) });
     } else {
-      skipped.push({ recordid: p.recordid, kind: p.kind, reason: p.kind === 'zero' ? 'Zero Block пишется savezerocode — серверного предпросмотра нет' : `предпросмотр для ${p.kind} не предусмотрен` });
+      skipped.push({ recordid: p.recordid, kind: p.kind, reason: p.kind === 'zero' ? msg('cycle.skip.zeroNoPreview') : msg('cycle.skip.previewNotProvided', { kind: p.kind }) });
       continue;
     }
     const r = await driver.call('previewRecord', [pageid, p.recordid, fields, { render: true }]);
@@ -510,8 +512,8 @@ export async function verifyPlan(driver, plan, opts = {}) {
 
 /** Читает план из файла с проверкой формы. */
 export function readPlan(path) {
-  if (!existsSync(path)) throw new Error(`план не найден: ${path}`);
+  if (!existsSync(path)) throw new ToolError('PLAN_NOT_FOUND', msg('cycle.planNotFound', { path }));
   const plan = JSON.parse(readFileSync(path, 'utf8'));
-  if (!plan.page) throw new Error(`план ${path}: нет поля page`);
+  if (!plan.page) throw new ToolError('PLAN_INVALID', msg('cycle.planNoPage', { path }));
   return plan;
 }

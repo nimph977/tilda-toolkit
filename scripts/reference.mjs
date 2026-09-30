@@ -13,6 +13,8 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { createLogger } from './lib/log.mjs';
+import { msg } from './lib/i18n.mjs';
+import { ToolError } from './lib/tool-error.mjs';
 import { splitRecords } from './lib/html-blocks.mjs';
 import {
   assertSlug, ensureDirs, imageFileName, isLabel, newManifest, pageNameFromUrl,
@@ -34,10 +36,7 @@ export function sleep(ms) {
 }
 
 function usageError(message, code) {
-  const err = new Error(message);
-  err.code = code;
-  err.exitCode = 2;
-  return err;
+  return new ToolError(code, message, { exitCode: 2 });
 }
 
 function assertHttpUrl(url) {
@@ -45,10 +44,10 @@ function assertHttpUrl(url) {
   try {
     parsed = new URL(url);
   } catch {
-    throw usageError(`недопустимый URL референса: ${JSON.stringify(url)}`, 'BAD_URL');
+    throw usageError(msg('reference.badUrl', { url: JSON.stringify(url) }), 'BAD_URL');
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw usageError(`URL референса должен быть http(s): ${parsed.protocol}`, 'BAD_URL');
+    throw usageError(msg('reference.urlNotHttp', { protocol: parsed.protocol }), 'BAD_URL');
   }
   return parsed.href;
 }
@@ -308,7 +307,7 @@ export async function fetchReference(
       const relFile = relative(paths.root, file).replace(/\\/g, '/');
       if (splitRecords(html).length === 0) {
         log.warn('fetchReference', 'страница без блоков Tilda', { name });
-        upsertPage(manifest, { name, url: u, file: relFile, status: 'empty', error: 'нет блоков Tilda в HTML (заглушка?)', fetchedAt });
+        upsertPage(manifest, { name, url: u, file: relFile, status: 'empty', error: 'no Tilda blocks in the HTML (a stub page?)', fetchedAt });
         writeManifest(slug, manifest, { baseDir });
         stats.failed += 1;
         await sleep(delayMs);
@@ -349,10 +348,7 @@ export async function fetchReference(
 }
 
 function refError(message, code, exitCode) {
-  const err = new Error(message);
-  err.code = code;
-  err.exitCode = exitCode;
-  return err;
+  return new ToolError(code, message, { exitCode });
 }
 
 /**
@@ -364,12 +360,12 @@ function refError(message, code, exitCode) {
  */
 export async function shotReference({ slug, source, widths, baseDir, settleMs, stamp }, deps = {}) {
   assertSlug(slug);
-  if (!isLabel(source)) throw refError(`reference shot: нужна метка карты сайта (P00…), получено ${JSON.stringify(source)}`, 'LABEL_REQUIRED', 2);
+  if (!isLabel(source)) throw refError(msg('reference.labelRequired', { source: JSON.stringify(source) }), 'LABEL_REQUIRED', 2);
   const site = readSite(slug, { baseDir });
-  if (!site) throw refError(`карты сайта ${slug} нет: сначала reference pages --slug ${slug}`, 'NO_SITE', 1);
+  if (!site) throw refError(msg('reference.noSite', { slug }), 'NO_SITE', 1);
   const entry = resolveSource(site, source);
-  if (!entry) throw refError(`метки ${source} нет в карте сайта ${slug}`, 'UNKNOWN_LABEL', 2);
-  if (!entry.url) throw refError(`у ${source} нет своего адреса: шапка и подвал видны на снимке любой страницы — снимайте P00`, 'NO_REFERENCE_URL', 2);
+  if (!entry) throw refError(msg('reference.unknownLabel', { source, slug }), 'UNKNOWN_LABEL', 2);
+  if (!entry.url) throw refError(msg('reference.noReferenceUrl', { source }), 'NO_REFERENCE_URL', 2);
   const dir = join(refPaths(slug, { baseDir }).root, 'shots', source);
   const browser = deps.browser || (await import('./lib/browser.mjs'));
   const { captureWidths } = await import('./shot.mjs');
@@ -383,7 +379,7 @@ export async function shotReference({ slug, source, widths, baseDir, settleMs, s
       r = await captureWidths(page, { url: entry.url, widths, outDir: dir, settleMs, stamp, requireOk: true });
     } catch (e) {
       if (e.code !== 'NAV_FAILED') throw e;
-      throw refError(`страница референса ${source} недоступна: HTTP ${e.status}`, 'REFERENCE_UNAVAILABLE', 1);
+      throw refError(msg('reference.pageUnavailable', { source, status: e.status }), 'REFERENCE_UNAVAILABLE', 1);
     }
     const out = { label: source, dir, files: r.files.length, widths: r.widths.map((w) => ({ width: w.width, height: w.height, records: w.records, files: w.files.length })) };
     log.info('shotReference', 'снимок референса', { label: source, widths: out.widths.map((w) => w.width), files: out.files });
@@ -398,12 +394,7 @@ export async function shotReference({ slug, source, widths, baseDir, settleMs, s
 export async function structureReference({ slug, baseDir }) {
   assertSlug(slug);
   const manifest = readManifest(slug, { baseDir });
-  if (!manifest) {
-    const err = new Error(`слепок ${slug} не найден: сначала reference fetch`);
-    err.code = 'NO_MANIFEST';
-    err.exitCode = 1;
-    throw err;
-  }
+  if (!manifest) throw refError(msg('reference.noManifest', { slug }), 'NO_MANIFEST', 1);
   const paths = refPaths(slug, { baseDir });
   const tplids = new Set();
   let pages = 0;

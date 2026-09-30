@@ -9,18 +9,20 @@
  * CLI печатает человеку пошаговую инструкцию.
  */
 import { createLogger } from './lib/log.mjs';
+import { attachMessage, messageText, msg } from './lib/i18n.mjs';
 import { editorUrl } from './lib/browser.mjs';
 import { parseNumericId, resolveProjectId } from './lib/config.mjs';
 
 const log = createLogger('page-ops');
 
 /** Маркер подтверждения публикации — копия в браузерном слое (T.PUBLISH_CONFIRM). */
-export const PUBLISH_CONFIRM = 'опубликовать';
+export const PUBLISH_CONFIRM = 'publish';
 export const BLANK_EXAMPLE_PAGE = '1231';
 
 export class PageOpError extends Error {
   constructor(code, message, data = {}) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
     this.name = 'PageOpError';
     this.code = code;
     Object.assign(this, data);
@@ -36,10 +38,10 @@ export function parseNewPageResponse(text, { comm = 'dublicatepage' } = {}) {
   if (/^\d+$/.test(value)) return { pageid: value };
   if (/you created maximum/i.test(value)) {
     log.error('parseNewPageResponse', 'исчерпан лимит страниц', { comm, text: value.slice(0, 200) });
-    throw new PageOpError('PAGE_LIMIT', `Тильда: исчерпан лимит страниц тарифа (${comm}): ${value.slice(0, 200)}`, { text: value });
+    throw new PageOpError('PAGE_LIMIT', msg('pageOps.pageLimit', { comm, text: value.slice(0, 200) }), { text: value });
   }
   log.error('parseNewPageResponse', 'ответ не похож на pageid', { comm, text: value.slice(0, 200) });
-  throw new PageOpError('PAGE_CREATE_FAILED', `${comm}: ожидался pageid, получено «${value.slice(0, 200)}»`, { text: value });
+  throw new PageOpError('PAGE_CREATE_FAILED', msg('pageOps.createFailed', { comm, text: value.slice(0, 200) }), { text: value });
 }
 
 /**
@@ -59,14 +61,14 @@ export function parsePublishResponse(text) {
       return { link: json.link || json.linkstr || '', wslink: json.wslink || '', customdomain: json.customdomain || '', raw: json };
     }
     if (json.error || json.errors) {
-      throw new PageOpError('PUBLISH_FAILED', `Тильда отказала в публикации: ${JSON.stringify(json.error || json.errors).slice(0, 200)}`, { text: value });
+      throw new PageOpError('PUBLISH_FAILED', msg('pageOps.publishRefused', { details: JSON.stringify(json.error || json.errors).slice(0, 200) }), { text: value });
     }
   }
-  if (/manual restriction for publishing/i.test(value)) throw new PageOpError('PUBLISH_BANNED', `публикация запрещена вручную администрацией Тильды: ${value.slice(0, 200)}`, { text: value });
-  if (/restriction for publishing/i.test(value)) throw new PageOpError('PUBLISH_BANNED', `публикация ограничена: ${value.slice(0, 200)}`, { text: value });
-  if (/err_technical_maintenance/i.test(value)) throw new PageOpError('PUBLISH_UNAVAILABLE', 'публикация временно недоступна (технические работы Тильды)', { text: value });
-  if (/work on server/i.test(value)) throw new PageOpError('PUBLISH_SERVER_ERROR', `ошибка сервера Тильды при публикации: ${value.slice(0, 200)}`, { text: value });
-  throw new PageOpError('PUBLISH_FAILED', `pagepublish: неожиданный ответ «${value.slice(0, 200)}»`, { text: value });
+  if (/manual restriction for publishing/i.test(value)) throw new PageOpError('PUBLISH_BANNED', msg('pageOps.publishBannedManual', { text: value.slice(0, 200) }), { text: value });
+  if (/restriction for publishing/i.test(value)) throw new PageOpError('PUBLISH_BANNED', msg('pageOps.publishRestricted', { text: value.slice(0, 200) }), { text: value });
+  if (/err_technical_maintenance/i.test(value)) throw new PageOpError('PUBLISH_UNAVAILABLE', msg('pageOps.publishUnavailable'), { text: value });
+  if (/work on server/i.test(value)) throw new PageOpError('PUBLISH_SERVER_ERROR', msg('pageOps.publishServerError', { text: value.slice(0, 200) }), { text: value });
+  throw new PageOpError('PUBLISH_FAILED', msg('pageOps.publishUnexpected', { text: value.slice(0, 200) }), { text: value });
 }
 
 /** Дубль страницы: источник только читается (это шаг бэкапа живой главной при накате `promote`). */
@@ -91,17 +93,17 @@ export function pageTitleFor(entry = {}) {
 export async function setPageTitle(driver, pageid, title, { protectedIds = [] } = {}) {
   const id = parseNumericId(pageid, 'pageid');
   const text = String(title ?? '').trim();
-  if (!text) throw new PageOpError('TITLE_EMPTY', 'заголовок страницы пуст');
+  if (!text) throw new PageOpError('TITLE_EMPTY', msg('pageOps.titleEmpty'));
   if (protectedIds.map(String).includes(id)) {
     log.error('setPageTitle', 'страница защищена — отказ до драйвера', { pageid: id });
-    throw new PageOpError('PROTECTED_PAGE', `страница ${id} защищена (TILDA_PROTECTED_PAGES)`, { pageid: id });
+    throw new PageOpError('PROTECTED_PAGE', msg('pageOps.protectedPage', { id }), { pageid: id });
   }
   log.debug('setPageTitle', 'запись заголовка', { pageid: id, length: text.length, mode: TITLE_WRITE_MODE });
   const r = await driver.callWithResponse('setPageTitle', [id, text], { urlPart: '/projects/submit/', bodyPart: 'comm=savepagesettings' });
   const answer = String(r?.text ?? '').trim();
   if (answer !== 'OK' && answer !== '') {
     log.error('setPageTitle', 'ответ не OK', { pageid: id, status: r?.status, body: answer.slice(0, 120) });
-    throw new PageOpError('TITLE_NOT_SAVED', `заголовок страницы ${id} не сохранён: ${answer.slice(0, 120)}`, { pageid: id, text: answer });
+    throw new PageOpError('TITLE_NOT_SAVED', msg('pageOps.titleNotSaved', { id, text: answer.slice(0, 120) }), { pageid: id, text: answer });
   }
   log.info('setPageTitle', 'заголовок записан', { pageid: id, length: text.length });
   return { pageid: id, title: text };
@@ -130,22 +132,22 @@ export async function setPageAlias(driver, pageid, alias, { protectedIds = [] } 
   const value = normalizePageAlias(alias);
   if (!ALIAS_RE.test(value)) {
     log.error('setPageAlias', 'адрес не подходит — отказ до драйвера', { pageid: id, length: value.length });
-    throw new PageOpError('ALIAS_INVALID', `адрес страницы ${id} пуст или содержит недопустимые символы (допустимы a-z, 0-9, "-", "_", "/")`, { pageid: id });
+    throw new PageOpError('ALIAS_INVALID', msg('pageOps.aliasInvalid', { id }), { pageid: id });
   }
   if (protectedIds.map(String).includes(id)) {
     log.error('setPageAlias', 'страница защищена — отказ до драйвера', { pageid: id });
-    throw new PageOpError('PROTECTED_PAGE', `страница ${id} защищена (TILDA_PROTECTED_PAGES)`, { pageid: id });
+    throw new PageOpError('PROTECTED_PAGE', msg('pageOps.protectedPage', { id }), { pageid: id });
   }
   log.debug('setPageAlias', 'запись адреса', { pageid: id, alias: value });
   const r = await driver.callWithResponse('setPageAlias', [id, value], { urlPart: '/projects/submit/', bodyPart: 'comm=savepagesettings' });
   const answer = String(r?.text ?? '').trim();
   if (ALIAS_TAKEN_RE.test(answer)) {
     log.warn('setPageAlias', 'адрес занят другой страницей проекта', { pageid: id });
-    throw new PageOpError('ALIAS_TAKEN', `адрес страницы ${id} занят другой страницей проекта`, { pageid: id, text: answer });
+    throw new PageOpError('ALIAS_TAKEN', msg('pageOps.aliasTaken', { id }), { pageid: id, text: answer });
   }
   if (answer !== 'OK' && answer !== '') {
     log.error('setPageAlias', 'ответ не OK', { pageid: id, status: r?.status, body: answer.slice(0, 120) });
-    throw new PageOpError('ALIAS_NOT_SAVED', `адрес страницы ${id} не сохранён: ${answer.slice(0, 120)}`, { pageid: id, text: answer });
+    throw new PageOpError('ALIAS_NOT_SAVED', msg('pageOps.aliasNotSaved', { id, text: answer.slice(0, 120) }), { pageid: id, text: answer });
   }
   log.info('setPageAlias', 'адрес записан', { pageid: id });
   return { pageid: id, alias: value };
@@ -176,10 +178,10 @@ export async function createPage(driver, { projectid, examplepageid = BLANK_EXAM
  */
 export async function publishPage(driver, pageid, opts = {}) {
   const id = String(pageid || '');
-  if (!id) throw new PageOpError('PUBLISH_NO_PAGE', 'publish: страница не указана — нужен явный --page <pageid>');
+  if (!id) throw new PageOpError('PUBLISH_NO_PAGE', msg('pageOps.publishNoPage'));
   if (opts.confirmed !== true) {
     log.warn('publishPage', 'публикация без подтверждения — отказ до обращения к браузеру', { pageid: id });
-    throw new PageOpError('PUBLISH_NOT_CONFIRMED', `публикация страницы ${id} требует явного подтверждения: повторите команду с --confirm`, { pageid: id });
+    throw new PageOpError('PUBLISH_NOT_CONFIRMED', msg('pageOps.publishNotConfirmed', { id }), { pageid: id });
   }
   log.debug('publishPage', 'запрос публикации', { pageid: id });
   const r = await driver.call('publishPage', [id, PUBLISH_CONFIRM]);
@@ -188,15 +190,15 @@ export async function publishPage(driver, pageid, opts = {}) {
   return { pageid: id, ...parsed };
 }
 
-/** Удаление страниц — вне автоматизации: пошаговая инструкция человеку. */
+/** Удаление страниц — вне автоматизации: пошаговая инструкция человеку (список `Message`). */
 export function deletePageInstructions(pageid, { projectid } = {}) {
   projectid = resolveProjectId(projectid);
   const id = String(pageid);
   return [
-    `Удаление страницы ${id} делает человек (правило AGENTS.md: удаление и перенос страниц вне автоматизации).`,
-    `1. Открой список страниц проекта: https://tilda.ru/projects/?projectid=${projectid}`,
-    `2. Найди страницу ${id} (ссылка редактора: ${editorUrl(id, projectid)}), проверь заголовок и что это не живая главная.`,
-    '3. Меню страницы (⋯ или шестерёнка) → «Удалить» → подтверди.',
-    `4. Проверь, что страницы нет в списке; локальные снимки <папка сайта>/site-baseline/*/${id}/ можно оставить как историю.`,
+    msg('pageOps.deleteStepIntro', { id }),
+    msg('pageOps.deleteStepList', { url: `https://tilda.ru/projects/?projectid=${projectid}` }),
+    msg('pageOps.deleteStepFind', { id, editorUrl: editorUrl(id, projectid) }),
+    msg('pageOps.deleteStepMenu'),
+    msg('pageOps.deleteStepCheck', { id }),
   ];
 }

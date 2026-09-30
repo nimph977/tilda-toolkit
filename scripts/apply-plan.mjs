@@ -27,8 +27,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createLogger } from './lib/log.mjs';
+import { ToolError } from './lib/tool-error.mjs';
+import { msg, messageText } from './lib/i18n.mjs';
 import { baselineDir, protectedPages } from './lib/paths.mjs';
 import { load as loadSnapshot, snapshotPath } from './snapshot.mjs';
+import { verifyData } from './journal.mjs';
 import { findElement, setFields, diff, validate, duplicateElement, removeElement, setBlockFields } from './zero-model.mjs';
 import { assertNotFormField, assertNoScript, formFieldChanges } from './lib/form-fields.mjs';
 import { decodeEntities } from './lib/entities.mjs';
@@ -60,7 +63,7 @@ function loadInventory(pageid, opts) {
   const p = join(opts.baseDir, 'records', String(pageid), '_inventory.json');
   if (!existsSync(p)) {
     log.error('loadInventory', 'нет инвентаря страницы; снять через listRecords()', { path: p });
-    throw new Error(`NO_INVENTORY ${p}`);
+    throw new ToolError('NO_INVENTORY', msg('apply.noInventory', { path: p }));
   }
   return readJson(p);
 }
@@ -85,27 +88,27 @@ export function reorderBlocks(inventory, moves = [], setOrder = null) {
     const want = setOrder.map(String);
     if ([...want].sort().join() !== [...before].sort().join()) {
       log.error('reorderBlocks', 'setOrder не совпадает по составу с инвентарём', { inventory: before.length, setOrder: want.length });
-      throw new Error(`BAD_ORDER: setOrder должен содержать ровно те же ${before.length} recordid, что и инвентарь`);
+      throw new ToolError('BAD_ORDER', msg('apply.badOrder', { count: before.length }));
     }
     order = want;
   }
   for (const m of moves) {
     const id = String(m.recordid);
     const from = order.indexOf(id);
-    if (from < 0) throw new Error(`NO_RECORD ${id}: нет в инвентаре`);
+    if (from < 0) throw new ToolError('NO_RECORD', msg('apply.noRecord', { id }));
     order.splice(from, 1);
     let to;
     if (m.after !== undefined) {
       const i = order.indexOf(String(m.after));
-      if (i < 0) throw new Error(`NO_RECORD ${m.after}: нет в инвентаре (after)`);
+      if (i < 0) throw new ToolError('NO_RECORD', msg('apply.noRecordAfter', { id: m.after }));
       to = i + 1;
     } else if (m.before !== undefined) {
       const i = order.indexOf(String(m.before));
-      if (i < 0) throw new Error(`NO_RECORD ${m.before}: нет в инвентаре (before)`);
+      if (i < 0) throw new ToolError('NO_RECORD', msg('apply.noRecordBefore', { id: m.before }));
       to = i;
     } else if (m.index !== undefined) {
       to = Math.max(0, Math.min(order.length, Number(m.index)));
-    } else throw new Error(`moveBlock ${id}: нужен after, before или index`);
+    } else throw new ToolError('PLAN_INVALID', msg('apply.moveNeedsTarget', { id }));
     order.splice(to, 0, id);
     applied.push({ recordid: id, from, to: order.indexOf(id) });
     log.debug('reorderBlocks', 'перестановка', { recordid: id, from, to: order.indexOf(id) });
@@ -123,12 +126,12 @@ export function resolveBlock(block, pageid, opts) {
     const hit = inv.find((r) => r.zeroIndex === Number(block.zeroIndex));
     if (!hit) {
       log.error('resolveBlock', 'Zero Block с таким порядковым номером не найден', { pageid, zeroIndex: block.zeroIndex });
-      throw new Error(`NO_ZERO_INDEX ${block.zeroIndex}`);
+      throw new ToolError('NO_ZERO_INDEX', msg('apply.noZeroIndex', { zeroIndex: block.zeroIndex }));
     }
     log.debug('resolveBlock', 'zeroIndex → recordid', { zeroIndex: block.zeroIndex, recordid: hit.recordid });
     return String(hit.recordid);
   }
-  throw new Error('block: нужен recordid или zeroIndex');
+  throw new ToolError('PLAN_INVALID', msg('apply.blockNeedsId'));
 }
 
 /**
@@ -145,10 +148,10 @@ function prepareCreateOp(op, i, pageid, plan, o) {
   const source = { ...(spec.source || {}) };
   source.page = String(source.page || (plan.source && plan.source.page) || '');
   source.recordid = String(source.recordid || '');
-  if (!source.page || !source.recordid) throw new Error(`op#${i} (${id}): нужен source.page и source.recordid`);
+  if (!source.page || !source.recordid) throw new ToolError('PLAN_INVALID', msg('apply.sourceRequired', { i, id }));
   const tplid = String(op.addZero ? '396' : spec.tplid || '');
-  if (!tplid) throw new Error(`op#${i} (${id}): у addRecord нужен tplid`);
-  if (blockKind === 'record' && tplid === '396') throw new Error(`op#${i} (${id}): Zero Block копируется операцией addZero`);
+  if (!tplid) throw new ToolError('PLAN_INVALID', msg('apply.addRecordNeedsTplid', { i, id }));
+  if (blockKind === 'record' && tplid === '396') throw new ToolError('PLAN_INVALID', msg('apply.zeroCopyViaAddZero', { i, id }));
 
   // Снимок источника обязан существовать — иначе сверять получившийся блок будет не с чем.
   const snapshot = loadSnapshot({ kind: blockKind, pageid: source.page, recordid: source.recordid }, o);
@@ -212,7 +215,7 @@ function expectedCards(cards) {
  */
 function formContentOf(op, i, id) {
   if (op.formContent === undefined || op.formContent === null) return false;
-  if (op.formContent !== 'reference') throw new Error(`op#${i} (${id}): formContent допускает только 'reference'`);
+  if (op.formContent !== 'reference') throw new ToolError('PLAN_INVALID', msg('apply.formContentOnlyReference', { i, id }));
   return true;
 }
 
@@ -228,9 +231,9 @@ function formInputsOf(value, i, id, now) {
   try {
     items = JSON.parse(String(value));
   } catch {
-    throw new Error(`op#${i} (${id}): forminputs должно быть JSON-массивом элементов формы`);
+    throw new ToolError('PLAN_INVALID', msg('apply.formInputsNotArray', { i, id }));
   }
-  if (!Array.isArray(items)) throw new Error(`op#${i} (${id}): forminputs должно быть JSON-массивом элементов формы`);
+  if (!Array.isArray(items)) throw new ToolError('PLAN_INVALID', msg('apply.formInputsNotArray', { i, id }));
   return items.map((el, idx) => ({
     ...el,
     lid: el.lid ? String(el.lid) : newLid(items.slice(0, idx), now + idx),
@@ -244,22 +247,22 @@ function prepareNewOp(op, i, pageid, plan, o) {
   const id = op.id || `b${i + 1}`;
   const spec = op.newRecord;
   const tplid = String(spec.tplid || '');
-  if (!/^\d+$/.test(tplid)) throw new Error(`op#${i} (${id}): у newRecord нужен числовой tplid`);
-  if (tplid === '396') throw new Error(`op#${i} (${id}): Zero Block из полей не собирается`);
+  if (!/^\d+$/.test(tplid)) throw new ToolError('PLAN_INVALID', msg('apply.newRecordNeedsTplid', { i, id }));
+  if (tplid === '396') throw new ToolError('PLAN_INVALID', msg('apply.newRecordNoZero', { i, id }));
   const allowContent = formContentOf(op, i, id);
 
   const rawFields = Array.isArray(spec.fields) ? spec.fields : [];
   for (const f of rawFields) {
-    if (!f || typeof f.name !== 'string' || !f.name) throw new Error(`op#${i} (${id}): у поля newRecord нужно имя`);
-    if (typeof f.value !== 'string' && typeof f.value !== 'number') throw new Error(`op#${i} (${id}): значение поля ${f.name} должно быть строкой или числом`);
+    if (!f || typeof f.name !== 'string' || !f.name) throw new ToolError('PLAN_INVALID', msg('apply.fieldNeedsName', { i, id }));
+    if (typeof f.value !== 'string' && typeof f.value !== 'number') throw new ToolError('PLAN_INVALID', msg('apply.fieldValueType', { i, id, name: f.name }));
     assertNotFormField(f.name, { op: i }, { allowContent });
     assertNoScript(String(f.value), { op: i, field: f.name });
   }
   // Код HTML-блока: только у 131, не больше 25 КБ, без <script> (сбрасывает сессию Tilda).
   const code = spec.code === undefined || spec.code === null ? undefined : String(spec.code);
   if (code !== undefined) {
-    if (tplid !== '131') throw new Error(`op#${i} (${id}): code пишется только в HTML-блок 131, а не в ${tplid}`);
-    if (code.length > T123_CODE_LIMIT) throw new Error(`op#${i} (${id}): код HTML-блока ${code.length} байт больше лимита ${T123_CODE_LIMIT}`);
+    if (tplid !== '131') throw new ToolError('PLAN_INVALID', msg('apply.codeOnlyIn131', { i, id, tplid }));
+    if (code.length > T123_CODE_LIMIT) throw new ToolError('PLAN_INVALID', msg('apply.codeTooLong', { i, id, length: code.length, limit: T123_CODE_LIMIT }));
     assertNoScript(code, { op: i, field: 'code' });
   }
   const pendingImages = Array.isArray(spec.images) ? spec.images.filter((im) => im.file && !im.url) : [];
@@ -281,7 +284,7 @@ function prepareNewOp(op, i, pageid, plan, o) {
   let formItems = [];
   const formField = fields.find((f) => f.name === FORM_INPUTS_FIELD);
   if (formField) {
-    if (cards.length) throw new Error(`op#${i} (${id}): у newRecord не может быть одновременно cards и forminputs`);
+    if (cards.length) throw new ToolError('PLAN_INVALID', msg('apply.cardsAndFormInputs', { i, id }));
     formItems = formInputsOf(formField.value, i, id, now);
     formField.value = JSON.stringify(formItems);
     log.debug('prepare', 'поля формы', { id, items: formItems.length, types: formItems.map((x) => x.li_type) });
@@ -291,7 +294,7 @@ function prepareNewOp(op, i, pageid, plan, o) {
   if (cat === null) {
     log.warn('prepare', 'каталог для tplid не снят — имена полей не проверены', { id, tplid });
   } else if (cat.available === false) {
-    throw new Error(`op#${i} (${id}): шаблон ${tplid} недоступен на тарифе (каталог)`);
+    throw new ToolError('TEMPLATE_UNAVAILABLE', msg('apply.templateUnavailable', { i, id, tplid }));
   } else {
     // tplFields — полный список полей шаблона (buttonlink, rutubeid пустыми в tabs не видны).
     const allowed = new Set([...(cat.tabs?.content ?? []), ...(cat.tabs?.settings ?? []), ...(cat.tplFields ?? [])]);
@@ -353,12 +356,12 @@ export function imageUploadFields(field, up) {
  */
 export function applyImageUpload(op, image, up) {
   const spec = op.newRecord;
-  if (!spec) throw new Error('applyImageUpload: операция не newRecord');
+  if (!spec) throw new Error('applyImageUpload: the operation is not newRecord');
   const info = typeof up === 'string' ? { cdnUrl: up } : up;
-  if (!info || !info.cdnUrl) throw new Error('applyImageUpload: нет cdnUrl загрузки');
+  if (!info || !info.cdnUrl) throw new Error('applyImageUpload: the upload has no cdnUrl');
   if (image.card !== undefined) {
     const card = Array.isArray(spec.cards) ? spec.cards[image.card] : undefined;
-    if (!card) throw new Error(`applyImageUpload: карточки #${image.card} нет в операции`);
+    if (!card) throw new ToolError('PLAN_INVALID', msg('apply.imageCardMissing', { card: image.card }));
     card[image.field] = info.cdnUrl;
   } else {
     spec.fields = Array.isArray(spec.fields) ? spec.fields : [];
@@ -410,9 +413,9 @@ export function prepare(plan, opts = {}) {
   const pageid = String(plan.page);
   if (protectedPages().includes(pageid)) {
     log.error('prepare', 'страница защищена от записи (TILDA_PROTECTED_PAGES)', { pageid });
-    throw new Error(`PROTECTED_PAGE ${pageid}`);
+    throw new ToolError('PROTECTED_PAGE', msg('apply.protectedPage', { pageid }));
   }
-  if (!Array.isArray(plan.ops) || plan.ops.length === 0) throw new Error('план без операций');
+  if (!Array.isArray(plan.ops) || plan.ops.length === 0) throw new ToolError('PLAN_INVALID', msg('apply.noOps'));
   log.info('prepare', 'начало', { pageid, ops: plan.ops.length });
 
   const zeroWork = new Map(); // recordid → {before, model}
@@ -457,9 +460,7 @@ export function prepare(plan, opts = {}) {
       const present = FORM_FIELDS.filter((f) => f in rec && rec[f] !== '');
       if (present.length) {
         log.warn('prepare', 'отказ: блок с полями формы через listSet не пишется — полный saverecord переслал бы их', { recordid, fields: present });
-        const e = new Error(`FORM_FIELD_REJECTED ${recordid}: блок содержит ${present.join(', ')}`);
-        e.code = 'FORM_FIELD_REJECTED';
-        throw e;
+        throw new ToolError('FORM_FIELD_REJECTED', msg('apply.formFieldRejectedBlock', { recordid, fields: present.join(', ') }));
       }
       const before = decodeList(rec.list);
       const spec = Array.isArray(op.listSet.cards) ? null : op.listSet;
@@ -483,7 +484,7 @@ export function prepare(plan, opts = {}) {
       log.info('prepare', `op#${i}: блок ${recordid} → видимость блока`, { hidden });
       return;
     }
-    if (!op.blockSet && (!op.elem || !(op.set || op.duplicateElement || op.removeElement || op.gallerySet))) throw new Error(`op#${i}: нужны elem и set (или duplicateElement / removeElement / gallerySet), либо field, listSet или blockSet`);
+    if (!op.blockSet && (!op.elem || !(op.set || op.duplicateElement || op.removeElement || op.gallerySet))) throw new ToolError('PLAN_INVALID', msg('apply.opNeedsElem', { i }));
     let entry = zeroWork.get(recordid);
     if (!entry) {
       const before = loadSnapshot({ kind: 'zero', pageid, recordid }, o);
@@ -506,14 +507,11 @@ export function prepare(plan, opts = {}) {
       // Дублирование элемента: раскладка разная или соседей мало → нужно явное confirm.
       const spec = op.duplicateElement === true ? {} : op.duplicateElement;
       const dup = duplicateElement(entry.model, op.elem, { gap: spec.gap, set: spec.set, resStrategy: spec.resStrategy || op.resStrategy || plan.resStrategy });
-      log.info('prepare', `op#${i}: блок ${recordid} → копия элемента ${dup.elem_id}`, { needsConfirm: dup.needsConfirm, reason: dup.reason, proposal: dup.proposal.map((p) => `${p.res}: top ${p.top}, left ${p.left}`) });
+      log.info('prepare', `op#${i}: блок ${recordid} → копия элемента ${dup.elem_id}`, { needsConfirm: dup.needsConfirm, reason: dup.reason && messageText(dup.reason), proposal: dup.proposal.map((p) => `${p.res}: top ${p.top}, left ${p.left}`) });
       if (dup.needsConfirm && spec.confirm !== true) {
-        log.error('prepare', 'DUPLICATE_NEEDS_CONFIRM: копия рассчитана, но раскладка требует подтверждения человека', { recordid, reason: dup.reason, proposal: dup.proposal });
-        const e = new Error(`DUPLICATE_NEEDS_CONFIRM ${recordid}: ${dup.reason}. Предложение: ${dup.proposal.map((p) => `${p.res}: top ${p.top}, left ${p.left}`).join('; ')}. Добавьте "confirm": true в duplicateElement, чтобы записать так`);
-        e.code = 'DUPLICATE_NEEDS_CONFIRM';
-        e.proposal = dup.proposal;
-        e.reason = dup.reason;
-        throw e;
+        log.error('prepare', 'DUPLICATE_NEEDS_CONFIRM: копия рассчитана, но раскладка требует подтверждения человека', { recordid, reason: messageText(dup.reason), proposal: dup.proposal });
+        const proposal = dup.proposal.map((p) => `${p.res}: top ${p.top}, left ${p.left}`).join('; ');
+        throw new ToolError('DUPLICATE_NEEDS_CONFIRM', msg('apply.duplicateNeedsConfirm', { recordid, reason: dup.reason, proposal }), { proposal: dup.proposal, reason: dup.reason });
       }
       entry.model = dup.model;
       entry.duplicates.push({ elem_id: dup.elem_id, key: dup.key, proposal: dup.proposal, abHeightRaised: dup.abHeightRaised });
@@ -543,9 +541,7 @@ export function prepare(plan, opts = {}) {
     const formChanged = formFieldChanges(before, model);
     if (formChanged.length) {
       log.warn('prepare', 'отказ: модель меняет поля формы', { recordid, changed: formChanged });
-      const e = new Error(`FORM_FIELD_REJECTED ${recordid}: ${formChanged.map((c) => `${c.key}.${c.field}`).join(', ')}`);
-      e.code = 'FORM_FIELD_REJECTED';
-      throw e;
+      throw new ToolError('FORM_FIELD_REJECTED', msg('apply.formFieldRejectedModel', { recordid, fields: formChanged.map((c) => `${c.key}.${c.field}`).join(', ') }));
     }
     validate(before, model, { allowNewElements: duplicates.length > 0, allowRemovedElements: removed.length > 0 && duplicates.length === 0 });
     const changes = diff(before, model);
@@ -559,9 +555,7 @@ export function prepare(plan, opts = {}) {
     const maxAge = o.maxInventoryAgeMs ?? 120_000;
     if (age > maxAge) {
       log.error('prepare', 'STALE_INVENTORY: инвентарь старше допустимого для перестановки', { ageSec: Math.round(age / 1000), maxSec: Math.round(maxAge / 1000) });
-      const e = new Error(`STALE_INVENTORY: инвентарь снят ${Math.round(age / 1000)} с назад (допустимо ${Math.round(maxAge / 1000)} с) — снимите заново перед перестановкой`);
-      e.code = 'STALE_INVENTORY';
-      throw e;
+      throw new ToolError('STALE_INVENTORY', msg('apply.staleInventory', { age: Math.round(age / 1000), max: Math.round(maxAge / 1000) }));
     }
     if (age > 30_000) log.warn('prepare', 'инвентарь старше 30 с', { ageSec: Math.round(age / 1000) });
     const inv = loadInventory(pageid, o);
@@ -633,7 +627,7 @@ export function buildCopyPlan({ from, to, startAfter = '' }, opts = {}) {
   const dst = String(to);
   if (protectedPages().includes(dst)) {
     log.error('buildCopyPlan', 'страница-приёмник защищена от записи', { pageid: dst });
-    throw new Error(`PROTECTED_PAGE ${dst}`);
+    throw new ToolError('PROTECTED_PAGE', msg('apply.protectedPage', { pageid: dst }));
   }
   const inv = loadInventory(src, o);
   const missing = [];
@@ -668,7 +662,7 @@ function verifyCreated(createIds, pageid, o) {
   const journalPath = join(o.reread, pageid, '_built.json');
   if (!existsSync(journalPath)) {
     log.error('verify', 'нет журнала сборки', { path: journalPath });
-    return [{ id: '(сборка)', problem: 'нет журнала сборки (buildBlocks не выполнялся?)', path: journalPath }];
+    return [{ id: '(build)', problem: msg('apply.problem.noBuildJournal'), path: journalPath }];
   }
   const raw = readJson(journalPath);
   const journal = Array.isArray(raw) ? raw : raw.built || [];
@@ -676,26 +670,26 @@ function verifyCreated(createIds, pageid, o) {
   for (const id of createIds) {
     const payloadPath = join(o.out, pageid, `${id}.create.payload.json`);
     if (!existsSync(payloadPath)) {
-      problems.push({ id, problem: 'нет payload (prepare не выполнялся?)', path: payloadPath });
+      problems.push({ id, problem: msg('apply.problem.noPayload'), path: payloadPath });
       continue;
     }
     const payload = readJson(payloadPath);
     const entry = journal.find((b) => b.id === id);
     if (!entry) {
-      problems.push({ id, problem: 'блока нет в журнале сборки' });
+      problems.push({ id, problem: msg('apply.problem.notInBuildJournal') });
       continue;
     }
     if (entry.status !== 'ok' || !entry.recordid) {
-      problems.push({ id, problem: 'блок не собран', error: entry.error || entry.status });
+      problems.push({ id, problem: msg('apply.problem.notBuilt'), error: entry.error || entry.status });
       continue;
     }
-    if (payload.hidden === 'y' && entry.hidden !== 'y') problems.push({ id, recordid: entry.recordid, problem: 'блок должен быть скрыт, но виден' });
+    if (payload.hidden === 'y' && entry.hidden !== 'y') problems.push({ id, recordid: entry.recordid, problem: msg('apply.problem.shouldBeHidden') });
 
     if (payload.mode === 'new') {
       // Блок из полей: эталон — значения плана (expect), источника нет.
       const rereadPath = join(o.reread, pageid, `${entry.recordid}.record.json`);
       if (!existsSync(rereadPath)) {
-        problems.push({ id, recordid: entry.recordid, problem: 'нет перечитанного снимка собранного блока', path: rereadPath });
+        problems.push({ id, recordid: entry.recordid, problem: msg('apply.problem.noRereadBuilt'), path: rereadPath });
         continue;
       }
       const rereadSnap = readJson(rereadPath);
@@ -704,27 +698,27 @@ function verifyCreated(createIds, pageid, o) {
       if (payload.expect.code !== undefined) {
         const actualCode = String(rereadSnap.t123code ?? decodeEntities(String(rereadSnap.record?.code ?? '')));
         if (actualCode.trim() !== payload.expect.code.trim()) {
-          problems.push({ id, recordid: entry.recordid, problem: 'код HTML-блока не совпал', field: 'code', expected: payload.expect.code.trim().slice(0, 60), actual: actualCode.trim().slice(0, 60) });
+          problems.push({ id, recordid: entry.recordid, problem: msg('apply.problem.htmlCodeMismatch'), field: 'code', expected: payload.expect.code.trim().slice(0, 60), actual: actualCode.trim().slice(0, 60) });
         }
       }
       for (const [field, want] of Object.entries(payload.expect.values)) {
         // recordFields отбрасывает пустые значения: пустое ожидание и отсутствующее поле — совпадение.
         if (!(field in got)) {
-          if (want !== '') problems.push({ id, recordid: entry.recordid, problem: 'поле не записалось', field });
+          if (want !== '') problems.push({ id, recordid: entry.recordid, problem: msg('apply.problem.fieldNotWritten'), field });
         } else if (normalizeFieldValue(got[field]) !== want) {
-          problems.push({ id, recordid: entry.recordid, problem: 'значение поля не совпало', field, expected: String(want).slice(0, 60), actual: normalizeFieldValue(got[field]).slice(0, 60) });
+          problems.push({ id, recordid: entry.recordid, problem: msg('apply.problem.fieldValueMismatch'), field, expected: String(want).slice(0, 60), actual: normalizeFieldValue(got[field]).slice(0, 60) });
         }
       }
       const expectCards = payload.expect.cards || [];
       if (expectCards.length) {
         const actualCards = decodeList(got.list);
         if (actualCards.length !== expectCards.length) {
-          problems.push({ id, recordid: entry.recordid, problem: 'число карточек не совпало', expected: expectCards.length, actual: actualCards.length });
+          problems.push({ id, recordid: entry.recordid, problem: msg('apply.problem.cardCountMismatch'), expected: expectCards.length, actual: actualCards.length });
         } else {
           expectCards.forEach((e, ci) => {
             for (const k of Object.keys(e)) {
               const a = normalizeFieldValue(actualCards[ci][k] ?? '');
-              if (a !== e[k]) problems.push({ id, recordid: entry.recordid, problem: 'карточка не совпала', card: ci, field: k, expected: String(e[k]).slice(0, 60), actual: a.slice(0, 60) });
+              if (a !== e[k]) problems.push({ id, recordid: entry.recordid, problem: msg('apply.problem.cardMismatch'), card: ci, field: k, expected: String(e[k]).slice(0, 60), actual: a.slice(0, 60) });
             }
           });
         }
@@ -735,23 +729,23 @@ function verifyCreated(createIds, pageid, o) {
     const source = loadSnapshot({ kind: payload.blockKind, pageid: payload.source.page, recordid: payload.source.recordid }, o);
     const rereadPath = join(o.reread, pageid, payload.blockKind === 'zero' ? `${entry.recordid}.json` : `${entry.recordid}.record.json`);
     if (!existsSync(rereadPath)) {
-      problems.push({ id, recordid: entry.recordid, problem: 'нет перечитанного снимка собранного блока', path: rereadPath });
+      problems.push({ id, recordid: entry.recordid, problem: msg('apply.problem.noRereadBuilt'), path: rereadPath });
       continue;
     }
     const actual = readJson(rereadPath);
 
     if (payload.blockKind === 'zero') {
       for (const x of diff(stripVolatile(source), stripVolatile(actual))) {
-        problems.push({ id, recordid: entry.recordid, problem: 'модель не совпала с источником', key: x.key, field: x.field, expected: x.from, actual: x.to });
+        problems.push({ id, recordid: entry.recordid, problem: msg('apply.problem.modelMismatch'), key: x.key, field: x.field, expected: x.from, actual: x.to });
       }
     } else {
       const want = recordFields(source);
       const got = recordFields(actual);
       for (const [field, value] of Object.entries(want)) {
         if (!(field in got)) {
-          problems.push({ id, recordid: entry.recordid, problem: 'поле не перенеслось', field });
+          problems.push({ id, recordid: entry.recordid, problem: msg('apply.problem.fieldNotCopied'), field });
         } else if (got[field] !== value) {
-          problems.push({ id, recordid: entry.recordid, problem: 'значение поля не совпало', field, expected: String(value).slice(0, 60), actual: String(got[field]).slice(0, 60) });
+          problems.push({ id, recordid: entry.recordid, problem: msg('apply.problem.fieldValueMismatch'), field, expected: String(value).slice(0, 60), actual: String(got[field]).slice(0, 60) });
         }
       }
     }
@@ -787,7 +781,7 @@ export function verify(plan, opts = {}) {
   for (const id of ids) {
     const payloadPath = join(o.out, pageid, `${id}.payload.json`);
     if (!existsSync(payloadPath)) {
-      problems.push({ id, problem: 'нет payload (prepare не выполнялся?)', path: payloadPath });
+      problems.push({ id, problem: msg('apply.problem.noPayload'), path: payloadPath });
       continue;
     }
     const payload = readJson(payloadPath);
@@ -795,29 +789,29 @@ export function verify(plan, opts = {}) {
       // Порядок сверяется по инвентарю, снятому после перезагрузки редактора.
       const invPath = join(o.reread, pageid, '_inventory.json');
       if (!existsSync(invPath)) {
-        problems.push({ id, problem: 'нет перечитанного инвентаря', path: invPath });
+        problems.push({ id, problem: msg('apply.problem.noRereadInventory'), path: invPath });
         continue;
       }
       const got = readJson(invPath).map((r) => String(r.recordid));
-      if (got.join() !== payload.order.join()) problems.push({ id, problem: 'порядок блоков не совпал', expected: payload.order, actual: got });
+      if (got.join() !== payload.order.join()) problems.push({ id, problem: msg('apply.problem.orderMismatch'), expected: payload.order, actual: got });
       continue;
     }
     if (payload.kind === 'block') {
       // Видимость блока сверяется по инвентарю, снятому listRecords() после перезагрузки редактора.
       const invPath = join(o.reread, pageid, '_inventory.json');
       if (!existsSync(invPath)) {
-        problems.push({ id, problem: 'нет перечитанного инвентаря', path: invPath });
+        problems.push({ id, problem: msg('apply.problem.noRereadInventory'), path: invPath });
         continue;
       }
       const row = readJson(invPath).find((r) => String(r.recordid) === String(payload.recordid));
       const got = row ? (row.hidden ? 'y' : 'n') : undefined;
-      if (got !== payload.hidden) problems.push({ id, problem: 'видимость блока не совпала', expected: payload.hidden, actual: got });
+      if (got !== payload.hidden) problems.push({ id, problem: msg('apply.problem.visibilityMismatch'), expected: payload.hidden, actual: got });
       continue;
     }
     // Модель Zero Block и запись стандартного блока могут относиться к одному recordid — разные имена.
     const rereadPath = join(o.reread, pageid, payload.kind === 'zero' ? `${payload.recordid}.json` : `${payload.recordid}.record.json`);
     if (!existsSync(rereadPath)) {
-      problems.push({ id, problem: 'нет перечитанного снимка', path: rereadPath });
+      problems.push({ id, problem: msg('apply.problem.noRereadSnapshot'), path: rereadPath });
       continue;
     }
     const actual = readJson(rereadPath);
@@ -828,7 +822,7 @@ export function verify(plan, opts = {}) {
     }
     if (payload.kind === 'zero') {
       const d = diff(stripVolatile(payload.model), stripVolatile(actual));
-      for (const x of d) problems.push({ id, problem: 'расхождение', key: x.key, field: x.field, expected: x.from, actual: x.to });
+      for (const x of d) problems.push({ id, problem: msg('apply.problem.mismatch'), key: x.key, field: x.field, expected: x.from, actual: x.to });
       if (VOLATILE_KEYS.has('timestamp') && payload.model.timestamp !== actual.timestamp) log.debug('verify', 'timestamp изменился (допустимо)', { id, from: payload.model.timestamp, to: actual.timestamp });
     } else {
       const rec = actual.record || actual;
@@ -837,7 +831,7 @@ export function verify(plan, opts = {}) {
       // [FIX] Поле, записанное с onlythisfield, Tilda хранит экранированным (`&lt;a …&gt;`, `<br />`) —
       // сравнение через тот же канон, что у newRecord; буквально равные значения проходят сразу.
       const same = String(got) === String(payload.value) || (got !== undefined && normalizeFieldValue(got) === normalizeFieldValue(payload.value));
-      if (!same) problems.push({ id, problem: 'поле не сохранилось', field: payload.field, expected: payload.value, actual: got });
+      if (!same) problems.push({ id, problem: msg('apply.problem.fieldNotSaved'), field: payload.field, expected: payload.value, actual: got });
       else if (String(got) !== String(payload.value)) log.debug('verify', '[FIX] поле совпало после нормализации формы хранения', { id, field: payload.field });
     }
   }
@@ -902,7 +896,7 @@ if (process.argv[1]?.endsWith('apply-plan.mjs')) {
       );
     } else if (cmd === 'verify') {
       const problems = verify(plan, opts);
-      console.log(JSON.stringify(problems, null, 2));
+      console.log(JSON.stringify(verifyData(problems), null, 2));
       process.exit(problems.length ? 1 : 0);
     } else {
       log.error('cli', 'неизвестная команда', { cmd });

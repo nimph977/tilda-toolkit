@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  LangError, attachMessage, isMessage, messageText, msg, peekLang, pluralForm, render, renderError,
+  LangError, attachMessage, hasKey, isMessage, messageText, msg, peekLang, pluralForm, render, renderError,
   resolveLang, systemLang, t,
 } from '../lib/i18n.mjs';
 import { ROOT } from './product-files.mjs';
@@ -183,5 +183,12 @@ describe('i18n.mjs остаётся совместимым с doctor', () => {
     for (const forbidden of ['Object.hasOwn', '.at(', 'findLast', 'structuredClone', 'import.meta.dirname', 'import.meta.filename', 'parseEnv']) {
       assert.ok(!code.includes(forbidden), forbidden);
     }
+  });
+});
+
+describe('hasKey', () => {
+  it('смотрит английский словарь', () => {
+    assert.equal(hasKey('i18n.badFlag'), true);
+    assert.equal(hasKey('browser.code.NOPE'), false);
   });
 });

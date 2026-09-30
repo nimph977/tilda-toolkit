@@ -24,7 +24,7 @@ test('rewriteDonorHref rewrites donor links to known pages and leaves the rest w
   assert.equal(rewriteDonorHref('//ref.test/about', ctx).value, '/about');
   assert.equal(rewriteDonorHref('https://ref.test/#popup:form', ctx).value, '/#popup:form');
   const missing = rewriteDonorHref('https://ref.test/oshibka', ctx);
-  assert.deepEqual(missing, { value: 'https://ref.test/oshibka', changed: false, donor: true, reason: LINK_REWRITE_REASONS.noPage('/oshibka') });
+  assert.deepEqual(missing, { value: 'https://ref.test/oshibka', changed: false, donor: true, code: 'noPage', reason: LINK_REWRITE_REASONS.noPage('/oshibka') });
   for (const href of ['tel:+70000000000', 'mailto:info@ref.test', '#rec1', '/about', 'https://other.test/about']) {
     const r = rewriteDonorHref(href, ctx);
     assert.equal(r.changed, false, href);
@@ -38,7 +38,7 @@ test('rewriteHrefsInHtml changes only href values, including the encoded form', 
   const r = rewriteHrefsInHtml(html, ctx);
   assert.equal(r.changed, 1);
   assert.equal(r.value, '<a href="/about" style="color:#000">https://ref.test/about</a> <a href=\'https://ref.test/x\'>x</a> <a href="mailto:a@ref.test">a@ref.test</a>');
-  assert.deepEqual(r.reasons, [{ href: 'https://ref.test/x', reason: LINK_REWRITE_REASONS.noPage('/x') }]);
+  assert.deepEqual(r.reasons, [{ href: 'https://ref.test/x', code: 'noPage', reason: LINK_REWRITE_REASONS.noPage('/x') }]);
   const encoded = rewriteHrefsInHtml('&lt;a href=&quot;https://ref.test/blog&quot;&gt;Блог&lt;/a&gt;', ctx);
   assert.equal(encoded.value, '&lt;a href=&quot;/blog&quot;&gt;Блог&lt;/a&gt;');
   assert.equal(encoded.changed, 1);
@@ -72,8 +72,8 @@ test('buildLinkRewritePlan builds field, set and listSet operations and names fo
     assert.ok(!ops.some((o) => o.field?.name === 'buttonlink'), 'путь без страницы в копии не переписывается');
     assert.deepEqual(ops.find((o) => o.elem), { block: { recordid: '400003' }, elem: { elem_id: '1700000000002' }, set: { link: '/about' } });
     assert.deepEqual(ops.find((o) => o.listSet).listSet.set, [{ lid: '1001', fields: { li_link: '/blog' } }]);
-    assert.deepEqual(r.unchanged, [{ recordid: '400001', field: 'buttonlink', reason: LINK_REWRITE_REASONS.noPage('/missing') }]);
-    assert.deepEqual(r.skippedForm, [{ recordid: '400001', field: 'formmsgurl', reason: LINK_REWRITE_REASONS.form('formmsgurl') }]);
+    assert.deepEqual(r.unchanged, [{ recordid: '400001', field: 'buttonlink', code: 'noPage', reason: LINK_REWRITE_REASONS.noPage('/missing') }]);
+    assert.deepEqual(r.skippedForm, [{ recordid: '400001', field: 'formmsgurl', code: 'form', reason: LINK_REWRITE_REASONS.form('formmsgurl') }]);
     assert.ok(!ops.some((o) => o.set?.text), 'почта в видимом тексте не меняется');
   } finally {
     rmSync(baseDir, { recursive: true, force: true });
@@ -120,10 +120,11 @@ test('rewriteDonorHref rewrites donor page links by ID', () => {
   assert.deepEqual(rewriteDonorHref('https://ref.test/page300005.html?x=1', idCtx), { value: '/page200005.html?x=1', changed: true, donor: true });
   assert.deepEqual(rewriteDonorHref('/page200002.html', idCtx), { value: '/page200002.html', changed: false, donor: false }, 'ID копии не трогается');
   assert.deepEqual(rewriteDonorHref('/page300008.html', idCtx), { value: '/page300008.html', changed: false, donor: false });
-  assert.equal(rewriteDonorHref('https://ref.test/page300008.html', idCtx).reason, LINK_REWRITE_REASONS.noPage('/page300008.html'), 'ID донора без пары на домене донора — noPage');
+  assert.equal(rewriteDonorHref('https://ref.test/page300008.html', idCtx).code, 'noPage', 'ID донора без пары на домене донора — noPage');
+  assert.doesNotMatch(LINK_REWRITE_REASONS.noPage('/x') + LINK_REWRITE_REASONS.form('f') + LINK_REWRITE_REASONS.otherHost, /[А-Яа-яЁё]/, 'причины в планах — английский текст');
   assert.deepEqual(rewriteDonorHref('http://demo.tilda.ws/page300004.html', idCtx), { value: '/about', changed: true, donor: true }, 'технический поддомен донора');
   assert.equal(rewriteDonorHref('http://demo.tilda.ws/about', idCtx).changed, false, 'на поддомене — только ссылки по ID');
-  assert.equal(rewriteDonorHref('https://other.test/page300004.html', idCtx).reason, LINK_REWRITE_REASONS.otherHost);
+  assert.equal(rewriteDonorHref('https://other.test/page300004.html', idCtx).code, 'otherHost');
 });
 
 test('buildLinkRewritePlan merges domain and donor-ID links of one field into one operation', () => {

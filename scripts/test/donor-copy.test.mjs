@@ -71,7 +71,7 @@ test('donor layer pastes only into an allow-listed page and parses an array answ
   const failed = donorLayer({ writable: ['200003'], fetchText: JSON.stringify({ error: 'nope' }) });
   await assert.rejects(() => failed.api.pasteFromBuffer('200003'), /PASTE_FAILED 200003: nope/);
   const empty = donorLayer({ writable: ['200003'], fetchText: JSON.stringify([{ html: '' }]) });
-  await assert.rejects(() => empty.api.pasteFromBuffer('200003'), /в ответе нет записей/);
+  await assert.rejects(() => empty.api.pasteFromBuffer('200003'), /no records in the response/);
 });
 
 // --- Чистые функции ---
@@ -155,7 +155,7 @@ test('copyDonorPage runs the documented call sequence and writes a transfer reco
 
 test('copyDonorPage refuses a non-empty target without --replace and a protected target before any browser call', async () => {
   const d = fakeDrivers({ targetBefore: [{ recordid: '1', tplid: '770', hidden: false }] });
-  await assert.rejects(() => copyDonorPage(d, { sourcePageid: '200002', targetPageid: '200003' }), (e) => e instanceof DonorCopyError && e.code === 'TARGET_NOT_EMPTY' && e.message === COPY_REASONS.targetNotEmpty(1));
+  await assert.rejects(() => copyDonorPage(d, { sourcePageid: '200002', targetPageid: '200003' }), (e) => e instanceof DonorCopyError && e.code === 'TARGET_NOT_EMPTY' && e.key === COPY_REASONS.targetNotEmpty && e.params.n === 1);
   assert.ok(!d.calls.some((c) => c[0].startsWith('donor.')));
   const p = fakeDrivers();
   await assert.rejects(() => copyDonorPage(p, { sourcePageid: '200002', targetPageid: '200001', protectedPages: ['200001'] }), (e) => e.code === 'PROTECTED_TARGET');
@@ -218,18 +218,19 @@ test('copyDonorPage writes the label title only onto a Blank page', async () => 
     blank.test.editorState = async () => ({ title: 'Tilda: Blank page' });
     blank.test.setTitle = async (p, t) => { blank.calls.push(['test.setTitle', p, t]); };
     const r = await copyDonorPage(blank, { sourcePageid: '200002', targetPageid: '200003', baseDir, label: 'P13', donorTitle: 'Контакты' });
-    assert.equal(r.title, 'записан');
+    assert.equal(r.title.key, 'donorCopy.reason.written');
     assert.deepEqual(blank.calls.at(-1), ['test.setTitle', '200003', 'P13 Контакты']);
     const named = fakeDrivers();
     named.test.editorState = async () => ({ title: 'Моя страница' });
     named.test.setTitle = async () => { throw new Error('must not be called'); };
     const r2 = await copyDonorPage(named, { sourcePageid: '200002', targetPageid: '200003', baseDir, label: 'P13' });
-    assert.equal(r2.title, 'оставлен');
+    assert.equal(r2.title.key, 'donorCopy.reason.kept');
     const failing = fakeDrivers();
     failing.test.editorState = async () => ({ title: 'Blank page' });
     failing.test.setTitle = async () => { throw new Error('TITLE_NOT_SAVED'); };
     const r3 = await copyDonorPage(failing, { sourcePageid: '200002', targetPageid: '200003', baseDir, label: 'P13' });
-    assert.match(r3.title, /не записан/);
+    assert.equal(r3.title.key, 'donorCopy.reason.notWritten');
+    assert.match(r3.title.params.reason, /TITLE_NOT_SAVED/);
     assert.equal(r3.ok, true, 'ошибка заголовка не отменяет перенос');
   } finally {
     rmSync(baseDir, { recursive: true, force: true });
@@ -243,17 +244,17 @@ test('copyDonorPage sets the donor alias only on a target without an alias', asy
     empty.test.pageAlias = async () => '';
     empty.test.setAlias = async (p, a) => { empty.calls.push(['test.setAlias', p, a]); };
     const r = await copyDonorPage(empty, { sourcePageid: '200002', targetPageid: '200003', baseDir, label: 'P13', alias: 'contacts' });
-    assert.equal(r.alias, 'записан');
+    assert.equal(r.alias.key, 'donorCopy.reason.written');
     assert.deepEqual(empty.calls.at(-1), ['test.setAlias', '200003', 'contacts']);
     const named = fakeDrivers();
     named.test.pageAlias = async () => 'my-page';
     named.test.setAlias = async () => { throw new Error('must not be called'); };
-    assert.equal((await copyDonorPage(named, { sourcePageid: '200002', targetPageid: '200003', baseDir, label: 'P13', alias: 'contacts' })).alias, 'оставлен');
+    assert.equal((await copyDonorPage(named, { sourcePageid: '200002', targetPageid: '200003', baseDir, label: 'P13', alias: 'contacts' })).alias.key, 'donorCopy.reason.kept');
     const taken = fakeDrivers();
     taken.test.pageAlias = async () => '';
     taken.test.setAlias = async () => { throw Object.assign(new Error('адрес занят'), { code: 'ALIAS_TAKEN' }); };
     const r3 = await copyDonorPage(taken, { sourcePageid: '200002', targetPageid: '200003', baseDir, label: 'P13', alias: 'contacts' });
-    assert.match(r3.alias, /не записан/);
+    assert.equal(r3.alias.key, 'donorCopy.reason.notWritten');
     assert.equal(r3.ok, true, 'занятый адрес не отменяет перенос');
     const noAlias = fakeDrivers();
     noAlias.test.pageAlias = async () => { throw new Error('must not be called'); };

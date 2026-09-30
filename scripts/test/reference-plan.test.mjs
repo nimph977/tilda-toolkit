@@ -4,8 +4,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setLogLevel } from '../lib/log.mjs';
-import { absoluteImageMap, buildReferencePlan, BUTTON_REASONS, generateReferencePlan, linkFieldFor, menuItems, parseSubstitutes, SHAPE_REASONS, soclinksShapeSupported, VIDEO_FIELD_BY_KIND, VIDEO_REASONS } from '../reference-plan.mjs';
+import { absoluteImageMap, buildReferencePlan, generateReferencePlan, linkFieldFor, menuItems, parseSubstitutes, soclinksShapeSupported, VIDEO_FIELD_BY_KIND } from '../reference-plan.mjs';
+import { BUTTON_REASONS, CARD_REASONS, CODE_REASONS, FIELD_REASONS, FORM_REASONS, MENU_REASONS, SETTINGS_REASONS, SHAPE_REASONS, SKIP_REASONS, SOCLINKS_REASONS, STYLE_REASONS, VIDEO_REASONS } from '../reference-plan.mjs';
 import { buildLinkIndex, LINK_REASONS } from '../lib/reference-links.mjs';
+import { UPDATE_REASONS } from '../lib/plan-update.mjs';
+import { CALIBRATION_REASONS } from '../lib/settings-calibration.mjs';
 
 setLogLevel('ERROR');
 
@@ -76,18 +79,20 @@ test('buildReferencePlan builds newRecord ops with fields, links, cards and imag
   assert.equal(b2.cards.length, 2);
   assert.deepEqual(b2.cards[0], { li_title: 'Один', li_descr: 'Первая<br>Б', li_img: '', 'li-tubutton': '', li_imgalt: '' });
   assert.deepEqual(b2.images, [{ card: 0, field: 'li_img', file: 'site-reference/demo/images/one.png' }]);
-  assert.ok(unmapped.some((u) => u.order === 2 && u.card === 1 && /не скачан/.test(u.reason)));
+  assert.ok(unmapped.some((u) => u.order === 2 && u.card === 1 && u.code === 'cardImageNotFetched'));
   assert.ok(unmapped.some((u) => u.order === 2 && u.field === 'li_extra'));
-  assert.ok(unmapped.some((u) => u.order === 2 && /ссылка карточки/.test(u.reason)));
+  assert.ok(unmapped.some((u) => u.order === 2 && (u.code === 'cardNoLink' || u.code === 'cardOneLink')));
 
-  assert.deepEqual(skipped.map((s) => [s.order, s.reason]), [
-    [3, 'Zero Block не поддерживается'],
-    [4, 'шаблон недоступен на тарифе — укажите --substitute <tplid>=<доступный>'],
-    [5, 'каталог не снят: catalog capture'],
-    [7, 'содержимое вне полей field= — не переносится'],
+  assert.deepEqual(skipped.map((s) => [s.order, s.code]), [
+    [3, 'zeroBlock'],
+    [4, 'templateUnavailable'],
+    [5, 'catalogMissing'],
+    [7, 'contentOutsideFields'],
   ]);
-  assert.ok(unmapped.some((u) => u.order === 6 && u.field === 'foo' && u.reason === 'поля нет в каталоге'));
-  assert.ok(unmapped.some((u) => u.order === 6 && /форма/.test(u.reason)));
+  assert.ok(skipped.every((s) => typeof s.reason === 'string' && !/[А-Яа-я]/.test(s.reason)));
+  assert.ok(unmapped.length > 0 && [...unmapped, ...skipped].every((x) => typeof x.code === 'string' && typeof x.reason === 'string'), 'every reason has a code');
+  assert.ok(unmapped.some((u) => u.order === 6 && u.field === 'foo' && u.code === 'fieldNotInCatalog'));
+  assert.ok(unmapped.some((u) => u.order === 6 && u.code === 'formNoForm'));
   assert.deepEqual(plan.ops[2].newRecord.fields, [{ name: 'title', value: 'Заг' }]);
 });
 
@@ -151,7 +156,7 @@ test('buildReferencePlan creates field-less spacer blocks and skips unmapped con
   assert.deepEqual(plan.ops[0].newRecord, { tplid: '796', fields: [] });
   assert.equal(skipped.length, 1);
   assert.equal(skipped[0].order, 3);
-  assert.match(skipped[0].reason, /вне полей/);
+  assert.equal(skipped[0].code, 'contentOutsideFields');
 });
 
 // --- Оформление блоков (Фаза 3) ---
@@ -169,7 +174,7 @@ test('styleFields maps paddings, background and typo onto catalog settings', () 
   assert.equal(byName.blockbackground, '#4599ff');
   assert.equal(byName.title_typo, '{"color":"#ffffff"}');
   // Семейство, которого нет во вкладке «Настройки», уходит причиной, а не молча.
-  assert.ok(unmapped.some((u) => u.field === 'descr_typo' && /типографика: поля descr_typo/.test(u.reason)));
+  assert.ok(unmapped.some((u) => u.field === 'descr_typo' && u.code === 'typography' && u.reason.startsWith('typography: ')));
 });
 
 test('styleFields reports every style family when the template has no settings fields', () => {
@@ -177,10 +182,10 @@ test('styleFields reports every style family when the template has no settings f
   const blocks = [block(1, '464', { fields: [{ name: 'title', text: 'Заг', html: 'Заг', href: null }], styles: STYLES_464 })];
   const { plan, unmapped } = buildReferencePlan(styleStructure(catalogs, blocks).structure, { page: '200002', slug: 'demo', catalogs });
   assert.deepEqual(plan.ops[0].newRecord.fields.map((f) => f.name), ['title']);
-  assert.ok(unmapped.some((u) => /^отступ:/.test(u.reason) && u.field === 'margintop'));
-  assert.ok(unmapped.some((u) => /^отступ:/.test(u.reason) && u.field === 'marginbottom'));
-  assert.ok(unmapped.some((u) => /^фон:/.test(u.reason)));
-  assert.ok(unmapped.some((u) => /^типографика:/.test(u.reason)));
+  assert.ok(unmapped.some((u) => u.code === 'spacing' && u.reason.startsWith('spacing: ') && u.field === 'margintop'));
+  assert.ok(unmapped.some((u) => u.code === 'spacing' && u.field === 'marginbottom'));
+  assert.ok(unmapped.some((u) => u.code === 'background'));
+  assert.ok(unmapped.some((u) => u.code === 'typography'));
 });
 
 test('buildReferencePlan with styles=false writes no style fields and no style reasons', () => {
@@ -203,7 +208,7 @@ test('styles do not create a block that is otherwise skipped', () => {
   const blocks = [block(1, '464', { styles: STYLES_464 })];
   const { plan, skipped } = buildReferencePlan(styleStructure(catalogs, blocks).structure, { page: '200002', slug: 'demo', catalogs });
   assert.equal(plan.ops.length, 0);
-  assert.ok(skipped.some((s) => /содержимое вне полей field=/.test(s.reason)));
+  assert.ok(skipped.some((s) => s.code === 'contentOutsideFields'));
 });
 
 // --- Соцссылки (Фаза 4) ---
@@ -233,8 +238,8 @@ test('buildReferencePlan reports messenger-form soclinks and keeps the block ski
   const blocks = [block(1, '898', { soclinks: SOC_ITEMS })];
   const { plan, skipped, unmapped } = buildReferencePlan({ name: 'index', blocks }, { page: '200002', slug: 'demo', catalogs });
   assert.equal(plan.ops.length, 0);
-  assert.ok(skipped.some((s) => /содержимое вне полей field=/.test(s.reason)));
-  assert.ok(unmapped.some((u) => u.reason === 'соцссылки: формат soclinks шаблона не поддерживается'));
+  assert.ok(skipped.some((s) => s.code === 'contentOutsideFields'));
+  assert.ok(unmapped.some((u) => u.code === 'soclinksShape'));
 });
 
 test('buildReferencePlan reports soclinks when the template has no such field', () => {
@@ -242,7 +247,7 @@ test('buildReferencePlan reports soclinks when the template has no such field', 
   const blocks = [block(1, '796', { fields: [{ name: 'title', text: 'Заг', html: 'Заг', href: null }], soclinks: SOC_ITEMS })];
   const { plan, unmapped } = buildReferencePlan({ name: 'index', blocks }, { page: '200002', slug: 'demo', catalogs });
   assert.deepEqual(plan.ops[0].newRecord.fields.map((f) => f.name), ['title']);
-  assert.ok(unmapped.some((u) => u.reason === 'соцссылки: нет поля soclinks в каталоге'));
+  assert.ok(unmapped.some((u) => u.code === 'soclinksNoField'));
 });
 
 test('a template with stock soclinks but no reference links gets the field blanked', () => {
@@ -259,7 +264,7 @@ test('card href goes to li_link when the template stores it', () => {
   const blocks = [block(1, '702', { cards: [{ lid: '11', fields: { li_title: 'Один' }, html: { li_title: 'Один' }, hrefs: { li_title: 'https://ref.test/1' }, images: {} }] })];
   const { plan, unmapped } = buildReferencePlan({ name: 'index', blocks }, { page: '200002', slug: 'demo', catalogs });
   assert.equal(plan.ops[0].newRecord.cards[0].li_link, 'https://ref.test/1');
-  assert.ok(!unmapped.some((u) => /ссылка карточки/.test(u.reason)));
+  assert.ok(!unmapped.some((u) => u.code === 'cardNoLink' || u.code === 'cardOneLink'));
 });
 
 test('card href is reported when the template does not store li_link', () => {
@@ -267,7 +272,7 @@ test('card href is reported when the template does not store li_link', () => {
   const blocks = [block(1, '702', { cards: [{ lid: '11', fields: { li_title: 'Один' }, html: { li_title: 'Один' }, hrefs: { li_title: 'https://ref.test/1' }, images: {} }] })];
   const { plan, unmapped } = buildReferencePlan({ name: 'index', blocks }, { page: '200002', slug: 'demo', catalogs });
   assert.ok(!('li_link' in plan.ops[0].newRecord.cards[0]));
-  assert.ok(unmapped.some((u) => u.reason === 'ссылка карточки: шаблон не хранит li_link'));
+  assert.ok(unmapped.some((u) => u.code === 'cardNoLink'));
 });
 
 // --- Меню и замена шаблона (Фаза 5) ---
@@ -313,7 +318,7 @@ test('linkhook alone does not create a block without content', () => {
   const { plan, skipped } = buildReferencePlan({ name: 'index', blocks }, { page: '200002', slug: 'demo', catalogs });
   assert.equal(plan.ops.length, 0);
   assert.equal(skipped.length, 2);
-  assert.ok(skipped.every((s) => /вне полей/.test(s.reason)));
+  assert.ok(skipped.every((s) => s.code === 'contentOutsideFields'));
 });
 
 test('menu links are not content for a template without menuitems and without substitution', () => {
@@ -321,8 +326,8 @@ test('menu links are not content for a template without menuitems and without su
   const blocks = [block(1, '746', { links: MENU_LINKS })];
   const { plan, skipped, unmapped } = buildReferencePlan({ name: 'index', blocks }, { page: '200002', slug: 'demo', catalogs });
   assert.equal(plan.ops.length, 0);
-  assert.ok(skipped.some((s) => /вне полей/.test(s.reason)));
-  assert.ok(!unmapped.some((u) => /меню/.test(u.reason)));
+  assert.ok(skipped.some((s) => s.code === 'contentOutsideFields'));
+  assert.ok(!unmapped.some((u) => u.code.startsWith('menu')));
 });
 
 test('parseSubstitutes accepts repeats and comma-separated pairs, last wins', () => {
@@ -340,7 +345,7 @@ test('substitution builds an unavailable menu block with the replacement templat
   assert.equal(skipped.length, 0);
   assert.equal(plan.ops[0].newRecord.tplid, '702');
   assert.deepEqual(plan.ops[0].newRecord.cards.map((c) => [c.li_title, c.li_link]), [['О нас', 'https://ref.test/about'], ['Контакты', 'https://ref.test/contacts']]);
-  assert.ok(unmapped.some((u) => u.field === 'title' && u.reason === 'поля нет в каталоге'));
+  assert.ok(unmapped.some((u) => u.field === 'title' && u.code === 'fieldNotInCatalog'));
   assert.deepEqual(substituted, [{ order: 1, from: '835', to: '702' }]);
 });
 
@@ -358,7 +363,8 @@ test('substitution to a template without a captured catalog is reported', () => 
   const blocks = [block(1, '835', { links: MENU_LINKS })];
   const { plan, skipped } = buildReferencePlan({ name: 'index', blocks }, { page: '200002', slug: 'demo', catalogs, substitutes: { 835: '999' } });
   assert.equal(plan.ops.length, 0);
-  assert.equal(skipped[0].reason, 'каталог замены не снят: catalog capture --tplid 999');
+  assert.equal(skipped[0].code, 'substituteCatalogMissing');
+  assert.equal(skipped[0].reason, 'substitute catalog not captured: catalog capture --tplid 999');
 });
 
 test('card text keys come from the catalog, not a fixed list', () => {
@@ -386,7 +392,7 @@ test('a catalog without cardKeys keeps the previous pair of text keys', () => {
   const { plan, unmapped } = buildReferencePlan({ name: 'index', blocks }, { page: '200002', slug: 'demo', catalogs });
   assert.equal(plan.ops[0].newRecord.cards[0].li_title, 'Один');
   assert.equal(plan.ops[0].newRecord.cards[0].li_descr, 'Текст');
-  assert.ok(unmapped.some((u) => u.field === 'li_text' && /не переносится/.test(u.reason)));
+  assert.ok(unmapped.some((u) => u.field === 'li_text' && u.code === 'cardFieldNotTransferred'));
 });
 
 test('substitution to an unavailable template is not counted as a substitution', () => {
@@ -398,7 +404,7 @@ test('substitution to an unavailable template is not counted as a substitution',
   const blocks = [block(1, '835', { fields: [{ name: 'title', text: 'Шапка', html: 'Шапка', href: null }] })];
   const { plan, skipped, substituted } = buildReferencePlan({ name: 'index', blocks }, { page: '200002', slug: 'demo', catalogs, substitutes: { 835: '770' } });
   assert.equal(plan.ops.length, 0);
-  assert.equal(skipped[0].reason, 'шаблон замены недоступен на тарифе');
+  assert.equal(skipped[0].code, 'substituteUnavailable');
   assert.deepEqual(substituted, [], 'несобранная замена не должна попадать в счётчик');
 });
 
@@ -416,7 +422,7 @@ test('card links beyond the one written to li_link get their own reason', () => 
   })];
   const { plan, unmapped } = buildReferencePlan({ name: 'index', blocks }, { page: '200002', slug: 'demo', catalogs });
   assert.equal(plan.ops[0].newRecord.cards[0].li_link, 'https://ref.test/1');
-  const extra = unmapped.filter((u) => /вторая ссылка|ссылка карточки/.test(u.reason) && u.text?.includes('/2'));
+  const extra = unmapped.filter((u) => (u.code === 'cardOneLink' || u.code === 'cardNoLink') && u.text?.includes('/2'));
   assert.equal(extra.length, 1, 'у неиспользованной ссылки карточки должна быть своя причина');
 });
 
@@ -433,7 +439,7 @@ test('a duplicate menu title is dropped with its own reason', () => {
   const items = JSON.parse(plan.ops[0].newRecord.fields.find((f) => f.name === 'menuitems').value);
   assert.equal(items.length, 1, 'дубль по тексту остаётся отброшенным');
   assert.equal(items[0].link, 'https://ref.test/a');
-  const dup = unmapped.filter((u) => /пункт меню/.test(u.reason));
+  const dup = unmapped.filter((u) => u.code === 'menuDuplicate');
   assert.equal(dup.length, 1, 'у отброшенного дубля должна быть причина');
   assert.ok(dup[0].text.includes('/b'), 'причина должна называть потерянный адрес');
 });
@@ -494,7 +500,7 @@ test('links rewrite fields, menus and cards to /page<pageid>.html and explain th
   assert.equal(fieldsOf('b1').buttonlink, '/page100002.html');
   assert.deepEqual(JSON.parse(fieldsOf('b2').menuitems).map((i) => i.link), ['/page100002.html', 'https://ref.test/nope']);
   assert.equal(r.plan.ops.find((o) => o.id === 'b3').newRecord.cards[0].li_link, '/page100002.html#f');
-  const lost = r.unmapped.filter((u) => u.reason === LINK_REASONS.unknownPage);
+  const lost = r.unmapped.filter((u) => u.code === LINK_REASONS.unknownPage.code);
   assert.deepEqual(lost.map((u) => [u.order, u.field, u.text]), [[2, 'menuitems', '/nope']]);
   assert.ok(lost.every((u) => !u.text.includes('ref.test')));
   // Уникальные исходные адреса по блокам: /about, /about/, /about#f — три; /nope оставлен.
@@ -520,14 +526,14 @@ test('a button address kept on the reference gives one reason from the button, n
     })],
   };
   const r = buildReferencePlan(structure, { page: '100001', slug: 'demo', catalogs: CATALOGS, links: LINKS });
-  const reasons = r.unmapped.filter((u) => u.reason === LINK_REASONS.unknownPage);
+  const reasons = r.unmapped.filter((u) => u.code === LINK_REASONS.unknownPage.code);
   assert.deepEqual(reasons.map((u) => u.field), ['buttontitle']);
   assert.equal(r.links.kept, 1);
 
   const menuCatalogs = { 835: { tplid: '835', available: false }, 702: { ...cat('702', ['btitle', 'list'], []), cardKeys: ['li_title', 'li_link'] } };
   const menu = { name: 'index', url: 'https://ref.test/', blocks: [block(1, '835', { links: [{ text: 'Куда-то', href: 'https://ref.test/nope' }] })] };
   const m = buildReferencePlan(menu, { page: '100001', slug: 'demo', catalogs: menuCatalogs, links: LINKS, substitutes: { 835: '702' } });
-  assert.deepEqual(m.unmapped.filter((u) => u.reason === LINK_REASONS.unknownPage).map((u) => u.field), ['li_link']);
+  assert.deepEqual(m.unmapped.filter((u) => u.code === LINK_REASONS.unknownPage.code).map((u) => u.field), ['li_link']);
 });
 
 test('without links the plan only counts reference addresses', () => {
@@ -595,7 +601,7 @@ test('generateReferencePlan by page name with zones warns and keeps all blocks',
     const r = generateReferencePlan({ slug: 'x', source: 'index', page: '200002', baseDir, catalogDir: baseDir, out: join(baseDir, 'n.json') });
     assert.equal(r.zone, 'all');
     assert.equal(r.zoneFiltered, 0);
-    assert.match(r.hint, /метки/);
+    assert.equal(r.hint.key, 'referencePlan.hint.headerFooter');
     assert.equal(r.label, undefined);
   } finally {
     rmSync(baseDir, { recursive: true, force: true });
@@ -637,7 +643,7 @@ test('without tplFields the link follows an allowed button title (branch A′)',
 test('a button without a title field in the catalog is reported', () => {
   const catalogs = { 213: btnCat(['title']) };
   const r = buildReferencePlan(btnBlock([{ slot: '2', text: 'Ещё', html: 'Ещё', href: '', source: 'order' }]), { page: '100001', slug: 'demo', catalogs });
-  assert.deepEqual(r.unmapped.map((u) => [u.field, u.reason]), [['buttontitle2', BUTTON_REASONS.noField('2')]]);
+  assert.deepEqual(r.unmapped.map((u) => [u.field, u.code]), [['buttontitle2', 'buttonNoField']]);
   assert.equal(r.buttons, 0);
 });
 
@@ -652,7 +658,7 @@ test('a button title known only from tplFields is written, and a field known now
   assert.equal(r.unmapped.length, 0);
 
   const r2 = buildReferencePlan(btnBlock([{ slot: '2', text: 'Ещё', html: 'Ещё', href: '', source: 'order' }]), { page: '100001', slug: 'demo', catalogs });
-  assert.deepEqual(r2.unmapped.map((u) => [u.field, u.reason]), [['buttontitle2', BUTTON_REASONS.noField('2')]]);
+  assert.deepEqual(r2.unmapped.map((u) => [u.field, u.code]), [['buttontitle2', 'buttonNoField']]);
 });
 
 test('a plain field known only from tplFields is written, not reported as missing', () => {
@@ -668,13 +674,13 @@ test('a button whose link field the template lacks keeps its text and reports th
   const r = buildReferencePlan(btnBlock([{ slot: '', text: 'Заказать', html: 'Заказать', href: '/page100002.html', source: 'attr' }]), { page: '100001', slug: 'demo', catalogs });
   assert.equal(opFields(r).buttontitle, 'Заказать');
   assert.equal(opFields(r).buttonlink, undefined);
-  assert.deepEqual(r.unmapped.map((u) => u.reason), [BUTTON_REASONS.noLinkField('')]);
+  assert.deepEqual(r.unmapped.map((u) => u.code), ['buttonNoLinkField']);
 });
 
 test('a button without text is not transferred', () => {
   const catalogs = { 213: btnCat(['title', 'buttontitle']) };
   const r = buildReferencePlan(btnBlock([{ slot: '', text: '', html: '', href: '/x', source: 'order' }]), { page: '100001', slug: 'demo', catalogs });
-  assert.deepEqual(r.unmapped.map((u) => u.reason), [BUTTON_REASONS.noText('')]);
+  assert.deepEqual(r.unmapped.map((u) => u.code), ['buttonNoText']);
 });
 
 test('a buttontitle field wins over a button of the same slot', () => {
@@ -702,7 +708,7 @@ test('cover video goes to the field of its kind when the template has it', () =>
 
   const without = { 213: btnCat(['title']) };
   const r2 = buildReferencePlan(btnBlock([], { video }), { page: '100001', slug: 'demo', catalogs: without });
-  assert.deepEqual(r2.unmapped.map((u) => [u.field, u.reason]), [['youtubeid', VIDEO_REASONS.noField]]);
+  assert.deepEqual(r2.unmapped.map((u) => [u.field, u.code]), [['youtubeid', 'videoNoField']]);
   assert.equal(r2.videos, 0);
 });
 
@@ -726,7 +732,7 @@ test('links inside field html are rewritten and a kept one gets its reason', () 
   const r = buildReferencePlan(structure, { page: '100001', slug: 'demo', catalogs: CATALOGS, links: LINKS });
   const descr = r.plan.ops[0].newRecord.fields.find((f) => f.name === 'descr').value;
   assert.equal(descr, '<a href="/page100002.html" style="color: rgb(0, 0, 0)">О нас</a><br><a href="https://ref.test/nope">Нет</a>');
-  assert.deepEqual(r.unmapped.filter((u) => u.reason === LINK_REASONS.unknownPage).map((u) => [u.field, u.text]), [['descr', '/nope']]);
+  assert.deepEqual(r.unmapped.filter((u) => u.code === LINK_REASONS.unknownPage.code).map((u) => [u.field, u.text]), [['descr', '/nope']]);
   assert.deepEqual(r.links, { rewritten: 1, kept: 1 });
 });
 
@@ -738,7 +744,7 @@ test('a link that lands nowhere in the plan is not counted as rewritten and gets
   };
   const r = buildReferencePlan(structure, { page: '100001', slug: 'demo', catalogs: CATALOGS, links: LINKS });
   assert.deepEqual(r.links, { rewritten: 0, kept: 0 });
-  const lost = r.unmapped.filter((u) => u.reason === LINK_REASONS.outsideFields);
+  const lost = r.unmapped.filter((u) => u.code === LINK_REASONS.outsideFields.code);
   assert.deepEqual(lost.map((u) => [u.order, u.text]), [[1, '/about']]);
 });
 
@@ -769,9 +775,9 @@ test('a divider shape goes to shapedividerstyle; an unknown shape or a missing f
   assert.equal(r.unmapped.length, 0);
   const odd = of({ style: null, position: 'bottom', path: 'M0 0L10 10z' });
   assert.deepEqual(odd.plan.ops[0].newRecord.fields, []);
-  assert.deepEqual(odd.unmapped.map((u) => [u.field, u.reason]), [['shapedividerstyle', SHAPE_REASONS.unknown]]);
+  assert.deepEqual(odd.unmapped.map((u) => [u.field, u.code]), [['shapedividerstyle', 'shapeUnknown']]);
   const noField = of({ style: 'skew', position: 'bottom', path: null }, { 796: { ...catalogs[796], tabs: { content: catalogs[796].tabs.content, settings: [] } } });
-  assert.deepEqual(noField.unmapped.map((u) => [u.field, u.reason]), [['shapedividerstyle', SHAPE_REASONS.noField]]);
+  assert.deepEqual(noField.unmapped.map((u) => [u.field, u.code]), [['shapedividerstyle', 'shapeNoField']]);
 });
 
 // --- настройки по карте влияния ---------------------------------------------------------------
@@ -796,7 +802,7 @@ test('settings go by the settings map when the template is calibrated', () => {
   assert.equal(fields.blocks, '3');
   assert.equal(fields.filteropacity, '30');
   assert.equal(fields.margintop, '60px', 'отступ, не решённый картой, — из классов записи');
-  assert.ok(!r.unmapped.some((u) => /не откалиброван/.test(u.reason)));
+  assert.ok(!r.unmapped.some((u) => u.code === 'settingsNoMap'));
   assert.deepEqual(r.settings, { decoded: 3, undecided: 0, unexplained: 0, byMap: 1, byRules: 0 });
 });
 
@@ -806,8 +812,8 @@ test('a block without a map keeps rule-based settings and names why, a substitut
   const r = buildReferencePlan({ name: 'x', url: 'https://ref.test/', blocks }, { page: '1', slug: 'demo', catalogs, settingsMaps: { 686: MAP_686 }, substitutes: { 770: '794' } });
   const second = Object.fromEntries(r.plan.ops[1].newRecord.fields.map((f) => [f.name, f.value]));
   assert.equal(second.margintop, '60px');
-  assert.ok(r.unmapped.some((u) => u.order === 2 && u.reason === 'настройки: шаблон не откалиброван — catalog calibrate'));
-  assert.ok(r.unmapped.some((u) => u.order === 3 && /шаблон 770 заменён на 794/.test(u.reason)));
+  assert.ok(r.unmapped.some((u) => u.order === 2 && u.code === 'settingsNoMap'));
+  assert.ok(r.unmapped.some((u) => u.order === 3 && u.code === 'settingsSubstituted' && u.reason.includes('770') && u.reason.includes('794')));
 });
 
 test('--no-styles writes no settings at all, even with a map', () => {
@@ -823,7 +829,7 @@ test('card buttons go to li_buttontitle when the template stores it, otherwise g
   assert.equal(r.plan.ops[0].newRecord.cards[0].li_buttontitle, 'Подробнее');
   const without = { ...cat('686', ['btitle', 'list']), cardKeys: ['li_title'] };
   const r2 = buildReferencePlan({ name: 'x', url: 'https://ref.test/', blocks: [block(1, '686', { cards })] }, { page: '1', slug: 'demo', catalogs: { 686: without } });
-  assert.ok(r2.unmapped.some((u) => u.field === 'li_buttontitle' && u.reason === 'кнопка карточки: у шаблона нет li_buttontitle'));
+  assert.ok(r2.unmapped.some((u) => u.field === 'li_buttontitle' && u.code === 'cardNoButton'));
 });
 
 // --- формы ------------------------------------------------------------------------------------
@@ -855,15 +861,15 @@ test('a form becomes forminputs, success message and a rewritten formmsgurl with
   assert.equal(f.formmsgsuccess, 'Спасибо!');
   assert.equal(f.formmsgurl, '/page1000000000102.html');
   assert.ok(!('receivers' in f));
-  assert.ok(r.unmapped.some((u) => u.reason === 'форма: получатели заявок — настройка проекта-копии, не переносится'));
-  assert.ok(r.unmapped.some((u) => u.reason === 'форма: тип поля sb не распознан'));
+  assert.ok(r.unmapped.some((u) => u.code === 'formReceivers'));
+  assert.ok(r.unmapped.some((u) => u.code === 'formInputUnknown' && u.reason.includes(' sb ')));
 });
 
 test('a template without the success message field gets noField', () => {
   const cat702 = { ...CAT_702, tplFields: ['title', 'forminputs'] };
   const blk = block(1, '702', { fields: [{ name: 'title', text: 'Заявка', href: null }], hasForm: true, form: FORM });
   const r = buildReferencePlan({ name: 'x', url: 'https://ref.test/', blocks: [blk] }, { page: '1', slug: 'demo', catalogs: { 702: cat702 } });
-  assert.ok(r.unmapped.some((u) => u.field === 'formmsgsuccess' && u.reason === 'форма: у шаблона нет поля formmsgsuccess'));
+  assert.ok(r.unmapped.some((u) => u.field === 'formmsgsuccess' && u.code === 'formNoField' && u.reason.includes('formmsgsuccess')));
   assert.ok(r.unmapped.some((u) => u.field === 'formmsgurl'));
   assert.equal(r.plan.ops[0].formContent, undefined);
 });
@@ -886,8 +892,8 @@ test('898 messengers become soclinks elements by MESSENGER_LINK_RULES', () => {
     { service: 'whatsapp', title: 'WhatsApp', type: 'tel', tel: '71234567890' },
     { service: 'phone', title: 'Phone', tel: '+71234567890' },
   ]);
-  assert.ok(r.unmapped.some((u) => u.reason === 'мессенджер viber: адрес не переводится в элемент soclinks'));
-  assert.ok(r.unmapped.some((u) => /whatsapp: параметры адреса/.test(u.reason)));
+  assert.ok(r.unmapped.some((u) => u.code === 'messengerUnsupported' && u.reason.includes('viber')));
+  assert.ok(r.unmapped.some((u) => u.code === 'messengerQuery' && u.reason.includes('whatsapp')));
   assert.ok(!r.skipped.length);
 });
 
@@ -899,8 +905,8 @@ test('a T123 block becomes newRecord with code, removed scripts get a reason, ov
   const big = block(2, '131', { code: { code: 'x'.repeat(26 * 1024), scripts: 0 } });
   const r = buildReferencePlan({ name: 'x', url: 'https://ref.test/', blocks: [small, big] }, { page: '1', slug: 'demo', catalogs: { 131: cat131 } });
   assert.deepEqual(r.plan.ops[0].newRecord, { tplid: '131', fields: [], code: '<div>x</div>' });
-  assert.ok(r.unmapped.some((u) => u.field === 'code' && u.reason === 'HTML-блок: скрипты вырезаны — их запись сбрасывает сессию Tilda' && u.text === '1'));
-  assert.deepEqual(r.skipped, [{ order: 2, tplid: '131', reason: 'HTML-блок: код больше 25 КБ' }]);
+  assert.ok(r.unmapped.some((u) => u.field === 'code' && u.code === 'codeScriptsRemoved' && u.text === '1'));
+  assert.deepEqual(r.skipped, [{ order: 2, tplid: '131', code: 'codeTooLarge', reason: 'HTML block: the code is larger than 25 KB' }]);
 });
 
 test('applyFontAliases replaces the reference custom font family in JSON settings with the Tilda preset', async () => {
@@ -919,4 +925,20 @@ test('absoluteImageMap turns snapshot-relative image paths into absolute ones', 
   const root = join(tmpdir(), 'tilda-ref-root');
   assert.deepEqual(absoluteImageMap({ 'https://cdn.test/a.png': 'images/a.png' }, root), { 'https://cdn.test/a.png': resolve(root, 'images/a.png') });
   assert.deepEqual(absoluteImageMap(undefined, root), {});
+});
+
+test('every plan reason has its own code and an English text', () => {
+  const groups = [BUTTON_REASONS, CARD_REASONS, CODE_REASONS, FIELD_REASONS, FORM_REASONS, MENU_REASONS, SETTINGS_REASONS, SHAPE_REASONS, SKIP_REASONS, SOCLINKS_REASONS, STYLE_REASONS, VIDEO_REASONS, LINK_REASONS, UPDATE_REASONS, CALIBRATION_REASONS];
+  const codes = [];
+  for (const group of groups) {
+    for (const value of Object.values(group)) {
+      const reason = typeof value === 'function' ? value('x', 'y') : value;
+      assert.equal(typeof reason.code, 'string');
+      assert.ok(reason.reason.length > 0);
+      assert.ok(!/[А-Яа-я]/.test(reason.reason), reason.code);
+      codes.push(reason.code);
+    }
+  }
+  assert.equal(new Set(codes).size, codes.length, 'a code names one reason only');
+  assert.equal(codes.length, 62);
 });

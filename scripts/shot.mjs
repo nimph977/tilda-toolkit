@@ -14,6 +14,8 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
+import { ToolError } from './lib/tool-error.mjs';
+import { msg } from './lib/i18n.mjs';
 import { baselineDir } from './lib/paths.mjs';
 import { editorUrl } from './lib/browser.mjs';
 import { resolveProjectId } from './lib/config.mjs';
@@ -32,7 +34,7 @@ export function previewUrl(pageid, projectid) {
 export function parseWidths(value) {
   if (value === undefined || value === null || value === '') return [...DEFAULT_WIDTHS];
   const widths = String(value).split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n >= 200 && n <= 4000);
-  if (!widths.length) throw new Error(`BAD_WIDTHS ${value}: ожидается список ширин 200–4000, например 1440,320`);
+  if (!widths.length) throw new ToolError('BAD_WIDTHS', msg('shot.badWidths', { value }));
   return widths;
 }
 
@@ -112,15 +114,17 @@ export async function loadLazyImages(page, { width, viewportHeight = 900, stepPa
 }
 
 /**
- * Проверка масштаба кадра: null — масштаб верный, иначе текст причины. Кадр в масштабе 80 %
+ * Проверка масштаба кадра: null — масштаб верный, иначе сообщение о причине (`Message`). Кадр в масштабе 80 %
  * давал ложное «шапка крупнее в 1,25 раза» и сверку 320 при ширине ~400 CSS px.
  * Допуск: ширина ±20 px (полоса прокрутки), dpr ±0.01.
  */
 export function scaleMismatch({ width, innerWidth, dpr }) {
-  const reasons = [];
-  if (Number.isFinite(innerWidth) && Math.abs(innerWidth - width) > 20) reasons.push(`ширина окна ${innerWidth} CSS px при заданной ${width}`);
-  if (Number.isFinite(dpr) && Math.abs(dpr - 1) > 0.01) reasons.push(`devicePixelRatio ${dpr} вместо 1`);
-  return reasons.length ? reasons.join('; ') : null;
+  const badWidth = Number.isFinite(innerWidth) && Math.abs(innerWidth - width) > 20;
+  const badDpr = Number.isFinite(dpr) && Math.abs(dpr - 1) > 0.01;
+  if (badWidth && badDpr) return msg('shot.scaleBoth', { innerWidth, width, dpr });
+  if (badWidth) return msg('shot.scaleWidth', { innerWidth, width });
+  if (badDpr) return msg('shot.scaleDpr', { dpr });
+  return null;
 }
 
 /**
@@ -144,10 +148,7 @@ export async function captureWidths(page, opts = {}) {
     const status = resp ? resp.status() : 0;
     if (opts.requireOk && status !== 200) {
       log.warn('captureWidths', 'страница не получена — снимка нет', { width, status });
-      const err = new Error(`страница не получена: HTTP ${status}`);
-      err.code = 'NAV_FAILED';
-      err.status = status;
-      throw err;
+      throw new ToolError('NAV_FAILED', msg('shot.navFailed', { status }), { status });
     }
     await page.waitForTimeout(opts.settleMs ?? 2500);
     if (opts.loadLazy !== false) await loadLazyImages(page, { width, viewportHeight: width < 600 ? 640 : 900 });
@@ -169,10 +170,7 @@ export async function captureWidths(page, opts = {}) {
     const mismatch = scaleMismatch({ width, innerWidth: info.width, dpr: info.dpr });
     if (mismatch) {
       log.error('captureWidths', 'кадр в чужом масштабе — снимка нет', { width, innerWidth: info.width, dpr: info.dpr });
-      const err = new Error(`SHOT_SCALED: ${mismatch}; сброс масштаба — browser stop, затем browser start`);
-      err.code = 'SHOT_SCALED';
-      err.exitCode = 1;
-      throw err;
+      throw new ToolError('SHOT_SCALED', msg('shot.scaled', { mismatch }));
     }
     // Адрес печатается только у предпросмотра (есть referer): адрес референса в логи не пишется.
     if (info.records === 0) log.warn('captureWidths', 'на виде страницы нет блоков — сессия или адрес предпросмотра?', { width, ...(referer ? { url: page.url() } : {}) });

@@ -17,6 +17,8 @@
 import { createLogger } from './lib/log.mjs';
 import { decodeEntities } from './lib/entities.mjs';
 import { assertNoScript } from './lib/form-fields.mjs';
+import { msg } from './lib/i18n.mjs';
+import { ToolError } from './lib/tool-error.mjs';
 
 const log = createLogger('list-model');
 
@@ -38,11 +40,11 @@ export function decodeList(raw) {
     parsed = JSON.parse(text);
   } catch (e) {
     log.error('decodeList', 'list не разобрался как JSON', { head: text.slice(0, 120) });
-    throw new Error(`BAD_LIST_JSON ${e.message}`);
+    throw new ToolError('BAD_LIST_JSON', msg('list.badListJson', { message: e.message }));
   }
   if (Array.isArray(parsed)) return parsed;
   if (parsed && typeof parsed === 'object') return Object.keys(parsed).sort((a, b) => Number(a) - Number(b)).map((k) => parsed[k]);
-  throw new Error('BAD_LIST_JSON: ожидается массив карточек');
+  throw new ToolError('BAD_LIST_JSON', msg('list.listNotArray'));
 }
 
 /** JSON для поля `list` в запросе: объект с индексными ключами, значения чистым текстом. */
@@ -58,19 +60,19 @@ export function newLid(cards, now = Date.now()) {
   return String(id);
 }
 
-function findCard(cards, ref, what = 'карточка') {
-  if (ref === undefined || ref === null) throw new Error(`${what}: нужен index или lid`);
+function findCard(cards, ref, what = 'card') {
+  if (ref === undefined || ref === null) throw new ToolError('CARD_REF_REQUIRED', msg('list.cardRefRequired', { what }));
   if (typeof ref === 'object') {
     if (ref.lid !== undefined) return findCard(cards, String(ref.lid), what);
     if (ref.index !== undefined) return findCard(cards, Number(ref.index), what);
-    throw new Error(`${what}: нужен index или lid`);
+    throw new ToolError('CARD_REF_REQUIRED', msg('list.cardRefRequired', { what }));
   }
   if (typeof ref === 'number') {
-    if (!Number.isInteger(ref) || ref < 0 || ref >= cards.length) throw new Error(`${what}: индекса ${ref} нет (карточек ${cards.length})`);
+    if (!Number.isInteger(ref) || ref < 0 || ref >= cards.length) throw new ToolError('CARD_INDEX_OUT_OF_RANGE', msg('list.cardIndexOutOfRange', { what, ref, count: cards.length }));
     return ref;
   }
   const i = cards.findIndex((c) => String(c.lid) === String(ref));
-  if (i < 0) throw new Error(`${what}: lid ${ref} не найден`);
+  if (i < 0) throw new ToolError('CARD_NOT_FOUND', msg('list.cardNotFound', { what, ref }));
   return i;
 }
 
@@ -92,7 +94,7 @@ export function applyListOps(cards, spec = {}, opts = {}) {
   for (const s of spec.set || []) {
     const i = findCard(out, s.index !== undefined ? Number(s.index) : s.lid !== undefined ? String(s.lid) : s, 'set');
     for (const [field, value] of Object.entries(s.fields || {})) {
-      if (field === 'lid') throw new Error('set: lid карточки не меняется');
+      if (field === 'lid') throw new ToolError('LID_IMMUTABLE', msg('list.cardLidImmutable'));
       changes.push({ op: 'set', lid: String(out[i].lid), field, from: out[i][field], to: value });
       out[i][field] = value === null ? '' : String(value);
     }
@@ -143,20 +145,20 @@ export function normalizeCardText(v) {
 /** Расхождения между ожидаемыми и перечитанными карточками по lid и содержательным полям. */
 export function diffCards(expected, actual) {
   const problems = [];
-  if (expected.length !== actual.length) problems.push({ problem: 'число карточек не совпало', expected: expected.length, actual: actual.length });
+  if (expected.length !== actual.length) problems.push({ problem: msg('list.problem.cardCountMismatch'), expected: expected.length, actual: actual.length });
   const byLid = new Map(actual.map((c) => [String(c.lid), c]));
   expected.forEach((e, i) => {
     const a = byLid.get(String(e.lid)) ?? actual[i];
     if (!a) {
-      problems.push({ problem: 'карточка не найдена', lid: e.lid });
+      problems.push({ problem: msg('list.problem.cardNotFound'), lid: e.lid });
       return;
     }
     for (const field of Object.keys(e)) {
       if (field === 'ls' || field === 'lid') continue;
-      if (normalizeCardText(e[field]) !== normalizeCardText(a[field])) problems.push({ problem: 'поле карточки не совпало', lid: e.lid, field, expected: normalizeCardText(e[field]).slice(0, 60), actual: normalizeCardText(a[field]).slice(0, 60) });
+      if (normalizeCardText(e[field]) !== normalizeCardText(a[field])) problems.push({ problem: msg('list.problem.cardFieldMismatch'), lid: e.lid, field, expected: normalizeCardText(e[field]).slice(0, 60), actual: normalizeCardText(a[field]).slice(0, 60) });
     }
   });
-  if (expected.map((c) => String(c.lid)).join() !== actual.map((c) => String(c.lid)).join()) problems.push({ problem: 'порядок карточек не совпал', expected: expected.map((c) => c.lid), actual: actual.map((c) => c.lid) });
+  if (expected.map((c) => String(c.lid)).join() !== actual.map((c) => String(c.lid)).join()) problems.push({ problem: msg('list.problem.cardOrderMismatch'), expected: expected.map((c) => c.lid), actual: actual.map((c) => c.lid) });
   return problems;
 }
 
@@ -177,9 +179,9 @@ export function decodeSlides(raw) {
   try {
     parsed = JSON.parse(String(raw));
   } catch (e) {
-    throw new Error(`BAD_IMGS_JSON ${e.message}`);
+    throw new ToolError('BAD_IMGS_JSON', msg('list.badImgsJson', { message: e.message }));
   }
-  if (!Array.isArray(parsed)) throw new Error('BAD_IMGS_JSON: ожидается массив слайдов');
+  if (!Array.isArray(parsed)) throw new ToolError('BAD_IMGS_JSON', msg('list.imgsNotArray'));
   return parsed;
 }
 
@@ -207,17 +209,19 @@ export function applyGalleryOps(slides, spec = {}, opts = {}) {
   for (const s of spec.set || []) {
     const i = findCard(out, s.index !== undefined ? Number(s.index) : s.lid !== undefined ? String(s.lid) : s, 'set');
     for (const [field, value] of Object.entries(s.fields || {})) {
-      if (field === 'lid') throw new Error('set: lid слайда не меняется');
-      if (!SLIDE_KEYS.includes(field)) throw new Error(`set: неизвестное поле слайда ${field}`);
-      if (field === 'li_img' && value && !/^https:\/\/static\.tildacdn\.com\//.test(String(value))) throw new Error(`IMAGE_URL_REJECTED ${String(value).slice(0, 60)}`);
+      if (field === 'lid') throw new ToolError('LID_IMMUTABLE', msg('list.slideLidImmutable'));
+      if (!SLIDE_KEYS.includes(field)) throw new ToolError('UNKNOWN_SLIDE_FIELD', msg('list.unknownSlideFieldSet', { field }));
+      if (field === 'li_img' && value && !/^https:\/\/static\.tildacdn\.com\//.test(String(value))) throw new ToolError('IMAGE_URL_REJECTED', msg('list.imageUrlRejected', { value: String(value).slice(0, 60) }));
       changes.push({ op: 'set', lid: out[i].lid, field, from: out[i][field], to: value });
       out[i][field] = value === null ? '' : String(value);
     }
   }
   for (const a of spec.add || []) {
     const f = a.fields || {};
-    if (!f.li_img || !/^https:\/\/static\.tildacdn\.com\//.test(String(f.li_img))) throw new Error(`IMAGE_URL_REJECTED ${String(f.li_img || '(пусто)').slice(0, 60)}`);
-    for (const k of Object.keys(f)) if (!SLIDE_KEYS.includes(k)) throw new Error(`add: неизвестное поле слайда ${k}`);
+    if (!f.li_img || !/^https:\/\/static\.tildacdn\.com\//.test(String(f.li_img))) {
+      throw new ToolError('IMAGE_URL_REJECTED', msg('list.imageUrlRejected', { value: f.li_img ? String(f.li_img).slice(0, 60) : msg('list.emptyValue') }));
+    }
+    for (const k of Object.keys(f)) if (!SLIDE_KEYS.includes(k)) throw new ToolError('UNKNOWN_SLIDE_FIELD', msg('list.unknownSlideFieldAdd', { field: k }));
     const slide = Object.fromEntries(SLIDE_KEYS.map((k) => [k, '']));
     Object.assign(slide, f);
     slide.lid = slideLid(f.li_img, out, opts.now);

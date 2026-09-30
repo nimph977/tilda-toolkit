@@ -134,6 +134,11 @@ function has(object, key) {
   return Object.prototype.hasOwnProperty.call(object, key);
 }
 
+/** Есть ли ключ в английском словаре (он полный: остальные языки сверяются с ним тестом). */
+export function hasKey(key) {
+  return has(loadDictionary('en'), key);
+}
+
 /** Форма множественного числа по правилам языка (`one`/`few`/`many`/`other`). */
 export function pluralForm(lang, n) {
   return new Intl.PluralRules(lang).select(n);

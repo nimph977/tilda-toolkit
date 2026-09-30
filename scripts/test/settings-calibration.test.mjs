@@ -30,8 +30,8 @@ test('probeVariants lists values by field kind and skips unknown types', () => {
   const json = variants.find((v) => v.key === 'fontfamily');
   assert.deepEqual(JSON.parse(json.value), { color: '#000000', fontfamily: 'CalibA' }, 'остальные ключи JSON сохраняются');
   assert.deepEqual(skipped, [
-    { field: 'title_typo', key: 'mystery', reason: CALIBRATION_REASONS.jsonKeyUntyped('mystery') },
-    { field: 'weird', reason: CALIBRATION_REASONS.unknownType('x') },
+    { field: 'title_typo', key: 'mystery', ...CALIBRATION_REASONS.jsonKeyUntyped('mystery') },
+    { field: 'weird', ...CALIBRATION_REASONS.unknownType('x') },
   ]);
   assert.equal(jsonKeyKind('bordercolorhover').kind, 'color');
   assert.equal(jsonKeyKind('fontsize_res_480').kind, 'size');
@@ -78,7 +78,8 @@ test('buildSettingsMap derives enum, slot and text rules and skips silent fields
   assert.equal(font.kind, 'text');
   assert.deepEqual(font.rule, { type: 'text', shape: "css:|#recRID .t-card__title{font-family:'§t'}", confirmed: true });
 
-  assert.deepEqual(map.skipped, [{ field: 'animationoff', reason: CALIBRATION_REASONS.noSignal }]);
+  assert.deepEqual(map.skipped, [{ field: 'animationoff', ...CALIBRATION_REASONS.noSignal }]);
+  assert.equal(map.skipped[0].code, 'calibrationNoSignal');
 });
 
 test('buildSettingsMap ignores noise features and reports failed previews', () => {
@@ -93,8 +94,8 @@ test('buildSettingsMap ignores noise features and reports failed previews', () =
   });
   assert.deepEqual(map.fields, {});
   assert.deepEqual(map.skipped, [
-    { field: 'blocks', reason: CALIBRATION_REASONS.previewFailed('TIMEOUT') },
-    { field: 'animationoff', reason: CALIBRATION_REASONS.noSignal },
+    { field: 'blocks', ...CALIBRATION_REASONS.previewFailed('TIMEOUT') },
+    { field: 'animationoff', ...CALIBRATION_REASONS.noSignal },
   ]);
 });
 

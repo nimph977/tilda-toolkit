@@ -17,7 +17,7 @@ test('synthetic standard-list model round-trips and protects its identity fields
     ['5001', 'Updated item', '10'], ['9000000000000', 'Third item', '20'],
   ]);
   assert.deepEqual(decodeList(encodeList(changed.cards)), changed.cards);
-  assert.throws(() => applyListOps(cards, { set: [{ lid: '5001', fields: { lid: 'changed' } }] }), /lid/);
+  assert.throws(() => applyListOps(cards, { set: [{ lid: '5001', fields: { lid: 'changed' } }] }), (e) => e.code === 'LID_IMMUTABLE' && e.key === 'list.cardLidImmutable');
   assert.deepEqual(diffCards(changed.cards, changed.cards), []);
 });
 

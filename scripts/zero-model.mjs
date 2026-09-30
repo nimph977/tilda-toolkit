@@ -15,6 +15,8 @@
 import { readFileSync } from 'node:fs';
 import { createLogger } from './lib/log.mjs';
 import { assertNotFormField, assertNoScript } from './lib/form-fields.mjs';
+import { msg, messageText } from './lib/i18n.mjs';
+import { ToolError } from './lib/tool-error.mjs';
 
 const log = createLogger('zero-model');
 
@@ -69,16 +71,16 @@ export function findElement(model, selector) {
     const want = normalizeText(sel.textIncludes);
     hits = keys.filter((k) => normalizeText(model[k].text).includes(want));
   } else {
-    throw new Error('findElement: нужен elem_id, text или textIncludes');
+    throw new ToolError('NO_SELECTOR', msg('zero.needSelector'));
   }
   log.debug('findElement', 'поиск', { selector: sel, hits: hits.map((k) => ({ key: k, elem_id: model[k].elem_id })) });
   if (hits.length === 0) {
     log.error('findElement', 'элемент не найден', { selector: sel });
-    throw new Error(`NOT_FOUND ${JSON.stringify(sel)}`);
+    throw new ToolError('NOT_FOUND', msg('zero.notFound', { selector: JSON.stringify(sel) }));
   }
   if (hits.length > 1) {
     log.error('findElement', 'найдено несколько элементов', { selector: sel, hits });
-    throw new Error(`AMBIGUOUS ${JSON.stringify(sel)}: ${hits.length} совпадений`);
+    throw new ToolError('AMBIGUOUS', msg('zero.ambiguous', { selector: JSON.stringify(sel), count: hits.length }));
   }
   return { key: hits[0], elem: model[hits[0]] };
 }
@@ -88,7 +90,7 @@ const clone = (model) => JSON.parse(JSON.stringify(model));
 function assertKey(model, key, fn) {
   if (!isElemKey(String(key)) || !(key in model)) {
     log.error(fn, 'нет элемента с таким ключом', { key });
-    throw new Error(`NO_SUCH_KEY ${key}`);
+    throw new ToolError('NO_SUCH_KEY', msg('zero.noSuchKey', { key }));
   }
 }
 
@@ -97,7 +99,7 @@ export function setText(model, key, text) {
   assertKey(model, key, 'setText');
   if (/<script/i.test(String(text))) {
     log.error('setText', 'отказ: текст содержит <script', { key });
-    throw new Error('SCRIPT_REJECTED');
+    throw new ToolError('SCRIPT_REJECTED', msg('zero.scriptRejected'));
   }
   const next = clone(model);
   const from = next[key].text;
@@ -180,10 +182,7 @@ function applyResVariants(next, key, field, oldBase, newBase, fields, strategy) 
     if (missing.length) {
       const names = missing.map((res) => `${field}-res-${res}`);
       log.error('setFields', 'RES_VARIANTS_MISSING: план не дал значения имеющихся у элемента вариантов', { key, elem_id: el.elem_id, field, missing: names });
-      const e = new Error(`RES_VARIANTS_MISSING ${field}: нет ${names.join(', ')}`);
-      e.code = 'RES_VARIANTS_MISSING';
-      e.missing = names;
-      throw e;
+      throw new ToolError('RES_VARIANTS_MISSING', msg('zero.resVariantsMissing', { field, names: names.join(', ') }), { missing: names });
     }
     return; // явные значения запишутся как обычные поля
   }
@@ -211,7 +210,7 @@ export function setLink(model, key, url) {
   const value = String(url ?? '');
   if (value !== '' && !LINK_ALLOWED.test(value)) {
     log.error('setLink', 'отказ: недопустимая схема ссылки', { key, value: value.slice(0, 60) });
-    throw new Error(`LINK_REJECTED ${value.slice(0, 60)}`);
+    throw new ToolError('LINK_REJECTED', msg('zero.linkRejected', { value: value.slice(0, 60) }));
   }
   const next = clone(model);
   const type = next[key].elem_type;
@@ -257,7 +256,7 @@ export function setImage(model, key, spec) {
   const img = String(s.img ?? '');
   if (!IMAGE_URL.test(img)) {
     log.error('setImage', 'отказ: img должен быть http(s)-адресом картинки', { key, img: img.slice(0, 60) });
-    throw new Error(`IMAGE_URL_REJECTED ${img.slice(0, 60)}`);
+    throw new ToolError('IMAGE_URL_REJECTED', msg('zero.imageUrlRejected', { img: img.slice(0, 60) }));
   }
   if (!/^https?:\/\/[^/]*tildacdn\./i.test(img)) {
     log.warn('setImage', 'адрес не на tildacdn — приём внешних адресов Тильдой не проверялся', { key, img: img.slice(0, 60) });
@@ -266,7 +265,7 @@ export function setImage(model, key, spec) {
   const el = next[key];
   if (el.elem_type !== 'image') {
     log.error('setImage', 'операция image применима только к elem_type image; для фона shape есть bgimg', { key, elem_type: el.elem_type });
-    throw new Error(`WRONG_ELEM_TYPE ${el.elem_type} (нужен image)`);
+    throw new ToolError('WRONG_ELEM_TYPE', msg('zero.wrongElemType', { elemType: el.elem_type }));
   }
   const from = { img: el.img, filewidth: el.filewidth, fileheight: el.fileheight, height: el.height };
   el.img = img;
@@ -305,7 +304,7 @@ export function setBgImage(model, key, url) {
   const img = String(url ?? '');
   if (img !== '' && !IMAGE_URL.test(img)) {
     log.error('setBgImage', 'отказ: bgimg должен быть http(s)-адресом или пустой строкой', { key, img: img.slice(0, 60) });
-    throw new Error(`IMAGE_URL_REJECTED ${img.slice(0, 60)}`);
+    throw new ToolError('IMAGE_URL_REJECTED', msg('zero.imageUrlRejected', { img: img.slice(0, 60) }));
   }
   const next = clone(model);
   const el = next[key];
@@ -325,13 +324,13 @@ const SPECIAL_FIELDS = new Set(['text', 'hidden', 'link', 'linktarget', 'image',
 /** Новая модель с изменённым произвольным полем элемента; поле по умолчанию пишется как есть. */
 export function setPlainField(model, key, field, value) {
   assertKey(model, key, 'setPlainField');
-  if (!/^[\w-]+$/.test(String(field))) throw new Error(`BAD_FIELD_NAME ${String(field).slice(0, 40)}`);
-  if (value !== null && typeof value === 'object') throw new Error(`BAD_FIELD_VALUE ${field}: ожидается строка или число`);
+  if (!/^[\w-]+$/.test(String(field))) throw new ToolError('BAD_FIELD_NAME', msg('zero.badFieldName', { field: String(field).slice(0, 40) }));
+  if (value !== null && typeof value === 'object') throw new ToolError('BAD_FIELD_VALUE', msg('zero.badFieldValue', { field }));
   const next = clone(model);
   const from = next[key][field];
   if (value === null || value === undefined) delete next[key][field];
   else next[key][field] = typeof value === 'number' ? value : String(value);
-  log.info('setPlainField', 'поле изменено', { key, elem_id: next[key].elem_id, field, from: String(from ?? '(нет)').slice(0, 60), to: String(value ?? '(удалено)').slice(0, 60) });
+  log.info('setPlainField', 'поле изменено', { key, elem_id: next[key].elem_id, field, from: String(from ?? '(none)').slice(0, 60), to: String(value ?? '(removed)').slice(0, 60) });
   return next;
 }
 
@@ -342,9 +341,9 @@ export function setPlainField(model, key, field, value) {
  * 'scale' (по умолчанию) или 'explicit'.
  */
 export function setFields(model, key, fields, opts = {}) {
-  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) throw new Error('setFields: ожидается объект { поле: значение }');
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) throw new ToolError('BAD_FIELDS', msg('zero.fieldsNotObject'));
   const strategy = opts.resStrategy || 'scale';
-  if (!['scale', 'explicit', 'none'].includes(strategy)) throw new Error(`BAD_RES_STRATEGY ${strategy}: ожидается scale, explicit или none`);
+  if (!['scale', 'explicit', 'none'].includes(strategy)) throw new ToolError('BAD_RES_STRATEGY', msg('zero.badResStrategy', { strategy }));
   let next = model;
   for (const [field, value] of Object.entries(fields)) {
     assertNotFormField(field, { key, elem_id: model[key] && model[key].elem_id, path: 'zero-model.setFields' });
@@ -550,17 +549,17 @@ export function duplicateElement(model, selector, opts = {}) {
       entry = { res: res || 'base', top: last.top + step.top, left: last.left + step.left, axis, step, from: `${prev.k}→${last.k}` };
       if (step.top === 0 && step.left === 0) {
         entry = { res: res || 'base', top: g.top + g.height + gap, left: g.left, axis: 'y', step: { top: g.height + gap, left: 0 }, fallback: true };
-        reason = reason || 'соседи стоят на одном месте';
+        reason = reason || msg('zero.reason.neighboursOverlap');
       }
       axes.add(entry.axis);
     } else {
       entry = { res: res || 'base', top: g.top + g.height + gap, left: g.left, axis: 'y', step: { top: g.height + gap, left: 0 }, fallback: true };
-      reason = reason || `однотипных соседей меньше двух (найдено ${sib.length})`;
+      reason = reason || msg('zero.reason.fewNeighbours', { count: sib.length });
     }
     proposal.push(entry);
     log.debug('duplicateElement', 'шаг на разрешении', { res: res || 'base', neighbours: chain.length, ...entry });
   }
-  if (!reason && axes.size > 1) reason = `раскладка разная: оси ${[...axes].join(',')} на разных разрешениях`;
+  if (!reason && axes.size > 1) reason = msg('zero.reason.axesDiffer', { axes: [...axes].join(',') });
   const needsConfirm = Boolean(reason);
 
   const next = clone(model);
@@ -596,7 +595,7 @@ export function duplicateElement(model, selector, opts = {}) {
   }
   // Правки копии (например новый текст) — тем же путём, что и любое поле: guard'ы включены.
   const out = opts.set && Object.keys(opts.set).length ? setFields(next, newKey, opts.set, { resStrategy: opts.resStrategy }) : next;
-  log.info('duplicateElement', needsConfirm ? 'копия рассчитана, нужно подтверждение' : `копия элемента ${elem_id} создана`, { source: src.elem_id, elem_id, key: newKey, needsConfirm, reason, proposal: proposal.map((p) => `${p.res}: top ${p.top}, left ${p.left} (${p.axis})`), abHeightRaised: abHeightRaised.length });
+  log.info('duplicateElement', needsConfirm ? 'копия рассчитана, нужно подтверждение' : `копия элемента ${elem_id} создана`, { source: src.elem_id, elem_id, key: newKey, needsConfirm, reason: reason && messageText(reason), proposal: proposal.map((p) => `${p.res}: top ${p.top}, left ${p.left} (${p.axis})`), abHeightRaised: abHeightRaised.length });
   return { model: out, key: newKey, elem_id, needsConfirm, reason, proposal, abHeightRaised };
 }
 
@@ -616,8 +615,8 @@ export function removeElement(model, selector) {
 export function setBlockFields(model, fields) {
   const next = clone(model);
   for (const [key, value] of Object.entries(fields || {})) {
-    if (isElemKey(key) || !(key in next)) throw new Error(`BAD_BLOCK_KEY ${key}: нет такого служебного ключа`);
-    if (typeof next[key] === 'object' && next[key] !== null) throw new Error(`BAD_BLOCK_KEY ${key}: структурный ключ не пишется`);
+    if (isElemKey(key) || !(key in next)) throw new ToolError('BAD_BLOCK_KEY', msg('zero.badBlockKeyMissing', { key }));
+    if (typeof next[key] === 'object' && next[key] !== null) throw new ToolError('BAD_BLOCK_KEY', msg('zero.badBlockKeyStructural', { key }));
     assertNoScript(value, { key });
     const from = next[key];
     next[key] = typeof value === 'number' ? value : String(value);

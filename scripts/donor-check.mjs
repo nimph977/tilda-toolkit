@@ -18,31 +18,47 @@ import { dirname, join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
 import { baselineDir } from './lib/paths.mjs';
 import { refPaths } from './lib/reference-store.mjs';
-import { auditLinks } from './reference-site.mjs';
+import { auditKindMessage, auditLinks } from './reference-site.mjs';
 import { HTML_BLOCK_TPLIDS, listHtmlBlocks } from './donor-verify.mjs';
 import { find } from './find-replace.mjs';
 import { normalizeAlias } from './donor-map.mjs';
+import { messageText, msg, render, t } from './lib/i18n.mjs';
 
 const log = createLogger('donor-check');
 
 /** Сколько сбоев подряд останавливают прогон: сессия потеряна — дальше то же самое. */
 export const MAX_FAILURES_IN_ROW = 3;
 
+/**
+ * Причины пропуска метки и сбоя проверки: имя → ключ словаря. Подстановки: `duplicate` {label},
+ * `failed` {message}, `stopped` {n}. В результате у причины есть `code` (имя), `params` и
+ * английский `reason` — их пишут в `checks.json`; `Message` для итога даёт `checkReasonMessage`.
+ */
 export const CHECK_REASONS = {
-  unknownLabel: 'метки нет в карте сайта',
-  noPageid: 'у метки нет pageid',
-  duplicate: (label) => `та же страница донора, что у метки ${label} — проверяется там`,
-  notTransferred: 'нет записи переноса — страница не переносилась',
-  failed: (message) => `проверка не выполнена: ${message}`,
-  stopped: `прогон остановлен после ${MAX_FAILURES_IN_ROW} сбоев подряд`,
+  unknownLabel: 'donorCheck.reason.unknownLabel',
+  noPageid: 'donorCheck.reason.noPageid',
+  duplicate: 'donorCheck.reason.duplicate',
+  notTransferred: 'donorCheck.reason.notTransferred',
+  failed: 'donorCheck.reason.failed',
+  stopped: 'donorCheck.reason.stopped',
 };
 
-/** Пункты списка, которые команда не проверяет: где смотреть и что делать. */
+/** Запись причины: `{ code, params, reason }`, `reason` — английский текст. */
+function reasonEntry(code, params = {}) {
+  return { code, params, reason: messageText(msg(CHECK_REASONS[code], params)) };
+}
+
+/** Причина пропуска или сбоя как `Message` — для итога команды; запись без известного кода даёт свой текст. */
+export function checkReasonMessage(entry) {
+  return entry.code && CHECK_REASONS[entry.code] ? msg(CHECK_REASONS[entry.code], entry.params ?? {}) : String(entry.reason ?? '');
+}
+
+/** Пункты списка, которые команда не проверяет: ключи словаря (где смотреть и что делать). */
 export const MANUAL_CHECKS = [
-  'Получатели заявок: формы переносятся без получателей — заявки с копии никуда не уйдут или уйдут в CRM донора; сказать владельцу',
-  'Страница 404: назначается в настройках сайта вручную (`page role` этого не умеет); решение владельца — в сводку',
-  'Запрет индексации до публикации: настройки сайта → SEO → «Запрет индексации» — включить до `page publish`',
-  'Отличия от публикации донора: предпросмотр той же страницы в редакторе донора (только чтение); совпадает со сборкой — старая публикация донора, не ошибка переноса',
+  'report.check.manualRecipients',
+  'report.check.manualNotFound',
+  'report.check.manualNoindex',
+  'report.check.manualDonorDiff',
 ];
 
 export const SECTION_START = '<!-- donor-check:start -->';
@@ -79,7 +95,7 @@ export function indexPageCheck(site, testPages, donorPages) {
 
 /**
  * Метки к проверке. Чистая: по умолчанию — все метки карты; `labels` — выбранные. Пропуск с
- * причиной: нет pageid, дубль страницы донора (проверяется первая метка), нет записи переноса.
+ * причиной (`{ label, code, params, reason }`): нет pageid, дубль страницы донора (проверяется первая метка), нет записи переноса.
  * `transferred(pageid)` — есть ли `site-baseline/transfer/<pageid>/`.
  */
 export function selectLabels(site, { labels, transferred }) {
@@ -89,17 +105,18 @@ export function selectLabels(site, { labels, transferred }) {
   for (const p of pages) if (p.pageid && p.donorPageid && !firstByDonor.has(String(p.donorPageid))) firstByDonor.set(String(p.donorPageid), p.label);
   const todo = [];
   const skipped = [];
-  const skip = (label, reason) => {
-    skipped.push({ label, reason });
-    log.debug('selectLabels', 'пропуск', { label, reason });
+  const skip = (label, code, params) => {
+    const entry = reasonEntry(code, params);
+    skipped.push({ label, ...entry });
+    log.debug('selectLabels', 'пропуск', { label, reason: entry.reason });
   };
   for (const label of labels ?? pages.map((p) => p.label)) {
     const entry = byLabel.get(label);
-    if (!entry) { skip(label, CHECK_REASONS.unknownLabel); continue; }
-    if (!entry.pageid) { skip(label, CHECK_REASONS.noPageid); continue; }
+    if (!entry) { skip(label, 'unknownLabel'); continue; }
+    if (!entry.pageid) { skip(label, 'noPageid'); continue; }
     const first = entry.donorPageid ? firstByDonor.get(String(entry.donorPageid)) : label;
-    if (first && first !== label) { skip(label, CHECK_REASONS.duplicate(first)); continue; }
-    if (!transferred(String(entry.pageid))) { skip(label, CHECK_REASONS.notTransferred); continue; }
+    if (first && first !== label) { skip(label, 'duplicate', { label: first }); continue; }
+    if (!transferred(String(entry.pageid))) { skip(label, 'notTransferred'); continue; }
     todo.push(entry);
   }
   return { todo, skipped };
@@ -134,65 +151,98 @@ export async function checkLabel(driver, { entry, referenceHost, hosts, knownAli
 
 const cell = (s) => String(s).replace(/\|/g, '\\|');
 
-function htmlCell(blocks) {
+function htmlCell(blocks, lang) {
   if (!blocks?.length) return '—';
   const placeholder = blocks.filter((b) => b.placeholder).length;
   const external = blocks.filter((b) => b.hosts.length).length;
-  return `${blocks.length} (с заглушкой ${placeholder}, с внешними хостами ${external})`;
+  return t(lang, 'report.check.htmlCell', { total: blocks.length, placeholder, external });
 }
 
-/** Markdown раздела проверок между маркерами. Чистая. */
-export function renderChecksSection(result) {
+/** Текст причины пропуска или сбоя на языке доклада; запись без известного кода — как записана. */
+function reasonText(entry, lang) {
+  return entry.code && CHECK_REASONS[entry.code] ? t(lang, CHECK_REASONS[entry.code], entry.params ?? {}) : String(entry.reason ?? '');
+}
+
+/** Текст сбоя метки на языке доклада: по параметрам, а без них — записанный английский. */
+function failureText(label, lang) {
+  return label.errorParams ? t(lang, CHECK_REASONS.failed, label.errorParams) : String(label.error);
+}
+
+/**
+ * Markdown раздела проверок между маркерами на языке `lang`. Чистая. Время съёмки пишется дважды:
+ * человекочитаемой строкой и нейтральной меткой `taken-at` — метку читает повторный запуск.
+ */
+export function renderChecksSection(result, lang = 'en') {
   const { at, labels = [], skipped = [], map, index, stopped } = result;
   const checked = labels.filter((l) => !l.error);
   const failed = labels.filter((l) => l.error);
   const linkViolations = checked.reduce((n, l) => n + l.violations.length, 0);
   const lines = [
     SECTION_START,
-    '## Проверки после переноса (donor check)',
+    t(lang, 'report.check.heading'),
     '',
-    `Снято: ${at}. Автоматические пункты 1–6 списка «Проверки после переноса»; ручные — в конце раздела.`,
+    `${t(lang, 'report.takenAt', { at })} ${t(lang, 'report.check.intro')}`,
+    `<!-- taken-at: ${at} -->`,
     '',
-    `Итог: меток проверено ${checked.length}, не проверено ${failed.length}${stopped ? ' (прогон остановлен)' : ''}, пропущено ${skipped.length}; нарушений ссылок ${linkViolations}; карта ${map?.ok ? 'полная' : 'неполная'}; главная ${index?.ok ? 'назначена верно' : 'не та'}.`,
+    t(lang, 'report.check.summary', {
+      checked: checked.length,
+      failed: failed.length,
+      stopped: stopped ? t(lang, 'report.check.stopped') : '',
+      skipped: skipped.length,
+      violations: linkViolations,
+      map: t(lang, map?.ok ? 'report.check.mapComplete' : 'report.check.mapIncomplete'),
+      index: t(lang, index?.ok ? 'report.check.indexOk' : 'report.check.indexWrong'),
+    }),
     '',
-    '| Метка | Ссылок | Нарушений ссылок | HTML-блоки | formmsgurl на домене донора |',
+    t(lang, 'report.check.tableHead'),
     '| --- | --- | --- | --- | --- |',
     ...labels.map((l) => (l.error
-      ? `| ${l.label} | — | ${cell(l.error)} | — | — |`
-      : `| ${l.label} | ${l.total} | ${l.violations.length} | ${htmlCell(l.htmlBlocks)} | ${l.forms.length} |`)),
+      ? `| ${l.label} | — | ${cell(failureText(l, lang))} | — | — |`
+      : `| ${l.label} | ${l.total} | ${l.violations.length} | ${htmlCell(l.htmlBlocks, lang)} | ${l.forms.length} |`)),
     '',
   ];
-  const detail = checked.flatMap((l) => l.violations.map((v) => `- ${l.label}: ${cell(v.kind)}: ${v.path} ×${v.count}`));
-  if (detail.length) lines.push('Нарушения ссылок:', '', ...detail, '');
-  const html = checked.flatMap((l) => (l.htmlBlocks ?? []).filter((b) => b.placeholder || b.hosts.length).map((b) => `- ${l.label}, блок ${b.recordid}${b.hidden ? ' (скрыт)' : ''}: ${b.placeholder ? 'заглушка «Html code will be here»' : `внешние хосты ${b.hosts.join(', ')}`}`));
-  if (html.length) lines.push('HTML-блоки — назвать владельцу (предпросмотр код не выполняет, проверять на публикации):', '', ...html, '');
-  const forms = checked.flatMap((l) => l.forms.map((f) => `- ${l.label}, блок ${f.recordid}: ${f.field} ведёт на домен донора`));
-  if (forms.length) lines.push('Формы — назвать владельцу:', '', ...forms, '');
-  if (skipped.length) lines.push('Пропущено:', '', ...skipped.map((s) => `- ${s.label}: ${s.reason}`), '');
+  const detail = checked.flatMap((l) => l.violations.map((v) => `- ${l.label}: ${cell(render(lang, auditKindMessage(v.kind)))}: ${v.path} ×${v.count}`));
+  if (detail.length) lines.push(t(lang, 'report.check.violationsTitle'), '', ...detail, '');
+  const html = checked.flatMap((l) => (l.htmlBlocks ?? []).filter((b) => b.placeholder || b.hosts.length).map((b) => `- ${t(lang, 'report.check.htmlLine', {
+    label: l.label,
+    recordid: b.recordid,
+    hidden: b.hidden ? t(lang, 'report.check.hidden') : '',
+    what: b.placeholder ? t(lang, 'report.check.htmlPlaceholder') : t(lang, 'report.check.htmlHosts', { hosts: b.hosts.join(', ') }),
+  })}`));
+  if (html.length) lines.push(t(lang, 'report.check.htmlTitle'), '', ...html, '');
+  const forms = checked.flatMap((l) => l.forms.map((f) => `- ${t(lang, 'report.check.formLine', { label: l.label, recordid: f.recordid, field: f.field })}`));
+  if (forms.length) lines.push(t(lang, 'report.check.formsTitle'), '', ...forms, '');
+  if (skipped.length) lines.push(t(lang, 'report.check.skippedTitle'), '', ...skipped.map((s) => `- ${s.label}: ${reasonText(s, lang)}`), '');
   if (map) {
-    lines.push('### Полнота карты', '', `Страниц донора ${map.donorPages}, в карте ${map.mapped}, без метки ${map.missing.length}.`);
-    for (const m of map.missing) lines.push(`- ${m.pageid}${m.role ? ` (роль ${m.role})` : ''}: ${m.role === '404' ? 'страница 404 — ручной пункт ниже' : 'нет метки — назвать владельцу, решение в сводку'}`);
+    lines.push(t(lang, 'report.check.mapTitle'), '', t(lang, 'report.check.mapSummary', { donorPages: map.donorPages, mapped: map.mapped, missing: map.missing.length }));
+    for (const m of map.missing) {
+      const role = m.role ? t(lang, 'report.check.mapRole', { role: m.role }) : '';
+      lines.push(`- ${m.pageid}${role}: ${t(lang, m.role === '404' ? 'report.check.mapMissing404' : 'report.check.mapMissingNoLabel')}`);
+    }
     lines.push('');
   }
   if (index) {
-    lines.push('### Главная страница', '', index.ok
-      ? `Главной назначена страница метки ${index.label} — верно.`
-      : `Главной должна быть страница метки ${index.label ?? '—'} (${index.expected ?? 'пары главной донора нет'}), назначена ${index.actual ?? 'никакая'} — ${index.fix
-        ? `\`node scripts/tilda.mjs ${index.fix}\`, затем \`page list\` и повторный \`donor check\`.`
-        : 'у главной донора нет метки со страницей: сначала перенести её (donor copy), затем повторный donor check.'}`, '');
+    lines.push(t(lang, 'report.check.indexTitle'), '', index.ok
+      ? t(lang, 'report.check.indexAssigned', { label: index.label })
+      : t(lang, 'report.check.indexMismatch', {
+        label: index.label ?? '—',
+        expected: index.expected ?? t(lang, 'report.check.indexNoPair'),
+        actual: index.actual ?? t(lang, 'report.check.indexNone'),
+        action: index.fix ? t(lang, 'report.check.indexFix', { fix: index.fix }) : t(lang, 'report.check.indexNoFix'),
+      }), '');
   }
-  lines.push('### Ручные проверки', '', ...MANUAL_CHECKS.map((m) => `- [ ] ${m}`), '', SECTION_END);
+  lines.push(t(lang, 'report.check.manualTitle'), '', ...MANUAL_CHECKS.map((m) => `- [ ] ${t(lang, m)}`), '', SECTION_END);
   return lines.join('\n');
 }
 
 /**
  * Раздел проверок в сводке: заменить между маркерами или дописать в конец; файла нет — создать.
- * Текст вне маркеров не меняется.
+ * Текст вне маркеров не меняется. `lang` — язык заголовка нового файла.
  */
-export function writeChecksSection(summaryPath, section) {
+export function writeChecksSection(summaryPath, section, lang = 'en') {
   let text = existsSync(summaryPath) ? readFileSync(summaryPath, 'utf8') : null;
   if (text === null) {
-    text = `# Сводка переноса\n\n${section}\n`;
+    text = `${t(lang, 'report.check.summaryTitle')}\n\n${section}\n`;
   } else {
     const start = text.indexOf(SECTION_START);
     const end = text.indexOf(SECTION_END, start);
@@ -213,7 +263,7 @@ export function writeChecksSection(summaryPath, section) {
  */
 export async function runDonorCheck(openLabel, {
   slug, site, donorPages, testPages, referenceHost, hosts, labels, baseDir, baselineBase,
-  delayMs = 3000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = new Date().toISOString(),
+  delayMs = 3000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = new Date().toISOString(), lang = 'en',
 }) {
   const base = baselineBase ?? baselineDir();
   const { todo, skipped } = selectLabels(site, { labels, transferred: (pageid) => existsSync(join(base, 'transfer', pageid)) });
@@ -225,19 +275,19 @@ export async function runDonorCheck(openLabel, {
   let failuresInRow = 0;
   let stopped = false;
   for (const [i, entry] of todo.entries()) {
-    if (stopped) { skipped.push({ label: entry.label, reason: CHECK_REASONS.stopped }); continue; }
+    if (stopped) { skipped.push({ label: entry.label, ...reasonEntry('stopped', { n: MAX_FAILURES_IN_ROW }) }); continue; }
     if (i > 0) await sleep(delayMs);
     try {
       results.push(await openLabel(entry, (driver) => checkLabel(driver, { entry, referenceHost, hosts, knownAliases, knownPageIds, donorPageIds, baselineBase: base })));
       failuresInRow = 0;
     } catch (e) {
       const message = e.code ? `${e.code}: ${e.message}` : e.message;
-      results.push({ label: entry.label, pageid: String(entry.pageid), error: CHECK_REASONS.failed(message) });
+      results.push({ label: entry.label, pageid: String(entry.pageid), error: reasonEntry('failed', { message }).reason, errorParams: { message } });
       log.warn('runDonorCheck', 'метка не проверена', { label: entry.label, error: message });
       failuresInRow += 1;
       if (failuresInRow >= MAX_FAILURES_IN_ROW) {
         stopped = true;
-        log.error('runDonorCheck', CHECK_REASONS.stopped, { label: entry.label });
+        log.error('runDonorCheck', reasonEntry('stopped', { n: MAX_FAILURES_IN_ROW }).reason, { label: entry.label });
       }
     }
   }
@@ -248,7 +298,8 @@ export async function runDonorCheck(openLabel, {
   mkdirSync(reports, { recursive: true });
   const checksPath = join(reports, 'checks.json');
   writeFileSync(checksPath, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
-  const summaryPath = writeChecksSection(join(reports, 'transfer-summary.md'), renderChecksSection(result));
+  const summaryPath = writeChecksSection(join(reports, 'transfer-summary.md'), renderChecksSection(result, lang), lang);
+  log.debug('runDonorCheck', 'report language', { lang, file: summaryPath.replace(/\\/g, '/') });
   const linkViolations = results.reduce((n, l) => n + (l.violations?.length ?? 0), 0);
   const failed = results.filter((l) => l.error).length;
   const exitCode = linkViolations || failed || stopped || !map.ok || !index.ok ? 1 : 0;

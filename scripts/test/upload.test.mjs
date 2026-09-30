@@ -32,8 +32,8 @@ test('toDataUrl и imageSpecFromUpload', () => {
   const url = toDataUrl(PNG, 'image/png');
   assert.ok(url.startsWith('data:image/png;base64,iVBOR'));
   assert.deepEqual(imageSpecFromUpload({ cdnUrl: 'https://static.tildacdn.com/tild1/x.png', width: 240, height: '160' }), { img: 'https://static.tildacdn.com/tild1/x.png', filewidth: '240', fileheight: '160' });
-  assert.throws(() => imageSpecFromUpload({ cdnUrl: 'https://evil/x.png', width: 1, height: 1 }), /неожиданный адрес/);
-  assert.throws(() => imageSpecFromUpload({ cdnUrl: 'https://static.tildacdn.com/t/x.png' }), /размеры не пришли/);
+  assert.throws(() => imageSpecFromUpload({ cdnUrl: 'https://evil/x.png', width: 1, height: 1 }), (e) => e.code === 'UPLOAD_FAILED' && e.key === 'upload.unexpectedUrl');
+  assert.throws(() => imageSpecFromUpload({ cdnUrl: 'https://static.tildacdn.com/t/x.png' }), (e) => e.code === 'UPLOAD_FAILED' && e.key === 'upload.noSize');
 });
 
 test('upload: Node читает файл, слой получает data:-адрес и имя, результат — image-spec', async () => {

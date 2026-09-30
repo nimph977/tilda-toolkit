@@ -1,8 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { KEY_PATTERN } from '../lib/i18n.mjs';
+import { COMPARE_REASONS } from '../lib/block-compare.mjs';
 import { listSourceFiles, scanSource } from './literal-scan.mjs';
 import { ROOT } from './product-files.mjs';
 
@@ -11,13 +12,34 @@ const NAMESPACES = [
   'cli', 'doctor', 'setup', 'site', 'paths', 'config', 'browser', 'skillInstall', 'i18n', 'report',
   'apply', 'cycle', 'zero', 'list', 'snapshot', 'upload', 'journal', 'shot', 'pageOps', 'pageRole',
   'pageList', 'promote', 'stage', 'projectStyle', 'donorCopy', 'donorStyle', 'calibrate', 'layout',
+  'donorAliases', 'donorMap', 'donorLinks', 'donorCheck', 'donorVerify', 'reference', 'referenceCompare',
+  'referencePlan', 'referenceSite', 'referenceStore', 'formFields', 'catalog', 'linkCheck',
 ];
+
+/** Значения `missingCode` в `scripts/browser/tilda-project.js` (`submitPageSetting`): код собирается в шаблоне. */
+const MISSING_CODES = ['NO_TITLE_INPUT', 'NO_ALIAS_INPUT'];
+
+/** Код, который бросает не файл слоя, а `scripts/lib/browser.mjs` внутри `page.evaluate`. */
+const LIB_LAYER_CODES = ['NO_LAYER_FUNCTION'];
+
+/** Коды ошибок браузерного слоя: первое слово каждого `new Error(…)` в `scripts/browser/*.js` плюс особые случаи. */
+function browserLayerCodes() {
+  const codes = new Set([...MISSING_CODES, ...LIB_LAYER_CODES]);
+  const dir = join(ROOT, 'scripts', 'browser');
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith('.js')) continue;
+    for (const match of readFileSync(join(dir, name), 'utf8').matchAll(/new Error\(\s*[`'"]([A-Z][A-Z0-9_]{2,})\b/g)) {
+      codes.add(match[1]);
+    }
+  }
+  return [...codes];
+}
 
 /**
  * Семейства ключей, которые собираются из кода и суффикса: префикс → функция, возвращающая
  * ожидаемый набор суффиксов. Остальные ключи пишутся в коде целиком одним литералом.
  */
-const DYNAMIC_KEY_FAMILIES = {};
+const DYNAMIC_KEY_FAMILIES = { 'browser.code.': browserLayerCodes, 'report.compareReason.': () => Object.keys(COMPARE_REASONS) };
 
 /** Литералы, похожие на ключи, но ключами не являющиеся: значение → причина. */
 const NOT_KEYS = {
@@ -57,7 +79,8 @@ function usedKeys() {
     const name = relative(ROOT, file).replace(/\\/g, '/');
     for (const literal of scanSource(readFileSync(file, 'utf8')).literals) {
       if (literal.hasSubst || !isKeyLike(literal.value)) continue;
-      if (CALLEES_WITHOUT_KEYS.has(literal.callee) || FILE_NAME.test(literal.value)) continue;
+      // Имя файла вроде 'upload.png' — не ключ, если только такого ключа нет в словаре (`cli.help.flag.json`).
+      if (CALLEES_WITHOUT_KEYS.has(literal.callee) || (FILE_NAME.test(literal.value) && !(literal.value in en))) continue;
       if (Object.prototype.hasOwnProperty.call(NOT_KEYS, literal.value)) continue;
       if (!used.has(literal.value)) used.set(literal.value, []);
       used.get(literal.value).push(name + ':' + literal.line);

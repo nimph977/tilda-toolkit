@@ -39,6 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { chromium } from 'playwright-core';
 import { createLogger } from './log.mjs';
+import { attachMessage, hasKey, messageText, msg } from './i18n.mjs';
 import { repoRoot, protectedPages, testProfileDir, assertOutsideRepo } from './paths.mjs';
 import { resetTildaZoom } from './browser-profile.mjs';
 import { resolveProjectIdFor, getProjectIdFor, getDonorProfile, requireDonorConfig, PROJECT_ROLES } from './config.mjs';
@@ -52,10 +53,14 @@ export const COMMAND_LOCK_FILE = 'command.lock';
 /** Описание держателя: { pid, port, startedAt } — пишет browser-daemon.mjs. */
 export const DAEMON_FILE = 'daemon.json';
 
-/** Ошибка слоя с машиночитаемым кодом: SESSION_LOST, BROWSER_LOCKED, TIMEOUT, CALL_FAILED, LAYER_NOT_FOUND. */
+/**
+ * Ошибка слоя с машиночитаемым кодом: SESSION_LOST, BROWSER_LOCKED, TIMEOUT, CALL_FAILED, LAYER_NOT_FOUND.
+ * `message` — строка или `Message`: английский текст в `message`, ключ и параметры — в `key`/`params`.
+ */
 export class BrowserError extends Error {
   constructor(code, message, data) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
     this.name = 'BrowserError';
     this.code = code;
     if (data !== undefined) this.data = data;
@@ -128,11 +133,23 @@ export function wrapLayer(code) {
  * JSON; в тексте ошибки браузерного слоя — SESSION_LOST.
  */
 /** Куда входить при потере сессии: у донора свой держатель и своя команда входа. */
-export const LOGIN_HINTS = { test: 'тестовый держатель: session', donor: 'держатель донора: session --donor' };
+export const LOGIN_HINTS = { test: msg('browser.lib.loginHintTest'), donor: msg('browser.lib.loginHintDonor') };
 
-/** Текст SESSION_LOST с подсказкой входа для роли держателя. */
+/** Сообщение SESSION_LOST с подсказкой входа для роли держателя (`Message`). */
 export function sessionLostMessage(role = 'test') {
-  return `Сессии Тильды нет: войдите в открытом окне браузера и повторите команду (${LOGIN_HINTS[role] ?? LOGIN_HINTS.test})`;
+  return msg('browser.lib.sessionLostRole', { hint: LOGIN_HINTS[role] ?? LOGIN_HINTS.test });
+}
+
+/**
+ * Код слоя в начале текста ошибки страницы: `SAVE_FAILED: x`, `page.evaluate: Error: SESSION_LOST y`,
+ * `WRONG_PAGE_SETTINGS 123 instead of 456`. Нет кода — `null`. Чистая.
+ */
+export function layerErrorCode(message) {
+  // Префикс Playwright — имя метода с точкой (`page.evaluate: `); сам код слоя за префикс не считается.
+  const body = String(message).replace(/^(?:[a-z]\w*(?:\.\w+)+: )?(?:Error: )?/, '');
+  const m = body.match(/^([A-Z][A-Z0-9_]{2,})(?::|\s|$)\s*([\s\S]*)$/);
+  // Стек Playwright («\n    at …») в подробности не попадает.
+  return m ? { code: m[1], detail: m[2].split(/\n\s+at /)[0].trim() } : null;
 }
 
 export function isSessionLost({ url = '', body = '', error = '' } = {}) {
@@ -154,14 +171,14 @@ export function isRetryable(error) {
 
 /** Пауза перед повтором после попытки `attempt` (с 1): base × factor^(attempt-1), не больше max. */
 export function retryDelayMs(attempt, { base = 1000, factor = 2, max = 15000 } = {}) {
-  if (!Number.isInteger(attempt) || attempt < 1) throw new RangeError(`attempt должен быть ≥ 1, получено ${attempt}`);
+  if (!Number.isInteger(attempt) || attempt < 1) throw new RangeError(`attempt must be >= 1, got ${attempt}`);
   return Math.min(max, Math.round(base * factor ** (attempt - 1)));
 }
 
 /** Выражение вызова функции слоя — для отладочных `*.call.js` и для логов. */
 export function buildCallExpression(fn, args = []) {
-  if (!/^[A-Za-z_$][\w$]*$/.test(fn)) throw new TypeError(`недопустимое имя функции слоя: ${fn}`);
-  if (!Array.isArray(args)) throw new TypeError('args должен быть массивом');
+  if (!/^[A-Za-z_$][\w$]*$/.test(fn)) throw new TypeError(`invalid layer function name: ${fn}`);
+  if (!Array.isArray(args)) throw new TypeError('args must be an array');
   const list = args.map((a) => JSON.stringify(a === undefined ? null : a)).join(', ');
   return `async () => window.__tilda.${fn}(${list})`;
 }
@@ -173,7 +190,7 @@ export function matchesCapture(url, filter, request) {
   if (typeof filter === 'function') return Boolean(filter(url, request));
   if (filter instanceof RegExp) return filter.test(url);
   if (typeof filter === 'string') return url.includes(filter);
-  throw new TypeError(`неподдерживаемый фильтр перехвата: ${typeof filter}`);
+  throw new TypeError(`unsupported intercept filter: ${typeof filter}`);
 }
 
 const COOKIE_KEY = /^(cookie|set-cookie|cookie2|authorization)$/i;
@@ -220,14 +237,14 @@ function readJsonSafe(file) {
   }
 }
 
-function acquireLock(dir, name = LOCK_FILE, what = 'браузер') {
+function acquireLock(dir, name = LOCK_FILE, what = msg('browser.lib.whatBrowser')) {
   mkdirSync(dir, { recursive: true });
   const file = resolve(dir, name);
   if (existsSync(file)) {
     const info = readJsonSafe(file);
     if (isPidAlive(info.pid) && info.pid !== process.pid) {
-      log.error('open', `${what} уже занят другим процессом`, { lock: file, pid: info.pid, startedAt: info.startedAt });
-      throw new BrowserError('BROWSER_LOCKED', `${what} уже занят процессом ${info.pid} (${info.startedAt}); дождитесь его или удалите ${file}`);
+      log.error('open', `${messageText(what)} уже занят другим процессом`, { lock: file, pid: info.pid, startedAt: info.startedAt });
+      throw new BrowserError('BROWSER_LOCKED', msg('browser.lib.locked', { what, pid: info.pid, startedAt: info.startedAt, file }));
     }
     log.warn('open', 'найден протухший lock, перезаписываю', { lock: file, pid: info.pid });
   }
@@ -326,14 +343,14 @@ export async function attach(daemon, opts = {}) {
   const guard = sessionGuard(role, opts);
   const projectid = sessionProject(role);
   const writablePages = role === 'donor' ? [] : null;
-  const lockFile = acquireLock(dir, COMMAND_LOCK_FILE, 'браузер держателя (другая команда)');
+  const lockFile = acquireLock(dir, COMMAND_LOCK_FILE, msg('browser.lib.whatCommand'));
   let browser;
   try {
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${daemon.port}`, { timeout: opts.connectTimeoutMs ?? 15_000 });
   } catch (e) {
     releaseLock(lockFile);
     log.error('attach', 'не удалось подключиться к держателю', { port: daemon.port, pid: daemon.pid, error: e.message });
-    throw new BrowserError('CALL_FAILED', `держатель браузера (pid ${daemon.pid}, порт ${daemon.port}) не отвечает: ${e.message}`);
+    throw new BrowserError('CALL_FAILED', msg('browser.lib.daemonNoAnswer', { pid: daemon.pid, port: daemon.port, reason: e.message }));
   }
   const context = browser.contexts()[0] ?? (await browser.newContext());
   const page = context.pages()[0] ?? (await context.newPage());
@@ -383,7 +400,7 @@ export async function startDaemon({ profileDir: dirOpt, role = 'test', timeoutMs
     if (!isPidAlive(child.pid)) break;
   }
   log.error('startDaemon', 'держатель не поднялся', { log: logFile });
-  throw new BrowserError('CALL_FAILED', `держатель браузера не поднялся за ${Math.round(timeoutMs / 1000)} с — смотрите ${logFile}`);
+  throw new BrowserError('CALL_FAILED', msg('browser.lib.daemonNotStarted', { seconds: Math.round(timeoutMs / 1000), logFile }));
 }
 
 /** Остановить держателя: закрыть Chrome по CDP; процесс держателя завершится сам. */
@@ -479,7 +496,7 @@ export async function setDaemonWindow(state, { profileDir: dirOpt, role = 'test'
     const context = browser.contexts()[0] ?? (await browser.newContext());
     const page = context.pages()[0] ?? (await context.newPage());
     const ok = await setWindowState({ context, page }, state);
-    if (!ok) throw new BrowserError('CALL_FAILED', `окно держателя не переключилось в ${state} — смотрите лог уровня warn`);
+    if (!ok) throw new BrowserError('CALL_FAILED', msg('browser.lib.windowNotSwitched', { state }));
     log.info('setDaemonWindow', state === 'normal' ? '[FIX] окно держателя на экране' : '[FIX] окно держателя свёрнуто', { pid: st.pid });
     return true;
   } finally {
@@ -525,7 +542,7 @@ export async function openProject(session, { layers = ['tilda-project'], project
   log.debug('openProject', 'навигация', { url, role });
   await page.goto(url, { waitUntil: 'load' });
   if (isSessionLost({ url: page.url() })) {
-    log.error('openProject', '[FIX] SESSION_LOST', { url: page.url(), role, hint: LOGIN_HINTS[role] });
+    log.error('openProject', '[FIX] SESSION_LOST', { url: page.url(), role, hint: messageText(LOGIN_HINTS[role]) });
     throw new BrowserError('SESSION_LOST', sessionLostMessage(role), { url: page.url() });
   }
   await page.waitForFunction(() => document.readyState === 'complete' && typeof getCSRF === 'function' && Boolean(window.projectid), null, { timeout: 30_000 });
@@ -533,7 +550,7 @@ export async function openProject(session, { layers = ['tilda-project'], project
   const wanted = String(resolveProjectIdFor(role, projectid));
   if (projectOnPage !== wanted) {
     log.error('openProject', 'открыт другой проект', { role, wanted, got: projectOnPage });
-    throw new BrowserError('CALL_FAILED', `открыт проект ${projectOnPage} вместо ${wanted}`);
+    throw new BrowserError('CALL_FAILED', msg('browser.lib.wrongProject', { onPage: projectOnPage, wanted }));
   }
   const installed = await installLayers(page, layers, { protectedPages: session.protectedPages, writablePages: session.writablePages });
   installed.forEach((l) => session.layers.add(l.name));
@@ -549,14 +566,14 @@ export async function openProjectSettings(session, { layers = ['tilda-project'],
   const { page } = session;
   const role = session.role ?? 'test';
   const selector = SETTINGS_TAB_SELECT[tab];
-  if (!selector) throw new BrowserError('CALL_FAILED', `неизвестная вкладка настроек: ${tab}`);
+  if (!selector) throw new BrowserError('CALL_FAILED', msg('browser.lib.unknownTab', { tab }));
   const url = projectSettingsUrl(projectid, role, tab);
   log.debug('openProjectSettings', 'навигация', { url, role, tab });
   // Смена только хэша не перезагружает страницу — открываем с нуля, чтобы форма взяла свежие значения.
   await page.goto('about:blank');
   await page.goto(url, { waitUntil: 'load' });
   if (isSessionLost({ url: page.url() })) {
-    log.error('openProjectSettings', '[FIX] SESSION_LOST', { url: page.url(), role, hint: LOGIN_HINTS[role] });
+    log.error('openProjectSettings', '[FIX] SESSION_LOST', { url: page.url(), role, hint: messageText(LOGIN_HINTS[role]) });
     throw new BrowserError('SESSION_LOST', sessionLostMessage(role), { url: page.url() });
   }
   await page.waitForSelector(selector, { state: 'attached', timeout: 30_000 });
@@ -564,7 +581,7 @@ export async function openProjectSettings(session, { layers = ['tilda-project'],
   const wanted = String(resolveProjectIdFor(role, projectid));
   if (projectOnPage !== wanted) {
     log.error('openProjectSettings', 'открыт другой проект', { role, wanted, got: projectOnPage });
-    throw new BrowserError('CALL_FAILED', `открыты настройки проекта ${projectOnPage} вместо ${wanted}`);
+    throw new BrowserError('CALL_FAILED', msg('browser.lib.wrongSettingsProject', { onPage: projectOnPage, wanted }));
   }
   const installed = await installLayers(page, layers, { protectedPages: session.protectedPages, writablePages: session.writablePages });
   installed.forEach((l) => session.layers.add(l.name));
@@ -605,7 +622,7 @@ export async function installLayers(page, names = ['tilda-zero'], { protectedPag
     const path = layerPath(name);
     if (!existsSync(path)) {
       log.error('installLayers', 'файл слоя не найден', { name, path });
-      throw new BrowserError('LAYER_NOT_FOUND', `слой ${name} не найден: ${path}`);
+      throw new BrowserError('LAYER_NOT_FOUND', msg('browser.lib.layerNotFound', { name, path }));
     }
     const code = readFileSync(path, 'utf8');
     log.debug('installLayers', 'установка слоя', { name: basename(path), bytes: Buffer.byteLength(code) });
@@ -696,12 +713,12 @@ export async function openEditor(session, pageid, { layers = ['tilda-zero'], pro
   if (!isSessionLost({ url: page.url() })) await waitForEditorReady(page);
   const state = await editorState(page);
   if (state.sessionLost) {
-    log.error('openEditor', '[FIX] SESSION_LOST', { url: state.url, pageid: String(pageid), role, hint: LOGIN_HINTS[role] });
+    log.error('openEditor', '[FIX] SESSION_LOST', { url: state.url, pageid: String(pageid), role, hint: messageText(LOGIN_HINTS[role]) });
     throw new BrowserError('SESSION_LOST', sessionLostMessage(role), { url: state.url });
   }
   if (state.pageid !== String(pageid)) {
     log.error('openEditor', 'редактор открыл другую страницу', { wanted: String(pageid), got: state.pageid });
-    throw new BrowserError('CALL_FAILED', `редактор открыл страницу ${state.pageid} вместо ${pageid}`);
+    throw new BrowserError('CALL_FAILED', msg('browser.lib.wrongEditorPage', { actual: state.pageid, wanted: pageid }));
   }
   const installed = await installLayers(page, layers, { protectedPages: session.protectedPages, writablePages: session.writablePages });
   installed.forEach((l) => session.layers.add(l.name));
@@ -756,7 +773,7 @@ export async function waitForLogin(session, pageid, { timeoutMs = 10 * 60_000, p
   }
   await hide();
   log.error('waitForLogin', 'вход не выполнен за отведённое время', { timeoutMs });
-  throw new BrowserError('SESSION_LOST', `вход в Тильду не выполнен за ${Math.round(timeoutMs / 1000)} с`);
+  throw new BrowserError('SESSION_LOST', msg('browser.lib.loginTimeout', { seconds: Math.round(timeoutMs / 1000) }));
 }
 
 /**
@@ -766,13 +783,13 @@ export async function waitForLogin(session, pageid, { timeoutMs = 10 * 60_000, p
 async function callOnce(page, fn, args, timeoutMs) {
   let timer;
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new BrowserError('TIMEOUT', `вызов ${fn} не завершился за ${timeoutMs} мс`)), timeoutMs);
+    timer = setTimeout(() => reject(new BrowserError('TIMEOUT', msg('browser.lib.callTimeout', { fn, ms: timeoutMs }))), timeoutMs);
   });
   try {
     return await Promise.race([
       page.evaluate(async ({ fn, args }) => {
         const T = window.__tilda;
-        if (!T || typeof T[fn] !== 'function') throw new Error(`NO_LAYER_FUNCTION ${fn}: слой не установлен`);
+        if (!T || typeof T[fn] !== 'function') throw new Error(`NO_LAYER_FUNCTION ${fn}: layer is not installed`);
         return T[fn](...args);
       }, { fn, args }),
       timeout,
@@ -806,19 +823,26 @@ export async function call(page, fn, args = [], opts = {}) {
       journal.push({ fn, attempt, ok: false, ms: Date.now() - started, error: message.slice(0, 200) });
       if (isSessionLost({ url: page.url(), error: message })) {
         log.error('call', 'SESSION_LOST', { fn, attempt });
-        throw new BrowserError('SESSION_LOST', 'Сессии Тильды нет: войдите в открытом окне браузера и повторите команду', { fn });
+        throw new BrowserError('SESSION_LOST', msg('browser.lib.sessionLost'), { fn });
       }
       if (!isRetryable(e) || attempt === attempts) {
-        log.error('call', 'вызов не удался', { fn, attempt, error: message.slice(0, 200) });
+        const layer = layerErrorCode(message);
+        log.error('call', 'вызов не удался', { fn, attempt, layerCode: layer?.code, error: message.slice(0, 200) });
         if (e instanceof BrowserError) throw e;
-        throw new BrowserError('CALL_FAILED', `${fn}: ${message}`, { fn, attempt });
+        // Код слоя (SAVE_FAILED и т. п.) идёт в ключ `browser.code.<КОД>`; незнакомый код — общий текст.
+        // Код ошибки остаётся CALL_FAILED, код слоя — в data.layerCode.
+        if (layer && hasKey('browser.code.' + layer.code)) {
+          log.debug('call', 'layer error code', { fn, layerCode: layer.code });
+          throw new BrowserError('CALL_FAILED', msg('browser.code.' + layer.code, { fn, detail: layer.detail }), { fn, attempt, layerCode: layer.code });
+        }
+        throw new BrowserError('CALL_FAILED', msg('browser.lib.callFailed', { fn, detail: message }), { fn, attempt });
       }
       const delay = retryDelayMs(attempt, opts.retry);
       log.warn('call', 'ошибка, повтор', { fn, attempt, nextAttempt: attempt + 1, delayMs: delay, error: message.slice(0, 200) });
       await new Promise((r) => setTimeout(r, delay));
     }
   }
-  throw new BrowserError('CALL_FAILED', `${fn}: попытки исчерпаны`);
+  throw new BrowserError('CALL_FAILED', msg('browser.lib.attemptsExhausted', { fn }));
 }
 
 /**
@@ -838,7 +862,7 @@ export async function callWithResponse(page, fn, args = [], { urlPart, bodyPart,
     resp = await wait;
   } catch (e) {
     log.error('callWithResponse', 'нет ответа сервера', { fn, urlPart, timeoutMs, error: String(e.message || e).slice(0, 120) });
-    throw new BrowserError('CALL_FAILED', `настройки не сохранены: нет ответа сервера за ${Math.round(timeoutMs / 1000)} с`, { fn });
+    throw new BrowserError('CALL_FAILED', msg('browser.lib.settingsNotSaved', { seconds: Math.round(timeoutMs / 1000) }), { fn });
   }
   const text = (await resp.text()).slice(0, 200);
   log.info('callWithResponse', 'ответ получен', { fn, status: resp.status(), bytes: text.length });

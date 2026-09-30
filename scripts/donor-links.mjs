@@ -17,10 +17,14 @@ import { normalizeAlias } from './donor-map.mjs';
 
 const log = createLogger('donor-links');
 
+/**
+ * Причины, по которым ссылка остаётся как есть: имя → английский текст. Это данные плана и итога;
+ * рядом с текстом везде лежит `code` — имя причины.
+ */
 export const LINK_REWRITE_REASONS = {
-  noPage: (path) => `страницы ${path} в копии нет — ссылка оставлена на сайт донора`,
-  form: (field) => `поле формы ${field} не меняется — назвать владельцу`,
-  otherHost: 'ссылка не на домен донора',
+  noPage: (path) => `page ${path} does not exist in the copy: the link stays pointing to the donor site`,
+  form: (field) => `form field ${field} is not changed: tell the owner`,
+  otherHost: 'the link is not to the donor domain',
 };
 
 const KEEP_RE = /^(?:#|tel:|mailto:|javascript:|data:)/i;
@@ -85,7 +89,7 @@ function donorPagePath(pathname, donorLinks) {
 }
 
 /**
- * Решение по одному адресу. Чистая: `{ value, changed, donor, reason? }`. `donor: true` — адрес на
+ * Решение по одному адресу. Чистая: `{ value, changed, donor, code?, reason? }`. `donor: true` — адрес на
  * домене донора или на страницу донора по ID (переписан или оставлен с причиной); остальные ссылки
  * не трогаются. `donorLinks` — `donorPageLinks(...)`.
  */
@@ -106,7 +110,7 @@ export function rewriteDonorHref(href, { hosts, knownPaths, donorLinks }) {
   } catch {
     return { value: raw, changed: false, donor: false };
   }
-  if (!/^https?:$/.test(url.protocol)) return { value: raw, changed: false, donor: false, reason: LINK_REWRITE_REASONS.otherHost };
+  if (!/^https?:$/.test(url.protocol)) return { value: raw, changed: false, donor: false, code: 'otherHost', reason: LINK_REWRITE_REASONS.otherHost };
   const host = url.hostname.toLowerCase();
   // Страница донора по ID — и на техническом поддомене проекта (`<имя>.tilda.ws`): блоки донора
   // ссылаются и так (прогон 2026-09-24, P22); ID страницы Tilda глобален, чужой сайт его не даст.
@@ -114,7 +118,7 @@ export function rewriteDonorHref(href, { hosts, knownPaths, donorLinks }) {
     const target = donorPagePath(url.pathname, donorLinks);
     if (target) return { value: `${target}${url.search}${url.hash}`, changed: true, donor: true };
   }
-  if (!hosts.includes(host)) return { value: raw, changed: false, donor: false, reason: LINK_REWRITE_REASONS.otherHost };
+  if (!hosts.includes(host)) return { value: raw, changed: false, donor: false, code: 'otherHost', reason: LINK_REWRITE_REASONS.otherHost };
   let path = url.pathname;
   try {
     path = decodeURI(path);
@@ -122,13 +126,13 @@ export function rewriteDonorHref(href, { hosts, knownPaths, donorLinks }) {
     // битые проценты — путь как есть
   }
   path = path.replace(/\/+$/, '').toLowerCase() || '/';
-  if (!knownPaths.has(path)) return { value: raw, changed: false, donor: true, reason: LINK_REWRITE_REASONS.noPage(path) };
+  if (!knownPaths.has(path)) return { value: raw, changed: false, donor: true, code: 'noPage', reason: LINK_REWRITE_REASONS.noPage(path) };
   return { value: `${url.pathname}${url.search}${url.hash}`, changed: true, donor: true };
 }
 
 /**
  * Перепись значений `href` в HTML-поле: `href="…"`, `href='…'` и закодированный `href=&quot;…&quot;`.
- * Текст между тегами не меняется. Чистая: `{ value, changed, reasons: [{ href, reason }] }`.
+ * Текст между тегами не меняется. Чистая: `{ value, changed, reasons: [{ href, code, reason }] }`.
  */
 export function rewriteHrefsInHtml(html, ctx) {
   let changed = 0;
@@ -136,7 +140,7 @@ export function rewriteHrefsInHtml(html, ctx) {
   const value = String(html ?? '').replace(HREF_RE, (whole, head, dq, sq, enc) => {
     const href = dq ?? sq ?? enc;
     const r = rewriteDonorHref(href, ctx);
-    if (r.donor && !r.changed) reasons.push({ href, reason: r.reason });
+    if (r.donor && !r.changed) reasons.push({ href, code: r.code, reason: r.reason });
     if (!r.changed) return whole;
     changed += 1;
     if (dq !== undefined) return `${head}"${r.value}"`;
@@ -151,7 +155,7 @@ function rewriteField(value, ctx) {
   const s = String(value);
   if (WHOLE_URL_RE.test(s.trim()) || WHOLE_PATH_RE.test(s.trim())) {
     const r = rewriteDonorHref(s.trim(), ctx);
-    return { value: r.changed ? r.value : s, changed: r.changed ? 1 : 0, reasons: r.donor && !r.changed ? [{ href: s.trim(), reason: r.reason }] : [] };
+    return { value: r.changed ? r.value : s, changed: r.changed ? 1 : 0, reasons: r.donor && !r.changed ? [{ href: s.trim(), code: r.code, reason: r.reason }] : [] };
   }
   return rewriteHrefsInHtml(s, ctx);
 }
@@ -160,7 +164,7 @@ function rewriteField(value, ctx) {
  * План переписи ссылок страницы по её снимкам. `hosts` — `donorHosts(...)`, `knownPaths` —
  * `knownPathsFrom(page list)`, `donorLinks` — `donorPageLinks(...)` (ссылки по ID донора),
  * `recordids` — живые блоки (иначе инвентарь страницы). Итог
- * `{ plan, changed, unchanged: [{ recordid, field, reason }], skippedForm, blocks, skippedStale }`;
+ * `{ plan, changed, unchanged: [{ recordid, field, code, reason }], skippedForm, blocks, skippedStale }`;
  * `changed` — число адресов, попавших в операции плана.
  */
 export function buildLinkRewritePlan(pageid, { hosts, knownPaths, donorLinks, baseDir, recordids } = {}) {
@@ -187,7 +191,7 @@ export function buildLinkRewritePlan(pageid, { hosts, knownPaths, donorLinks, ba
   for (const h of hits) {
     const r = rewriteField(h.value, ctx);
     for (const u of r.reasons) {
-      unchanged.push({ recordid: h.recordid, field: h.lid ? `${h.lid}.${h.field}` : h.field, reason: u.reason });
+      unchanged.push({ recordid: h.recordid, field: h.lid ? `${h.lid}.${h.field}` : h.field, code: u.code, reason: u.reason });
       log.debug('buildLinkRewritePlan', 'оставлено', { recordid: h.recordid, field: h.field, href: u.href });
     }
     if (!r.changed) continue;
@@ -207,7 +211,7 @@ export function buildLinkRewritePlan(pageid, { hosts, knownPaths, donorLinks, ba
     }
   }
   ops.push(...listByRecord.values());
-  const forms = skippedForm.map((x) => ({ recordid: x.recordid, field: x.field, reason: LINK_REWRITE_REASONS.form(x.field) }));
+  const forms = skippedForm.map((x) => ({ recordid: x.recordid, field: x.field, code: 'form', reason: LINK_REWRITE_REASONS.form(x.field) }));
   const plan = { name: `donor-links-${String(pageid)}`, page: String(pageid), ops };
   log.info('buildLinkRewritePlan', `переписано ${changed}, оставлено ${unchanged.length}, поля форм ${forms.length}`, { pageid: String(pageid), ops: ops.length, blocks, skippedStale });
   return { plan, changed, unchanged, skippedForm: forms, blocks, skippedStale };

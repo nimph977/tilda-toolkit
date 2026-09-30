@@ -5,8 +5,11 @@ import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { parseCli, usage, UsageError, formatSummary, statusCode } from '../tilda.mjs';
+import { parseCli, usage, UsageError, formatSummary, statusCode, planSummary } from '../tilda.mjs';
 import { msg } from '../lib/i18n.mjs';
+
+/** Проверка ошибки разбора аргументов по ключу словаря, а не по тексту. */
+const usageKey = (key) => (e) => e instanceof UsageError && e.key === key;
 
 const cli = fileURLToPath(new URL('../tilda.mjs', import.meta.url));
 const repoDir = fileURLToPath(new URL('../..', import.meta.url));
@@ -56,12 +59,12 @@ test('CLI rejects missing online configuration before it can create a browser pr
 
 test('parseCli validates reference actions and flags', () => {
   assert.throws(() => parseCli(['reference']), UsageError);
-  assert.throws(() => parseCli(['reference', 'fetch', '--slug', 'demo']), /--url/);
-  assert.throws(() => parseCli(['reference', 'fetch', '--url', 'https://ref.test/']), /--slug/);
-  assert.throws(() => parseCli(['reference', 'plan', '--slug', 'demo']), /--source/);
-  assert.throws(() => parseCli(['reference', 'plan', '--slug', 'demo', '--source', 'index']), /--page/);
+  assert.throws(() => parseCli(['reference', 'fetch', '--slug', 'demo']), usageKey('cli.usage.needUrl'));
+  assert.throws(() => parseCli(['reference', 'fetch', '--url', 'https://ref.test/']), usageKey('cli.usage.needSlugReference'));
+  assert.throws(() => parseCli(['reference', 'plan', '--slug', 'demo']), usageKey('cli.usage.planNeedSource'));
+  assert.throws(() => parseCli(['reference', 'plan', '--slug', 'demo', '--source', 'index']), usageKey('cli.usage.needDraftPageOrLabel'));
   assert.equal(parseCli(['reference', 'plan', '--slug', 'demo', '--source', 'index', '--page', '200002']).positionals[0], 'plan');
-  assert.throws(() => parseCli(['reference', 'structure', '--slug', 'demo', '--max', 'x']), /--max/);
+  assert.throws(() => parseCli(['reference', 'structure', '--slug', 'demo', '--max', 'x']), usageKey('cli.usage.notInteger'));
   const ok = parseCli(['reference', 'fetch', '--slug', 'demo', '--url', 'https://ref.test/', '--follow', '--max', '5']);
   assert.equal(ok.cmd, 'reference');
   assert.deepEqual(ok.positionals, ['fetch']);
@@ -71,11 +74,11 @@ test('parseCli validates reference actions and flags', () => {
   assert.deepEqual(parseCli(['reference', 'pages', '--slug', 'x']).positionals, ['pages']);
   assert.equal(parseCli(['reference', 'plan', '--slug', 'x', '--source', 'P07']).values.source, 'P07');
   assert.deepEqual(parseCli(['reference', 'shot', '--slug', 'x', '--source', 'P00']).positionals, ['shot']);
-  assert.throws(() => parseCli(['reference', 'shot', '--slug', 'x', '--source', 'index']), /метка карты сайта/);
+  assert.throws(() => parseCli(['reference', 'shot', '--slug', 'x', '--source', 'index']), usageKey('cli.usage.needSourceLabelStrict'));
   assert.deepEqual(parseCli(['reference', 'audit', '--slug', 'x', '--source', 'P00']).positionals, ['audit']);
-  assert.throws(() => parseCli(['reference', 'plan', '--slug', 'x', '--source', 'index']), /--page/);
-  assert.throws(() => parseCli(['reference', 'plan', '--slug', 'x', '--source', 'P07', '--zone', 'content']), /ролью метки/);
-  assert.throws(() => parseCli(['reference', 'plan', '--slug', 'x', '--source', 'index', '--page', '200002', '--zone', 'bad']), /--zone/);
+  assert.throws(() => parseCli(['reference', 'plan', '--slug', 'x', '--source', 'index']), usageKey('cli.usage.needDraftPageOrLabel'));
+  assert.throws(() => parseCli(['reference', 'plan', '--slug', 'x', '--source', 'P07', '--zone', 'content']), usageKey('cli.usage.zoneByLabel'));
+  assert.throws(() => parseCli(['reference', 'plan', '--slug', 'x', '--source', 'index', '--page', '200002', '--zone', 'bad']), usageKey('cli.usage.zoneValue'));
   assert.equal(parseCli(['reference', 'plan', '--slug', 'x', '--source', 'index', '--page', '200002', '--zone', 'content']).values.zone, 'content');
   assert.equal(parseCli(['reference', 'fetch', '--slug', 'x', '--url', 'https://ref.test/', '--sitemap']).values.sitemap, true);
 
@@ -112,8 +115,8 @@ test('parseCli accepts browser show|hide and rejects unknown browser actions', (
 
 test('parseCli validates catalog actions', () => {
   assert.throws(() => parseCli(['catalog']), UsageError);
-  assert.throws(() => parseCli(['catalog', 'capture', '--slug', 'demo']), /--page/);
-  assert.throws(() => parseCli(['catalog', 'capture', '--page', '200002']), /--slug|--tplid/);
+  assert.throws(() => parseCli(['catalog', 'capture', '--slug', 'demo']), usageKey('cli.usage.needDraftPage'));
+  assert.throws(() => parseCli(['catalog', 'capture', '--page', '200002']), usageKey('cli.usage.needSlugOrTplid'));
   assert.throws(() => parseCli(['catalog', 'capture', '--page', '200002', '--tplid', '796,x']), /--tplid/);
   assert.equal(parseCli(['catalog', 'capture', '--page', '100001', '--tplid', '30', '--force']).values.force, true);
   assert.equal(parseCli(['page', 'role', '--header', '100001']).values.header, '100001');
@@ -123,8 +126,8 @@ test('parseCli validates catalog actions', () => {
   const index = parseCli(['page', 'role', '--index', '100001', '--confirm']).values;
   assert.equal(index.index, '100001');
   assert.equal(index.confirm, true);
-  assert.throws(() => parseCli(['page', 'role', '--index', 'none']), /--index ждёт pageid/);
-  assert.throws(() => parseCli(['page', 'role', '--index', '100001', '--header', '100002']), /отдельно от --header/);
+  assert.throws(() => parseCli(['page', 'role', '--index', 'none']), usageKey('cli.usage.roleIndexId'));
+  assert.throws(() => parseCli(['page', 'role', '--index', '100001', '--header', '100002']), usageKey('cli.usage.roleIndexSeparate'));
   const capture = parseCli(['catalog', 'capture', '--page', '200002', '--tplid', '796,702']);
   assert.deepEqual([capture.cmd, capture.positionals[0], capture.values.tplid], ['catalog', 'capture', '796,702']);
   const list = parseCli(['catalog', 'list']);
@@ -185,8 +188,8 @@ test('parseCli validates donor actions and refuses the --donor flag for the dono
   assert.equal(parseCli(['donor', 'map', '--slug', 'demo']).values.slug, 'demo');
   assert.throws(() => parseCli(['donor']), UsageError);
   assert.throws(() => parseCli(['donor', 'list']), /pages\|map/);
-  assert.throws(() => parseCli(['donor', 'map']), /--slug/);
-  assert.throws(() => parseCli(['donor', 'pages', '--donor']), /роль задаёт сама команда/);
+  assert.throws(() => parseCli(['donor', 'map']), usageKey('cli.usage.needSlug'));
+  assert.throws(() => parseCli(['donor', 'pages', '--donor']), usageKey('cli.usage.donorFlagOnDonor'));
 });
 
 test('donor pages refuses missing donor configuration before creating a profile', () => {
@@ -208,10 +211,10 @@ test('parseCli validates donor copy flags', () => {
   assert.equal(parseCli(['donor', 'copy', '--slug', 'demo', '--source', 'P13']).values.source, 'P13');
   assert.equal(parseCli(['donor', 'copy', '--slug', 'demo', '--source', 'P13', '--dry-run'])['values']['dry-run'], true);
   assert.equal(parseCli(['donor', 'copy', '--slug', 'demo', '--from', '200002', '--to', '200003', '--replace']).values.replace, true);
-  assert.throws(() => parseCli(['donor', 'copy', '--source', 'P13']), /--slug/);
-  assert.throws(() => parseCli(['donor', 'copy', '--slug', 'demo', '--source', 'index']), /метк/);
-  assert.throws(() => parseCli(['donor', 'copy', '--slug', 'demo']), /--source/);
-  assert.throws(() => parseCli(['donor', 'copy', '--slug', 'demo', '--from', '200002', '--to', '200002']), /совпадают/);
+  assert.throws(() => parseCli(['donor', 'copy', '--source', 'P13']), usageKey('cli.usage.needSlug'));
+  assert.throws(() => parseCli(['donor', 'copy', '--slug', 'demo', '--source', 'index']), usageKey('cli.usage.copySourceLabel'));
+  assert.throws(() => parseCli(['donor', 'copy', '--slug', 'demo']), usageKey('cli.usage.copyNeedTarget'));
+  assert.throws(() => parseCli(['donor', 'copy', '--slug', 'demo', '--from', '200002', '--to', '200002']), usageKey('cli.usage.fromToSame'));
   assert.throws(() => parseCli(['donor', 'copy', '--slug', 'demo', '--from', '200002']), /--to/);
   assert.throws(() => parseCli(['donor', 'copy', '--slug', 'demo', '--from', 'x', '--to', '200003']), /--from/);
 });
@@ -228,7 +231,11 @@ test('donor copy refuses missing configuration and a missing site map before cre
     const env = { ...base, TILDA_PROJECT_ID: '100001', TILDA_PROTECTED_PAGES: '', TILDA_DONOR_PROJECT_ID: '100002', TILDA_DONOR_BROWSER_PROFILE: donorProfile };
     const noSite = spawnSync(process.execPath, [cli, 'donor', 'copy', '--slug', 'x', '--source', 'P00'], { encoding: 'utf8', env, timeout: 10_000 });
     assert.equal(noSite.status, 1, `${noSite.stdout}\n${noSite.stderr}`);
-    assert.match(noSite.stdout, /нет в site\.json/);
+    assert.match(noSite.stdout, /is not in the site\.json/);
+    const asJson = spawnSync(process.execPath, [cli, 'donor', 'copy', '--slug', 'x', '--source', 'P00', '--json'], { encoding: 'utf8', env, timeout: 10_000 });
+    const parsed = JSON.parse(asJson.stdout);
+    assert.equal(parsed.status, 'copyLabelNotFound', 'в --json status — код');
+    assert.match(parsed.statusText, /^donor copy: label P00 is not in the site\.json/);
     assert.equal(existsSync(donorProfile), false);
     assert.equal(existsSync(testProfile), false);
   } finally {
@@ -237,7 +244,7 @@ test('donor copy refuses missing configuration and a missing site map before cre
 });
 
 test('donor style --apply without --confirm refuses before any browser starts', () => {
-  assert.throws(() => parseCli(['donor', 'style']), /--slug/);
+  assert.throws(() => parseCli(['donor', 'style']), usageKey('cli.usage.needSlug'));
   assert.equal(parseCli(['donor', 'style', '--slug', 'demo', '--apply', '--confirm']).values.apply, true);
   const root = mkdtempSync(join(tmpdir(), 'tilda-cli-donor-style-'));
   const donorProfile = join(root, 'donor');
@@ -258,36 +265,36 @@ test('donor style --apply without --confirm refuses before any browser starts', 
 test('parseCli requires an explicit page and a title for page title', () => {
   assert.equal(parseCli(['page', 'title', '--page', '200002', '--title', 'x']).values.title, 'x');
   assert.throws(() => parseCli(['page', 'title', '--page', '200002']), /--title/);
-  assert.throws(() => parseCli(['page', 'title', '--title', 'x']), /--page/);
+  assert.throws(() => parseCli(['page', 'title', '--title', 'x']), usageKey('cli.usage.needExplicitPage'));
 });
 
 test('parseCli validates donor verify flags', () => {
   assert.equal(parseCli(['donor', 'verify', '--slug', 'x', '--source', 'P00']).values.source, 'P00');
   assert.equal(parseCli(['donor', 'verify', '--slug', 'x', '--source', 'P00', '--width', '1440,x']).values.width, '1440,x');
-  assert.throws(() => parseCli(['donor', 'verify', '--source', 'P00']), /--slug/);
+  assert.throws(() => parseCli(['donor', 'verify', '--source', 'P00']), usageKey('cli.usage.needSlug'));
   assert.throws(() => parseCli(['donor', 'verify', '--slug', 'x', '--source', 'index']), UsageError);
-  assert.throws(() => parseCli(['donor', 'verify', '--slug', 'x']), /--source/);
+  assert.throws(() => parseCli(['donor', 'verify', '--slug', 'x']), usageKey('cli.usage.needSourceLabel'));
 });
 
 test('parseCli validates donor aliases flags', () => {
   assert.equal(parseCli(['donor', 'aliases', '--slug', 'x']).values.slug, 'x');
   assert.equal(parseCli(['donor', 'aliases', '--slug', 'x', '--dry-run'])['values']['dry-run'], true);
-  assert.throws(() => parseCli(['donor', 'aliases']), /--slug/);
+  assert.throws(() => parseCli(['donor', 'aliases']), usageKey('cli.usage.needSlug'));
 });
 
 test('parseCli validates donor links flags', () => {
   const r = parseCli(['donor', 'links', '--slug', 'x', '--source', 'HDR', '--dry-run']);
   assert.equal(r.values.source, 'HDR');
   assert.equal(r.values['dry-run'], true);
-  assert.throws(() => parseCli(['donor', 'links', '--slug', 'x']), /--source/);
-  assert.throws(() => parseCli(['donor', 'links', '--source', 'HDR']), /--slug/);
+  assert.throws(() => parseCli(['donor', 'links', '--slug', 'x']), usageKey('cli.usage.needSourceLabel'));
+  assert.throws(() => parseCli(['donor', 'links', '--source', 'HDR']), usageKey('cli.usage.needSlug'));
 });
 
 test('parseCli validates donor check flags', () => {
   assert.equal(parseCli(['donor', 'check', '--slug', 'x']).values.slug, 'x');
   assert.equal(parseCli(['donor', 'check', '--slug', 'x', '--source', 'P01,P02']).values.source, 'P01,P02');
-  assert.throws(() => parseCli(['donor', 'check']), /--slug/);
-  assert.throws(() => parseCli(['donor', 'check', '--slug', 'x', '--source', 'P01,index']), /через запятую/);
+  assert.throws(() => parseCli(['donor', 'check']), usageKey('cli.usage.needSlug'));
+  assert.throws(() => parseCli(['donor', 'check', '--slug', 'x', '--source', 'P01,index']), usageKey('cli.usage.checkSourceList'));
 });
 
 test('donor aliases, links and check need the donor project id but not the donor browser profile', () => {
@@ -304,7 +311,7 @@ test('donor aliases, links and check need the donor project id but not the donor
       for (const k of ['TILDA_DEFAULT_PAGE', 'TILDA_DONOR_BROWSER_PROFILE']) delete env[k];
       const ok = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env, timeout: 10_000 });
       assert.doesNotMatch(ok.stdout + ok.stderr, /TILDA_DONOR_BROWSER_PROFILE/, `${args.join(' ')}: профиль донора не нужен`);
-      assert.match(ok.stdout, /карты сайта demo нет|нет карты|site\.json/, `${args.join(' ')}: доходит до своей проверки\n${ok.stdout}\n${ok.stderr}`);
+      assert.match(ok.stdout, /no site map|site\.json/, `${args.join(' ')}: доходит до своей проверки\n${ok.stdout}\n${ok.stderr}`);
       const noDonor = { ...base };
       for (const k of ['TILDA_DEFAULT_PAGE', 'TILDA_DONOR_PROJECT_ID', 'TILDA_DONOR_BROWSER_PROFILE']) delete noDonor[k];
       const refused = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env: noDonor, timeout: 10_000 });
@@ -526,7 +533,7 @@ test('неверный --lang: код 2, ошибка и справка в stdou
   const result = runCli(['--lang', 'de', 'doctor'], bareEnv({ TILDA_LANG: 'en' }));
   assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /^error: --lang expects en or ru, got de/);
-  assert.match(result.stdout, /Использование:/);
+  assert.match(result.stdout, /^Usage: /m);
 });
 
 test('без сайта: итог ошибки на языке --lang', () => {
@@ -549,4 +556,72 @@ test('справка печатается и при неверном TILDA_LANG'
   const result = runCli(['--help'], bareEnv({ TILDA_LANG: 'fr' }));
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /--lang en\|ru/);
+});
+
+test('usage: одинаковое число строк на двух языках, в английской нет кириллицы, в русской есть --lang', () => {
+  const en = usage('en').split('\n');
+  const ru = usage('ru').split('\n');
+  assert.equal(en.length, ru.length);
+  assert.equal(usage(), usage('en'));
+  assert.doesNotMatch(usage('en'), /[А-Яа-яЁё]/);
+  assert.match(usage('ru'), /--lang en\|ru/);
+  assert.match(usage('ru'), /Использование/);
+  assert.match(usage('en'), /^Usage: /);
+});
+
+test('--help печатается на языке --lang', () => {
+  const ru = runCli(['--lang', 'ru', '--help'], bareEnv());
+  assert.equal(ru.status, 0);
+  assert.match(ru.stdout, /Использование/);
+  const en = runCli(['--lang', 'en', '--help'], bareEnv({ TILDA_LANG: 'ru' }));
+  assert.equal(en.status, 0);
+  assert.match(en.stdout, /^Usage: /);
+  assert.doesNotMatch(en.stdout, /[А-Яа-яЁё]/);
+});
+
+/** Синтетический результат цикла для проверки итога: без сети и без браузера. */
+function syntheticCycleResult(extra) {
+  return { pageid: '100001', ops: 2, payloads: 2, written: 0, created: [], verify: [], dryRun: false, layout: false, shots: [], ms: 5, diff: [], ...extra };
+}
+
+test('planSummary: dry-run даёт код dryRun и английский statusText без кириллицы', () => {
+  const summary = planSummary(syntheticCycleResult({ dryRun: true }), { plan: 'plan.json' });
+  const json = JSON.parse(formatSummary(summary, true, 'en'));
+  assert.equal(json.status, 'dryRun');
+  assert.equal(json.statusText, 'dry run, nothing was written');
+  assert.doesNotMatch(JSON.stringify(json), /[А-Яа-яЁё]/);
+  assert.equal(JSON.parse(formatSummary(summary, true, 'ru')).statusText, 'dry-run, записи не было');
+});
+
+test('planSummary: расхождения verify и строки diff переводятся, причина расхождения — Message', () => {
+  const verify = [{ id: 'h1', recordid: '7001', problem: msg('apply.problem.fieldNotSaved'), field: 'title' }];
+  const diff = [{ create: 'b1', source: '100001/7002', tplid: '30' }, { recordid: '7001', blockHidden: 'y' }, { recordid: '7003', sort: true, from: 0, to: 2 }];
+  const summary = planSummary(syntheticCycleResult({ verify, diff, layout: true, shots: [] }), { plan: 'plan.json' });
+  const en = JSON.parse(formatSummary(summary, true, 'en'));
+  assert.equal(en.status, 'verifyMismatch');
+  assert.equal(en.statusText, 'verify mismatches: 1');
+  assert.equal(en.verify[0].problem, 'the field was not saved');
+  assert.deepEqual(en.diff, ['create b1 ← 100001/7002 (tpl 30)', '7001: hide the block', '7003: position 1 → 3']);
+  assert.equal(en.layout, 'geometry changed — no screenshot taken');
+  assert.doesNotMatch(JSON.stringify(en), /[А-Яа-яЁё]/);
+  const ru = JSON.parse(formatSummary(summary, true, 'ru'));
+  assert.equal(ru.statusText, 'расхождений verify: 1');
+  assert.equal(ru.verify[0].problem, 'поле не сохранилось');
+});
+
+test('browser status без запущенного держателя: итог по-английски и по-русски, status — код', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tilda-cli-browser-'));
+  try {
+    const env = bareEnv({ TILDA_BROWSER_PROFILE: join(root, 'profile') });
+    const en = runCli(['--lang', 'en', 'browser', 'status', '--json'], env);
+    assert.equal(en.status, 0, `${en.stdout}\n${en.stderr}`);
+    const json = JSON.parse(en.stdout);
+    assert.equal(json.status, 'holderNotRunning');
+    assert.equal(json.statusText, 'holder not running');
+    assert.doesNotMatch(en.stdout, /[А-Яа-яЁё]/);
+    const ru = runCli(['--lang', 'ru', 'browser', 'status'], env);
+    assert.match(ru.stdout, /^status: держатель не запущен$/m);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PageOpError, PUBLISH_CONFIRM, createPage, duplicatePage, parseNewPageResponse,
+  PageOpError, PUBLISH_CONFIRM, createPage, deletePageInstructions, duplicatePage, parseNewPageResponse,
   parsePublishResponse, publishPage,
 } from '../page-ops.mjs';
 import { setLogLevel } from '../lib/log.mjs';
@@ -61,7 +61,7 @@ test('pageTitleFor builds the cabinet title from the label and setPageTitle guar
   assert.equal(pageTitleFor({ label: 'P02', donorTitle: 'x'.repeat(300) }).length, TITLE_MAX);
   const calls = [];
   const driver = { callWithResponse: async (name, args, opts) => { calls.push({ name, args, opts }); return { status: 200, text: calls.length > 1 ? 'Wrong' : 'OK' }; } };
-  await assert.rejects(() => setPageTitle(driver, '200001', 'x', { protectedIds: ['200001'] }), (e) => e instanceof PageOpError && e.code === 'PROTECTED_PAGE');
+  await assert.rejects(() => setPageTitle(driver, '200001', 'x', { protectedIds: ['200001'] }), (e) => e instanceof PageOpError && e.code === 'PROTECTED_PAGE' && e.key === 'pageOps.protectedPage' && e.params.id === '200001');
   await assert.rejects(() => setPageTitle(driver, '200002', '  ', {}), (e) => e.code === 'TITLE_EMPTY');
   assert.equal(calls.length, 0);
   assert.deepEqual(await setPageTitle(driver, '200002', 'P13 Контакты'), { pageid: '200002', title: 'P13 Контакты' });
@@ -87,4 +87,20 @@ test('setPageAlias normalizes the alias, refuses bad or protected input before t
   assert.equal(calls[0].opts.bodyPart, 'comm=savepagesettings');
   await assert.rejects(() => setPageAlias(driver, '200003', 'about'), (e) => e.code === 'ALIAS_TAKEN');
   await assert.rejects(() => setPageAlias(driver, '200003', 'about'), (e) => e.code === 'ALIAS_NOT_SAVED');
+});
+
+test('deletePageInstructions returns the steps for a human as messages', () => {
+  const before = process.env.TILDA_PROJECT_ID;
+  process.env.TILDA_PROJECT_ID = '100001';
+  let steps;
+  try {
+    steps = deletePageInstructions('200002');
+  } finally {
+    if (before === undefined) delete process.env.TILDA_PROJECT_ID;
+    else process.env.TILDA_PROJECT_ID = before;
+  }
+  assert.deepEqual(steps.map((s) => s.key), ['pageOps.deleteStepIntro', 'pageOps.deleteStepList', 'pageOps.deleteStepFind', 'pageOps.deleteStepMenu', 'pageOps.deleteStepCheck']);
+  assert.equal(steps[0].params.id, '200002');
+  assert.match(steps[1].params.url, /projectid=100001$/);
+  assert.match(steps[2].params.editorUrl, /200002/);
 });

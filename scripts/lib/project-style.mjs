@@ -14,20 +14,38 @@
  */
 import { createLogger } from './log.mjs';
 import { normalizeHex } from './reference-styles.mjs';
+import { messageText, msg } from './i18n.mjs';
 
 const log = createLogger('project-style');
 
 /** Ключи настроек проекта, которые пишет оформление (итог пробы 4). */
 export const PROJECT_STYLE_KEYS = ['headlinefont', 'headlinefontweight', 'headlinecolor', 'textfont', 'textfontweight', 'textfontsize', 'textcolor', 'linkcolor', 'linkfontweight', 'linklinecolor', 'linklineheight', 'bgcolor'];
 
+/**
+ * Причины, по которым настройка не определена: имя → ключ словаря. Подстановки: `noOption` {key, want},
+ * `noPreset` {family}, `presetUnchecked` {name}. Запись `undecided` несёт `code` (имя причины),
+ * `params` и английский `reason` — его пишут в файл; `Message` для итога даёт `projectReasonMessage`.
+ */
 export const PROJECT_REASONS = {
-  noCss: 'оформление проекта: CSS проекта не найден в разметке главной',
-  noOption: (k, v) => `настройка ${k}: варианта «${v}» нет в форме проекта`,
-  fontsNotTransferred: 'свои шрифты не переносятся — выбран пресет Tilda с тем же начертанием',
-  noPreset: (family) => `шрифт ${family}: пресета Tilda с тем же начертанием нет — остаётся шрифт проекта`,
-  absent: (what) => `оформление проекта: в CSS нет ${what}`,
-  presetUnchecked: (name) => `пресет шрифта «${name}» не сверен с формой настроек — проверит --apply`,
+  noCss: 'projectStyle.reason.noCss',
+  noOption: 'projectStyle.reason.noOption',
+  fontsNotTransferred: 'projectStyle.reason.fontsNotTransferred',
+  noPreset: 'projectStyle.reason.noPreset',
+  absentHeadline: 'projectStyle.reason.absentHeadline',
+  absentText: 'projectStyle.reason.absentText',
+  absentLink: 'projectStyle.reason.absentLink',
+  presetUnchecked: 'projectStyle.reason.presetUnchecked',
 };
+
+/** Запись `undecided`: `{ key, code, params, reason }`, `reason` — английский текст причины. */
+function undecidedEntry(key, code, params = {}) {
+  return { key, code, params, reason: messageText(msg(PROJECT_REASONS[code], params)) };
+}
+
+/** Причина записи `undecided` как `Message` — для итога команды. */
+export function projectReasonMessage(entry) {
+  return msg(PROJECT_REASONS[entry.code], entry.params ?? {});
+}
 
 /** Подпись варианта веса в форме настроек → число (`Semibold` → 600). */
 const WEIGHT_BY_LABEL = { thin: 100, extralight: 200, light: 300, normal: 400, regular: 400, medium: 500, semibold: 600, bold: 700, extrabold: 800, black: 900 };
@@ -82,7 +100,7 @@ function declarations(body) {
 const firstFamily = (v) => (v ? String(v).split(',')[0].trim().replace(/^['"]|['"]$/g, '') : null);
 
 /**
- * @returns {{ fonts: Array<{family, weight, style, url}>, headline: {family, weight, color}, text: {family, weight, color}, link: {color, weight, lineColor, lineHeight}, undecided: string[] }}
+ * @returns {{ fonts: Array<{family, weight, style, url}>, headline: {family, weight, color}, text: {family, weight, color}, link: {color, weight, lineColor, lineHeight}, undecided: string[] }} — `undecided`: имена причин `absentHeadline`, `absentText`, `absentLink`
  */
 export function projectStyleFromCss(css) {
   const rules = [];
@@ -107,12 +125,12 @@ export function projectStyleFromCss(css) {
     if (!Object.keys(decl).length) undecided.push(what);
     return { family: firstFamily(decl['font-family']), weight: decl['font-weight'] ?? null, color: normalizeHex(decl.color) };
   };
-  const headline = pick(merged((s) => s === '.t-title'), 'правила .t-title');
+  const headline = pick(merged((s) => s === '.t-title'), 'absentHeadline');
   let textDecl = merged((s) => s === '.t-descr');
   if (!Object.keys(textDecl).length) textDecl = merged((s) => s === '.t-text');
-  const text = pick(textDecl, 'правил .t-descr и .t-text');
+  const text = pick(textDecl, 'absentText');
   const linkDecl = merged((s) => s === '#allrecords a');
-  if (!Object.keys(linkDecl).length) undecided.push('правила #allrecords a');
+  if (!Object.keys(linkDecl).length) undecided.push('absentLink');
   const line = rules.find((r) => r.selectors.some((s) => / a$/.test(s)) && /^\d+px solid /.test(r.decl['border-bottom'] ?? ''));
   const lineMatch = line ? line.decl['border-bottom'].match(/^(\d+px) solid (.+)$/) : null;
   const link = {
@@ -152,21 +170,21 @@ export function presetFor(family, fonts, presets) {
  * Желаемые настройки проекта по разбору CSS.
  * @param {object} style  итог `projectStyleFromCss`
  * @param {{ presets?: string[] }} controls  пресеты шрифтов формы настроек
- * @returns {{ values: Record<string,string>, fonts: object[], fontAliases: Record<string,string>, undecided: Array<{key, reason}> }}
+ * @returns {{ values: Record<string,string>, fonts: object[], fontAliases: Record<string,string>, undecided: Array<{key, code, params, reason}> }}
  */
 export function desiredProjectSettings(style, controls = {}) {
   // Пресеты неизвестны (разбор без страницы настроек) — берётся имя файлов шрифта, проверит --apply.
   const presets = controls.presets ?? null;
   const values = {};
-  const undecided = (style.undecided ?? []).map((what) => ({ key: null, reason: PROJECT_REASONS.absent(what) }));
+  const undecided = (style.undecided ?? []).map((code) => undecidedEntry(null, code));
   const fontAliases = {};
   const family = (key, fam) => {
     if (!fam) return;
     const guess = [fam, ...(style.fonts ?? []).filter((f) => norm(f.family) === norm(fam)).map((f) => fontBaseName(f.url))].filter(Boolean).pop();
     const preset = presets ? presetFor(fam, style.fonts ?? [], presets) : guess;
-    if (!presets) undecided.push({ key, reason: PROJECT_REASONS.presetUnchecked(preset) });
+    if (!presets) undecided.push(undecidedEntry(key, 'presetUnchecked', { name: preset }));
     if (!preset) {
-      undecided.push({ key, reason: PROJECT_REASONS.noPreset(fam) });
+      undecided.push(undecidedEntry(key, 'noPreset', { family: fam }));
       return;
     }
     values[key] = preset;
@@ -185,7 +203,7 @@ export function desiredProjectSettings(style, controls = {}) {
   set('linkfontweight', style.link?.weight);
   set('linklinecolor', style.link?.lineColor);
   set('linklineheight', style.link?.lineHeight);
-  if ((style.fonts ?? []).length) undecided.push({ key: 'myfonts_json', reason: PROJECT_REASONS.fontsNotTransferred });
+  if ((style.fonts ?? []).length) undecided.push(undecidedEntry('myfonts_json', 'fontsNotTransferred'));
   log.debug('desiredProjectSettings', 'желаемые настройки', { keys: Object.keys(values), aliases: Object.keys(fontAliases).length, undecided: undecided.length });
   return { values, fonts: style.fonts ?? [], fontAliases, undecided };
 }

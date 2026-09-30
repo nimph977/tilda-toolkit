@@ -15,6 +15,7 @@ import {
   existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { dirname, join, posix, sep } from 'node:path';
+import { attachMessage, messageText, msg } from './i18n.mjs';
 import { createLogger } from './log.mjs';
 import { repoRoot } from './paths.mjs';
 
@@ -46,10 +47,11 @@ export class SkillInstallError extends Error {
   /**
    * @param {'SKILL_TARGET_LINK'|'SKILL_TARGET_FOREIGN'|'SKILL_UNKNOWN_AGENT'} code
    * @param {string} path путь относительно корня, прямые слэши
-   * @param {string} message
+   * @param {string|import('./i18n.mjs').Message} message строка или `Message` (английский текст в `message`, ключ в `key`)
    */
   constructor(code, path, message) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
     this.name = 'SkillInstallError';
     this.code = code;
     this.exitCode = 1;
@@ -148,7 +150,7 @@ function targetOf(agent) {
     throw new SkillInstallError(
       'SKILL_UNKNOWN_AGENT',
       '',
-      `неизвестный агент: ${agent}; допустимые значения: ${Object.keys(AGENT_TARGETS).join(', ')}`,
+      msg('skillInstall.unknownAgent', { agent, allowed: Object.keys(AGENT_TARGETS).join(', ') }),
     );
   }
   return segments;
@@ -188,14 +190,14 @@ function refuse(info) {
     throw new SkillInstallError(
       'SKILL_TARGET_LINK',
       info.path,
-      `${info.path} — ярлык или символическая ссылка; удалите его вручную и повторите setup`,
+      msg('skillInstall.targetLink', { path: info.path }),
     );
   }
   if (info.state === 'foreign') {
     throw new SkillInstallError(
       'SKILL_TARGET_FOREIGN',
       info.path,
-      `${info.path} уже есть и создан не setup; перенесите его и повторите setup`,
+      msg('skillInstall.targetForeign', { path: info.path }),
     );
   }
 }

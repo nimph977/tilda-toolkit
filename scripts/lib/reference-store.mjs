@@ -11,6 +11,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createLogger } from './log.mjs';
+import { msg } from './i18n.mjs';
+import { ToolError } from './tool-error.mjs';
 import { referenceDir } from './paths.mjs';
 
 const log = createLogger('reference-store');
@@ -30,10 +32,7 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.sv
 /** Проверяет имя слепка; ошибка → код выхода 2. */
 export function assertSlug(slug) {
   if (typeof slug === 'string' && SLUG_RE.test(slug)) return slug;
-  const err = new Error(`недопустимое имя слепка: ${JSON.stringify(slug)} (ожидается ${SLUG_RE})`);
-  err.code = 'BAD_SLUG';
-  err.exitCode = 2;
-  throw err;
+  throw new ToolError('BAD_SLUG', msg('referenceStore.badSlug', { slug: JSON.stringify(slug), pattern: String(SLUG_RE) }), { exitCode: 2 });
 }
 
 /**

@@ -47,7 +47,7 @@ test('a block missing on the page becomes newRecord after its predecessor, an ex
   const r = buildUpdateOps(plan, live, deps);
   assert.equal(r.startAfter, R1);
   assert.deepEqual(r.ops, [{ id: 'b2', newRecord: plan[1].newRecord, hidden: 'n', formContent: 'reference' }]);
-  assert.deepEqual(r.unmapped, [{ recordid: R3, tplid: '212', field: null, reason: UPDATE_REASONS.extraBlock }]);
+  assert.deepEqual(r.unmapped, [{ recordid: R3, tplid: '212', field: null, ...UPDATE_REASONS.extraBlock }]);
 });
 
 test('card texts are set by index without touching images; a code difference is a manual reason', () => {
@@ -61,8 +61,8 @@ test('card texts are set by index without touching images; a code difference is 
   ];
   const r = buildUpdateOps(plan, live, deps);
   assert.deepEqual(r.ops, [{ id: 'b1.list', block: { recordid: R1 }, listSet: { set: [{ index: 0, fields: { li_buttontitle: 'Подробнее' } }, { index: 1, fields: { li_buttontitle: 'Подробнее' } }] } }]);
-  assert.ok(r.unmapped.some((u) => u.field === 'code' && u.reason === UPDATE_REASONS.codeManual));
-  assert.ok(r.unmapped.some((u) => u.field === 'li_img' && u.reason === UPDATE_REASONS.imageKept));
+  assert.ok(r.unmapped.some((u) => u.field === 'code' && u.code === UPDATE_REASONS.codeManual.code));
+  assert.ok(r.unmapped.some((u) => u.field === 'li_img' && u.code === UPDATE_REASONS.imageKept.code && !/[А-Яа-я]/.test(u.reason)));
 });
 
 test('form inputs are compared with the list of the page block and written with the form flag', () => {

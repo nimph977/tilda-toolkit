@@ -14,6 +14,8 @@ import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
 import { baselineDir } from './lib/paths.mjs';
 import { readSite } from './lib/reference-store.mjs';
+import { messageText, msg } from './lib/i18n.mjs';
+import { ToolError } from './lib/tool-error.mjs';
 import { normalizeAlias, readDonorPages } from './donor-map.mjs';
 import { setPageAlias } from './page-ops.mjs';
 
@@ -22,38 +24,42 @@ const log = createLogger('donor-aliases');
 /** Сколько отказов записи подряд останавливают прогон: повтор той же ошибки на всех страницах бесполезен. */
 export const MAX_FAILURES_IN_ROW = 3;
 
+/**
+ * Причины пропуска: имя → ключ словаря. Подстановки: `roleIndex` и `roleHeaderFooter` {role},
+ * `taken` {who}, `duplicate` {label}. В результате причина — `Message`, рядом её имя в `code`.
+ */
 export const ALIAS_REASONS = {
-  noTestPage: 'у метки нет страницы копии (pageid) — reference pages --create или donor copy',
-  noDonorPage: 'у метки нет пары у донора (donorPageid) — donor map',
-  notInDonorList: 'страницы донора нет в перечне donor pages — обновить donor pages',
-  notInPageList: 'страницы копии нет в перечне page list — обновить page list',
-  noDonorAlias: 'у страницы донора нет адреса (живёт по page<id>.html)',
-  role: (role) => `роль ${role}: адрес не нужен (${role === 'index' ? 'главная открывается по корню сайта' : 'шапка и подвал не публикуются отдельно'})`,
-  same: 'адрес уже как у донора',
-  taken: (who) => `адрес занят другой страницей тестового проекта (${who}) — не отбирается, решает владелец`,
-  duplicate: (label) => `та же страница донора, что у метки ${label}: адрес получает ${label}`,
-  protected: 'страница копии защищена (TILDA_PROTECTED_PAGES)',
+  noTestPage: 'donorAliases.reason.noTestPage',
+  noDonorPage: 'donorAliases.reason.noDonorPage',
+  notInDonorList: 'donorAliases.reason.notInDonorList',
+  notInPageList: 'donorAliases.reason.notInPageList',
+  noDonorAlias: 'donorAliases.reason.noDonorAlias',
+  roleIndex: 'donorAliases.reason.roleIndex',
+  roleHeaderFooter: 'donorAliases.reason.roleHeaderFooter',
+  same: 'donorAliases.reason.same',
+  taken: 'donorAliases.reason.taken',
+  duplicate: 'donorAliases.reason.duplicate',
+  protected: 'donorAliases.reason.protected',
 };
 
-function aliasError(message, code, exitCode = 1) {
-  const err = new Error(message);
-  err.code = code;
-  err.exitCode = exitCode;
-  return err;
-}
+/** Пропуск по имени из `ALIAS_REASONS`: `{ code, reason: Message }`. */
+const skipBy = (code, params) => ({ code, reason: msg(ALIAS_REASONS[code], params) });
+
+/** Причина для роли страницы: главная открывается по корню, шапка и подвал не публикуются. */
+const roleSkip = (role) => (role === 'index' ? skipBy('roleIndex', { role }) : skipBy('roleHeaderFooter', { role }));
 
 /**
  * Адрес страницы донора для метки карты. Чистая: `{ alias }` или `{ reason }` (шапка, подвал,
  * главная, нет пары, нет адреса). `donorById` — Map pageid → запись перечня донора.
  */
 export function donorAliasFor(entry, donorById) {
-  if (entry.role === 'header' || entry.role === 'footer') return { reason: ALIAS_REASONS.role(entry.role) };
-  if (!entry.donorPageid) return { reason: ALIAS_REASONS.noDonorPage };
+  if (entry.role === 'header' || entry.role === 'footer') return roleSkip(entry.role);
+  if (!entry.donorPageid) return skipBy('noDonorPage');
   const donor = donorById.get(String(entry.donorPageid));
-  if (!donor) return { reason: ALIAS_REASONS.notInDonorList };
-  if (donor.role === 'index') return { reason: ALIAS_REASONS.role('index') };
+  if (!donor) return skipBy('notInDonorList');
+  if (donor.role === 'index') return roleSkip('index');
   const alias = normalizeAlias(donor.alias);
-  return alias ? { alias } : { reason: ALIAS_REASONS.noDonorAlias };
+  return alias ? { alias } : skipBy('noDonorAlias');
 }
 
 /** Map pageid → запись перечня страниц. */
@@ -62,7 +68,7 @@ export const byPageid = (pages) => new Map((pages ?? []).map((p) => [String(p.pa
 /**
  * План адресов. Чистая: `site` — карта слепка (`pages[]` с label, role, pageid, donorPageid),
  * `donorPages` и `testPages` — записи перечней (`pageid`, `alias`, `role`, `protected`).
- * Возвращает `{ todo: [{ label, pageid, alias }], skipped: [{ label, reason }] }`.
+ * Возвращает `{ todo: [{ label, pageid, alias }], skipped: [{ label, code, reason: Message }] }`.
  */
 export function planAliases(site, donorPages, testPages) {
   const donorById = byPageid(donorPages);
@@ -77,24 +83,24 @@ export function planAliases(site, donorPages, testPages) {
   const planned = new Map();
   const todo = [];
   const skipped = [];
-  const skip = (label, reason) => {
-    skipped.push({ label, reason });
-    log.debug('planAliases', 'пропуск', { label, reason });
+  const skip = (label, { code, reason }) => {
+    skipped.push({ label, code, reason });
+    log.debug('planAliases', 'пропуск', { label, reason: messageText(reason) });
   };
   for (const entry of site?.pages ?? []) {
     const { label } = entry;
     const found = donorAliasFor(entry, donorById);
-    if (found.reason) { skip(label, found.reason); continue; }
+    if (found.reason) { skip(label, found); continue; }
     const { alias } = found;
-    if (!entry.pageid) { skip(label, ALIAS_REASONS.noTestPage); continue; }
+    if (!entry.pageid) { skip(label, skipBy('noTestPage')); continue; }
     const pageid = String(entry.pageid);
     const test = testById.get(pageid);
-    if (!test) { skip(label, ALIAS_REASONS.notInPageList); continue; }
-    if (test.protected) { skip(label, ALIAS_REASONS.protected); continue; }
-    if (normalizeAlias(test.alias) === alias) { skip(label, ALIAS_REASONS.same); continue; }
+    if (!test) { skip(label, skipBy('notInPageList')); continue; }
+    if (test.protected) { skip(label, skipBy('protected')); continue; }
+    if (normalizeAlias(test.alias) === alias) { skip(label, skipBy('same')); continue; }
     const holder = owner.get(alias);
-    if (holder && holder !== pageid) { skip(label, ALIAS_REASONS.taken(labelByPageid.get(holder) ?? holder)); continue; }
-    if (planned.has(alias)) { skip(label, ALIAS_REASONS.duplicate(planned.get(alias))); continue; }
+    if (holder && holder !== pageid) { skip(label, skipBy('taken', { who: labelByPageid.get(holder) ?? holder })); continue; }
+    if (planned.has(alias)) { skip(label, skipBy('duplicate', { label: planned.get(alias) })); continue; }
     planned.set(alias, label);
     todo.push({ label, pageid, alias });
   }
@@ -105,7 +111,7 @@ export function planAliases(site, donorPages, testPages) {
 /** Перечень страниц тестового проекта из файла `page list` (`pages/<projectid>.json`). */
 export function readPageList(projectid, { pagesDir } = {}) {
   const file = join(pagesDir ?? join(baselineDir(), 'pages'), `${projectid}.json`);
-  if (!existsSync(file)) throw aliasError(`перечня страниц тестового проекта нет (${file.replace(/\\/g, '/')}): сначала page list`, 'NO_PAGE_LIST', 1);
+  if (!existsSync(file)) throw new ToolError('NO_PAGE_LIST', msg('donorAliases.noPageList', { file: file.replace(/\\/g, '/') }));
   const data = JSON.parse(readFileSync(file, 'utf8'));
   const pages = Array.isArray(data.pages) ? data.pages : [];
   log.debug('readPageList', 'перечень прочитан', { file: file.replace(/\\/g, '/'), pages: pages.length, captured: data.captured });
@@ -120,7 +126,7 @@ export function readPageList(projectid, { pagesDir } = {}) {
  */
 export async function assignDonorAliases(driver, { slug, donorProjectId, testProjectId, baseDir, pagesDir, protectedIds = [], dryRun = false, delayMs = 3000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
   const site = readSite(slug, { baseDir });
-  if (!site) throw aliasError(`карты сайта ${slug} нет: сначала reference pages --slug ${slug}`, 'NO_SITE', 1);
+  if (!site) throw new ToolError('NO_SITE', msg('donorAliases.noSite', { slug }));
   const donorPages = readDonorPages(donorProjectId, { pagesDir });
   const testPages = readPageList(testProjectId, { pagesDir });
   const { todo, skipped } = planAliases(site, donorPages, testPages);

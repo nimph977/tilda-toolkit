@@ -12,6 +12,8 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, resolve } from 'node:path';
 import { createLogger } from './lib/log.mjs';
+import { msg } from './lib/i18n.mjs';
+import { ToolError } from './lib/tool-error.mjs';
 
 const log = createLogger('upload');
 
@@ -32,18 +34,18 @@ export function validateFile(path, { maxBytes = MAX_BYTES } = {}) {
   const abs = resolve(path);
   if (!existsSync(abs)) {
     log.error('validateFile', 'файл не найден', { path: abs });
-    throw Object.assign(new Error(`FILE_NOT_FOUND ${abs}`), { code: 'FILE_NOT_FOUND' });
+    throw new ToolError('FILE_NOT_FOUND', msg('upload.fileNotFound', { path: abs }));
   }
   const ext = extname(abs).toLowerCase();
   const mime = ALLOWED_TYPES[ext];
   if (!mime) {
     log.error('validateFile', 'тип файла не разрешён', { path: abs, ext, allowed: Object.keys(ALLOWED_TYPES) });
-    throw Object.assign(new Error(`FILE_TYPE_REJECTED ${ext || '(без расширения)'}: разрешены ${Object.keys(ALLOWED_TYPES).join(', ')}`), { code: 'FILE_TYPE_REJECTED' });
+    throw new ToolError('FILE_TYPE_REJECTED', msg('upload.fileTypeRejected', { ext: ext || msg('upload.noExtension'), allowed: Object.keys(ALLOWED_TYPES).join(', ') }));
   }
   const bytes = statSync(abs).size;
   if (bytes === 0 || bytes > maxBytes) {
     log.error('validateFile', 'размер файла вне предела', { path: abs, bytes, maxBytes });
-    throw Object.assign(new Error(`FILE_SIZE_REJECTED ${bytes} Б (предел ${maxBytes} Б)`), { code: 'FILE_SIZE_REJECTED' });
+    throw new ToolError('FILE_SIZE_REJECTED', msg('upload.fileSizeRejected', { bytes, maxBytes }));
   }
   log.debug('validateFile', 'файл принят', { path: abs, name: basename(abs), bytes, mime });
   return { path: abs, name: basename(abs), bytes, mime };
@@ -55,11 +57,11 @@ export function toDataUrl(buffer, mime) {
 
 /** Ответ CDN → поля операции set.image. */
 export function imageSpecFromUpload(result) {
-  if (!result || !result.cdnUrl) throw new Error('UPLOAD_FAILED: в ответе нет cdnUrl');
-  if (!/^https:\/\/static\.tildacdn\.com\//.test(result.cdnUrl)) throw new Error(`UPLOAD_FAILED: неожиданный адрес ${result.cdnUrl}`);
+  if (!result || !result.cdnUrl) throw new ToolError('UPLOAD_FAILED', msg('upload.noCdnUrl'));
+  if (!/^https:\/\/static\.tildacdn\.com\//.test(result.cdnUrl)) throw new ToolError('UPLOAD_FAILED', msg('upload.unexpectedUrl', { cdnUrl: result.cdnUrl }));
   const filewidth = Number(result.width);
   const fileheight = Number(result.height);
-  if (!Number.isFinite(filewidth) || !Number.isFinite(fileheight) || filewidth <= 0 || fileheight <= 0) throw new Error(`UPLOAD_FAILED: размеры не пришли (${result.width}×${result.height})`);
+  if (!Number.isFinite(filewidth) || !Number.isFinite(fileheight) || filewidth <= 0 || fileheight <= 0) throw new ToolError('UPLOAD_FAILED', msg('upload.noSize', { width: result.width, height: result.height }));
   return { img: result.cdnUrl, filewidth: String(filewidth), fileheight: String(fileheight) };
 }
 

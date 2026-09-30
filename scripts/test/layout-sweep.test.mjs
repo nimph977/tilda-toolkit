@@ -14,8 +14,8 @@ test('parseWidthSpec: диапазон с шагом, хвост, перечис
   assert.deepEqual(parseWidthSpec('320-500:100'), [320, 420, 500]);
   assert.deepEqual(parseWidthSpec('320, 375,768'), [320, 375, 768]);
   assert.deepEqual(parseWidthSpec(undefined), parseWidthSpec('320-1440:40'));
-  assert.throws(() => parseWidthSpec('900-300'), /неверный диапазон/);
-  assert.throws(() => parseWidthSpec('abc'), /пусто/);
+  assert.throws(() => parseWidthSpec('900-300'), /invalid range/);
+  assert.throws(() => parseWidthSpec('abc'), /empty/);
 });
 
 test('boxesOverlap: порог по обеим осям', () => {

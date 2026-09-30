@@ -42,10 +42,14 @@ test('rewriteReferenceUrl maps reference pages to /page<pageid>.html', () => {
 });
 
 test('rewriteReferenceUrl explains what it could not rewrite without the domain', () => {
-  assert.deepEqual(rw('https://ref.test/nope'), { value: 'https://ref.test/nope', changed: false, reason: LINK_REASONS.unknownPage, text: '/nope' });
-  assert.deepEqual(rw('https://ref.test/draft'), { value: 'https://ref.test/draft', changed: false, reason: LINK_REASONS.notCreated('P04'), text: '/draft' });
-  assert.deepEqual(rw('https://ref.test/doc.pdf'), { value: 'https://ref.test/doc.pdf', changed: false, reason: LINK_REASONS.file, text: '/doc.pdf' });
-  assert.match(LINK_REASONS.notCreated('P04'), /P04/);
+  assert.deepEqual(rw('https://ref.test/nope'), { value: 'https://ref.test/nope', changed: false, ...LINK_REASONS.unknownPage, text: '/nope' });
+  assert.deepEqual(rw('https://ref.test/draft'), { value: 'https://ref.test/draft', changed: false, ...LINK_REASONS.notCreated('P04'), text: '/draft' });
+  assert.deepEqual(rw('https://ref.test/doc.pdf'), { value: 'https://ref.test/doc.pdf', changed: false, ...LINK_REASONS.file, text: '/doc.pdf' });
+  assert.match(LINK_REASONS.notCreated('P04').reason, /P04/);
+  assert.equal(rw('https://ref.test/nope').code, 'linkUnknownPage');
+  assert.equal(rw('https://ref.test/draft').code, 'linkPageNotCreated');
+  assert.equal(rw('https://ref.test/doc.pdf').code, 'linkFile');
+  assert.doesNotMatch(JSON.stringify(LINK_REASONS.unknownPage), /[А-Яа-я]/);
 });
 
 test('pageKey normalizes root, trailing slash, case of host and encoding', () => {

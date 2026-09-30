@@ -14,6 +14,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
 import { refPaths } from './lib/reference-store.mjs';
+import { attachMessage, messageText, msg } from './lib/i18n.mjs';
 import { PROJECT_STYLE_KEYS } from './lib/project-style.mjs';
 import { applyProjectStyle, sameValue, STYLE_CONFIRM } from './project-style.mjs';
 
@@ -24,14 +25,19 @@ export const DONOR_STYLE_FILE = 'donor-style.json';
 /** Ключи, которые заполняет форма настроек (`playwrightStyleUi.setProjectStyle`). */
 export const FORM_WRITABLE_KEYS = ['headlinefont', 'textfont', 'headlinefontweight', 'textfontweight', 'textfontsize', 'headlinecolor', 'textcolor', 'linkcolor', 'bgcolor'];
 
+/**
+ * Причины пропуска ключа оформления: имя → ключ словаря. В результате причина — `Message`, рядом
+ * её имя в `code`; в файл слепка причина пишется английским текстом.
+ */
 export const STYLE_REASONS = {
-  formCannot: 'форма настроек не пишет этот ключ (playwrightStyleUi)',
-  assignedAtUpload: 'шрифт назначен при загрузке (set_ff_to_h/set_ff_to_t)',
+  formCannot: 'donorStyle.reason.formCannot',
+  assignedAtUpload: 'donorStyle.reason.assignedAtUpload',
 };
 
 export class DonorStyleError extends Error {
   constructor(code, message, data = {}) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
     this.name = 'DonorStyleError';
     this.code = code;
     this.exitCode = 1;
@@ -116,12 +122,12 @@ export function fontsToUpload(donorFonts, testFonts) {
 export function parseFontUploadResponse(text) {
   const t = String(text ?? '').trim();
   if (t === 'OK') return { ok: true, message: 'OK' };
-  if (/^\s*</.test(t)) return { ok: false, message: 'страница вместо ответа: проверьте протокол в шапке слоя' };
+  if (/^\s*</.test(t)) return { ok: false, message: msg('donorStyle.fontUploadHtml') };
   try {
     const json = JSON.parse(t);
     return { ok: false, message: String(json?.error ?? t).slice(0, 200) };
   } catch {
-    return { ok: false, message: t.slice(0, 200) || 'пустой ответ' };
+    return { ok: false, message: t.slice(0, 200) || msg('donorStyle.fontUploadEmpty') };
   }
 }
 
@@ -136,14 +142,14 @@ export async function applyDonorFonts(driver, { projectid, fonts, headlinefont, 
   for (const f of upload) {
     const r = await driver.uploadProjectFont({ projectid, name: f.name, files: f.files, asHeadline: f.name === headlinefont, asText: f.name === textfont });
     const parsed = parseFontUploadResponse(r?.text);
-    if (!parsed.ok) throw new DonorStyleError('FONT_UPLOAD_FAILED', `шрифт ${f.name} не загружен: ${parsed.message}`, { font: f.name });
+    if (!parsed.ok) throw new DonorStyleError('FONT_UPLOAD_FAILED', msg('donorStyle.fontUploadFailed', { font: f.name, message: parsed.message }), { font: f.name });
     log.info('applyDonorFonts', 'шрифт загружен', { name: f.name, weights: Object.keys(f.files).length });
   }
   if (!upload.length) return { uploaded: [], present: present.map((f) => f.name), after: before };
   await driver.reload();
   const after = parseMyFonts((await driver.readProjectStyle())?.values?.myfonts_json);
   const missing = fontsToUpload(upload, after).upload.map((f) => f.name);
-  if (missing.length) throw new DonorStyleError('FONT_NOT_APPLIED', `после загрузки в проекте нет шрифтов: ${missing.join(', ')}`, { missing });
+  if (missing.length) throw new DonorStyleError('FONT_NOT_APPLIED', msg('donorStyle.fontNotApplied', { missing: missing.join(', ') }), { missing });
   log.info('applyDonorFonts', 'загружено', { uploaded: upload.map((f) => f.name), present: present.map((f) => f.name) });
   return { uploaded: upload.map((f) => f.name), present: present.map((f) => f.name), after };
 }
@@ -151,19 +157,19 @@ export async function applyDonorFonts(driver, { projectid, fonts, headlinefont, 
 /**
  * Желаемые настройки из значений донора: только ключи формы; шрифты, назначенные при загрузке,
  * пропускаются. Пустые значения сохраняются (пустой цвет = «по умолчанию»).
- * @returns {{ values: object, skipped: [{ key, reason }] }}
+ * @returns {{ values: object, skipped: [{ key, code, reason: Message }] }}
  */
 export function desiredFromDonor(values, { uploadedFonts = [] } = {}) {
   const out = {};
   const skipped = [];
   for (const key of PROJECT_STYLE_KEYS) {
     if (!FORM_WRITABLE_KEYS.includes(key)) {
-      skipped.push({ key, reason: STYLE_REASONS.formCannot });
+      skipped.push({ key, code: 'formCannot', reason: msg(STYLE_REASONS.formCannot) });
       continue;
     }
     const value = values?.[key] ?? '';
     if ((key === 'headlinefont' || key === 'textfont') && uploadedFonts.includes(String(value))) {
-      skipped.push({ key, reason: STYLE_REASONS.assignedAtUpload });
+      skipped.push({ key, code: 'assignedAtUpload', reason: msg(STYLE_REASONS.assignedAtUpload) });
       continue;
     }
     out[key] = String(value);
@@ -178,11 +184,11 @@ export function desiredFromDonor(values, { uploadedFonts = [] } = {}) {
 export async function applyDonorStyle(driver, { slug, projectid, confirmed = false, confirm, baseDir, now = new Date().toISOString() }) {
   if (!confirmed || confirm !== STYLE_CONFIRM) {
     log.warn('applyDonorStyle', 'запись оформления без подтверждения — отказ до записи');
-    throw new DonorStyleError('STYLE_NOT_CONFIRMED', 'оформление проекта меняет вид всех его страниц: нужен --confirm');
+    throw new DonorStyleError('STYLE_NOT_CONFIRMED', msg('donorStyle.notConfirmed'));
   }
   const opts = baseDir ? { baseDir } : undefined;
   const style = readDonorStyle(slug, opts);
-  if (!style) throw new DonorStyleError('NO_DONOR_STYLE', `оформления донора нет: сначала donor style --slug ${slug}`);
+  if (!style) throw new DonorStyleError('NO_DONOR_STYLE', msg('donorStyle.noDonorStyle', { slug }));
   const donorFonts = style.fonts ?? [];
   const fonts = await applyDonorFonts(driver, { projectid, fonts: donorFonts, headlinefont: style.values.headlinefont, textfont: style.values.textfont });
   const desired = desiredFromDonor(style.values, { uploadedFonts: donorFonts.map((f) => f.name) });
@@ -191,7 +197,7 @@ export async function applyDonorStyle(driver, { slug, projectid, confirmed = fal
   const assigned = ['headlinefont', 'textfont'].filter((k) => donorFonts.some((f) => f.name === String(style.values[k])));
   const checkKeys = [...Object.keys(desired.values), ...assigned];
   const notMatched = checkKeys.filter((k) => !sameValue(k, after?.values?.[k], style.values[k]));
-  writeDonorStyle(slug, { ...style, skipped: desired.skipped, appliedAt: now }, opts);
+  writeDonorStyle(slug, { ...style, skipped: desired.skipped.map((x) => ({ key: x.key, code: x.code, reason: messageText(x.reason) })), appliedAt: now }, opts);
   log.info('applyDonorStyle', 'итог', { uploaded: fonts.uploaded, present: fonts.present, changed: r.changed, otherChanged: r.otherChanged.length, skipped: desired.skipped.map((s) => s.key), notMatched });
   return { fonts, changed: r.changed, otherChanged: r.otherChanged, record: r.record, skipped: desired.skipped, notMatched };
 }

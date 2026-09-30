@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setLogLevel } from '../lib/log.mjs';
+import { msg } from '../lib/i18n.mjs';
 import { ALIAS_REASONS, MAX_FAILURES_IN_ROW, assignDonorAliases, donorAliasFor, byPageid, planAliases } from '../donor-aliases.mjs';
 
 setLogLevel('ERROR');
@@ -47,36 +48,33 @@ const testPages = () => [
 
 test('donorAliasFor skips header, footer and the index page and normalizes the donor alias', () => {
   const byId = byPageid(donorPages());
-  assert.deepEqual(donorAliasFor({ role: 'header', donorPageid: '300001' }, byId), { reason: ALIAS_REASONS.role('header') });
-  assert.deepEqual(donorAliasFor({ role: 'content', donorPageid: '300003' }, byId), { reason: ALIAS_REASONS.role('index') });
+  assert.deepEqual(donorAliasFor({ role: 'header', donorPageid: '300001' }, byId), { code: 'roleHeaderFooter', reason: msg(ALIAS_REASONS.roleHeaderFooter, { role: 'header' }) });
+  assert.deepEqual(donorAliasFor({ role: 'content', donorPageid: '300003' }, byId), { code: 'roleIndex', reason: msg(ALIAS_REASONS.roleIndex, { role: 'index' }) });
   assert.deepEqual(donorAliasFor({ role: 'content', donorPageid: '300004' }, byId), { alias: 'about' });
-  assert.deepEqual(donorAliasFor({ role: 'content', donorPageid: '300006' }, byId), { reason: ALIAS_REASONS.noDonorAlias });
-  assert.deepEqual(donorAliasFor({ role: 'content' }, byId), { reason: ALIAS_REASONS.noDonorPage });
-  assert.deepEqual(donorAliasFor({ role: 'content', donorPageid: '399999' }, byId), { reason: ALIAS_REASONS.notInDonorList });
+  assert.deepEqual(donorAliasFor({ role: 'content', donorPageid: '300006' }, byId), { code: 'noDonorAlias', reason: msg(ALIAS_REASONS.noDonorAlias) });
+  assert.deepEqual(donorAliasFor({ role: 'content' }, byId), { code: 'noDonorPage', reason: msg(ALIAS_REASONS.noDonorPage) });
+  assert.deepEqual(donorAliasFor({ role: 'content', donorPageid: '399999' }, byId), { code: 'notInDonorList', reason: msg(ALIAS_REASONS.notInDonorList) });
 });
 
 test('planAliases names every skipped label with its reason and never takes an alias from another page', () => {
   const { todo, skipped } = planAliases(site(), donorPages(), testPages());
   assert.deepEqual(todo, [{ label: 'P01', pageid: '200004', alias: 'about' }]);
-  const reasons = Object.fromEntries(skipped.map((s) => [s.label, s.reason]));
-  assert.equal(reasons.HDR, ALIAS_REASONS.role('header'));
-  assert.equal(reasons.FTR, ALIAS_REASONS.role('footer'));
-  assert.equal(reasons.P00, ALIAS_REASONS.role('index'));
-  assert.equal(reasons.P02, ALIAS_REASONS.same);
-  assert.equal(reasons.P03, ALIAS_REASONS.noDonorAlias);
-  assert.equal(reasons.P04, ALIAS_REASONS.taken('200099'));
-  assert.equal(reasons.P05, ALIAS_REASONS.duplicate('P01'));
-  assert.equal(reasons.P06, ALIAS_REASONS.noTestPage);
-  assert.equal(reasons.P07, ALIAS_REASONS.noDonorPage);
+  const byLabel = Object.fromEntries(skipped.map((s) => [s.label, s]));
+  const codes = Object.fromEntries(skipped.map((s) => [s.label, s.code]));
+  assert.deepEqual(codes, { HDR: 'roleHeaderFooter', FTR: 'roleHeaderFooter', P00: 'roleIndex', P02: 'same', P03: 'noDonorAlias', P04: 'taken', P05: 'duplicate', P06: 'noTestPage', P07: 'noDonorPage' });
+  assert.deepEqual(byLabel.HDR.reason, msg(ALIAS_REASONS.roleHeaderFooter, { role: 'header' }));
+  assert.deepEqual(byLabel.FTR.reason, msg(ALIAS_REASONS.roleHeaderFooter, { role: 'footer' }));
+  assert.deepEqual(byLabel.P04.reason, msg(ALIAS_REASONS.taken, { who: '200099' }));
+  assert.deepEqual(byLabel.P05.reason, msg(ALIAS_REASONS.duplicate, { label: 'P01' }));
   assert.equal(todo.length + skipped.length, site().pages.length, 'каждая метка либо в плане, либо с причиной');
 });
 
 test('planAliases skips protected pages and pages missing from the page list', () => {
   const pages = testPages().map((p) => (p.pageid === '200004' ? { ...p, protected: true } : p));
   const r = planAliases(site(), donorPages(), pages);
-  assert.equal(r.skipped.find((s) => s.label === 'P01').reason, ALIAS_REASONS.protected);
+  assert.equal(r.skipped.find((s) => s.label === 'P01').code, 'protected');
   const r2 = planAliases(site(), donorPages(), testPages().filter((p) => p.pageid !== '200004'));
-  assert.equal(r2.skipped.find((s) => s.label === 'P01').reason, ALIAS_REASONS.notInPageList);
+  assert.equal(r2.skipped.find((s) => s.label === 'P01').code, 'notInPageList');
 });
 
 function files(root, { withTest = true } = {}) {

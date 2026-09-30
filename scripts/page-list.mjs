@@ -8,6 +8,7 @@
  * `pages` и несколько полей `project`, сырой текст не логируется и не сохраняется.
  */
 import { createLogger } from './lib/log.mjs';
+import { attachMessage, messageText, msg } from './lib/i18n.mjs';
 
 const log = createLogger('page-list');
 
@@ -16,7 +17,8 @@ const SKIP_REASONS = ['no-pageid', 'other-project', 'no-title', 'duplicate'];
 
 export class PageListError extends Error {
   constructor(code, message, data = {}) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
     this.name = 'PageListError';
     this.code = code;
     this.exitCode = 1;
@@ -46,10 +48,10 @@ export function parsePagesResponse(text, { emptyMarker = false } = {}) {
     json = JSON.parse(value);
   } catch (e) {
     log.error('parsePagesResponse', 'ответ не JSON', { bytes: value.length, error: e.message });
-    throw new PageListError('PAGES_BAD_JSON', `getprojectslist: ответ не JSON (${value.length} байт): «${redactedHead(value)}»`);
+    throw new PageListError('PAGES_BAD_JSON', msg('pageList.badJson', { bytes: value.length, head: redactedHead(value) }));
   }
   if (!json || typeof json !== 'object') {
-    throw new PageListError('PAGES_PARSE_FAILED', `getprojectslist: ожидался объект, получено ${typeof json}`);
+    throw new PageListError('PAGES_PARSE_FAILED', msg('pageList.notObject', { type: typeof json }));
   }
   const p = json.project && typeof json.project === 'object' ? json.project : {};
   const project = {
@@ -67,7 +69,7 @@ export function parsePagesResponse(text, { emptyMarker = false } = {}) {
   const empty = raw.length === 0 && (Boolean(emptyMarker) || isZero(p.pages_count));
   if (raw.length === 0 && !empty) {
     log.error('parsePagesResponse', 'страниц нет и признака пустого проекта нет', { pagesType: typeof json.pages, pagesCount: p.pages_count, emptyMarker });
-    throw new PageListError('PAGES_PARSE_FAILED', `getprojectslist: массив pages не найден (тип ${json.pages === null ? 'null' : typeof json.pages}), признака пустого проекта нет`);
+    throw new PageListError('PAGES_PARSE_FAILED', msg('pageList.noPagesArray', { type: json.pages === null ? 'null' : typeof json.pages }));
   }
   log.debug('parsePagesResponse', 'ответ разобран', { records: raw.length, pagesCount: project.pagesCount, emptyMarker: empty });
   return { raw, project, emptyMarker: empty };
@@ -132,7 +134,7 @@ export async function listPages(driver, { projectid, protectedIds = [] } = {}) {
   log.debug('listPages', 'вызов слоя', { projectid: id });
   const r = await driver.call('listPages', [id]);
   log.debug('listPages', 'ответ слоя', { source: r?.source, status: r?.status, bytes: String(r?.text ?? '').length });
-  if (r?.source !== 'api') throw new PageListError('PAGES_PARSE_FAILED', `listPages: неизвестная форма ответа слоя (source=${r?.source})`);
+  if (r?.source !== 'api') throw new PageListError('PAGES_PARSE_FAILED', msg('pageList.unknownLayerAnswer', { source: r?.source }));
   const parsed = parsePagesResponse(r.text, { emptyMarker: r.emptyMarker });
   const { pages, skipped } = normalizePages(parsed.raw, { protectedIds, project: parsed.project });
   log.info('listPages', 'страниц получено', { count: pages.length, protected: pages.filter((p) => p.protected).length, skipped: skipped.length });

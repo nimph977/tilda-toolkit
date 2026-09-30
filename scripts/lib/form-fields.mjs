@@ -11,6 +11,8 @@
  * глобально.
  */
 import { createLogger } from './log.mjs';
+import { msg } from './i18n.mjs';
+import { ToolError } from './tool-error.mjs';
 
 const log = createLogger('form-fields');
 
@@ -40,9 +42,7 @@ export function assertNotFormField(name, ctx = {}, { allowContent = false } = {}
     return;
   }
   log.warn('assertNotFormField', 'отказ: поле формы не пишется', { field: String(name), ...ctx });
-  const e = new Error(`FORM_FIELD_REJECTED ${name}: поля формы (${FORM_FIELDS.join(', ')}) не пишутся никогда`);
-  e.code = 'FORM_FIELD_REJECTED';
-  throw e;
+  throw new ToolError('FORM_FIELD_REJECTED', msg('formFields.rejected', { name, fields: FORM_FIELDS.join(', ') }));
 }
 
 /** Есть ли `<script` в строке или в любой строке внутри объекта/массива (на любой глубине). */
@@ -57,9 +57,8 @@ export function containsScript(value) {
 export function assertNoScript(value, ctx = {}) {
   if (!containsScript(value)) return;
   log.error('assertNoScript', 'отказ: значение содержит <script', ctx);
-  const e = new Error(`SCRIPT_REJECTED${ctx.field ? ' ' + ctx.field : ''}: значения с <script не пишутся ни в одно поле`);
-  e.code = 'SCRIPT_REJECTED';
-  throw e;
+  if (ctx.field) throw new ToolError('SCRIPT_REJECTED', msg('formFields.scriptRejectedField', { field: ctx.field }));
+  throw new ToolError('SCRIPT_REJECTED', msg('formFields.scriptRejected'));
 }
 
 /**

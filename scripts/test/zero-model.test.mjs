@@ -60,3 +60,11 @@ test('synthetic Zero Block: duplication produces a valid, separate element', () 
   assert.equal(before['2'].left, '140');
   assert.equal(validate(before, result.model, { allowNewElements: true }), true);
 });
+
+test('synthetic Zero Block: a lone element asks for confirmation with a message reason', () => {
+  const before = model();
+  const result = duplicateElement(before, { elem_id: '9000000000001' }, { now: 9000000000011 });
+  assert.equal(result.needsConfirm, true);
+  assert.equal(result.reason.key, 'zero.reason.fewNeighbours');
+  assert.deepEqual(result.reason.params, { count: 0 });
+});

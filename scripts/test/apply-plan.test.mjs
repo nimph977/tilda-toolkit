@@ -51,7 +51,7 @@ test('verification reports a missing reread and a field mismatch from synthetic 
   const plan = { page, ops: [{ block: { recordid }, elem: { elem_id: '9000000000001' }, set: { text: 'After' } }] };
   try {
     const [payload] = prepare(plan, { baseDir });
-    assert.equal(verify(plan, { baseDir })[0].problem, 'нет перечитанного снимка');
+    assert.equal(verify(plan, { baseDir })[0].problem.key, 'apply.problem.noRereadSnapshot');
     const reread = join(baseDir, 'reread', page);
     mkdirSync(reread, { recursive: true });
     writeFileSync(join(reread, `${recordid}.json`), JSON.stringify(payload.model));
@@ -110,10 +110,10 @@ test('newRecord prepare builds fields, list and expect without a source snapshot
 
 test('newRecord prepare rejects zero, form fields and script', () =>
   withNewRecordEnv((baseDir) => {
-    assert.throws(() => prepare({ page, ops: [{ newRecord: { tplid: '396', fields: [] } }] }, { baseDir }), /Zero Block/);
+    assert.throws(() => prepare({ page, ops: [{ newRecord: { tplid: '396', fields: [] } }] }, { baseDir }), (e) => e.code === 'PLAN_INVALID' && e.key === 'apply.newRecordNoZero');
     assert.throws(() => prepare({ page, ops: [{ newRecord: { tplid: '702', fields: [{ name: 'inputs', value: 'x' }] } }] }, { baseDir }), /FORM_FIELD/);
     assert.throws(() => prepare({ page, ops: [{ newRecord: { tplid: '702', fields: [{ name: 'text', value: '<script>1</script>' }] } }] }, { baseDir }), /SCRIPT_REJECTED/);
-    assert.throws(() => prepare({ page, ops: [{ newRecord: { tplid: 'abc', fields: [] } }] }, { baseDir }), /числовой tplid/);
+    assert.throws(() => prepare({ page, ops: [{ newRecord: { tplid: 'abc', fields: [] } }] }, { baseDir }), (e) => e.code === 'PLAN_INVALID' && e.key === 'apply.newRecordNeedsTplid');
   }));
 
 test('newRecord prepare refuses tplid marked unavailable in catalog', () =>
@@ -121,7 +121,7 @@ test('newRecord prepare refuses tplid marked unavailable in catalog', () =>
     mkdirSync(join(baseDir, 'catalog'), { recursive: true });
     writeFileSync(join(baseDir, 'catalog', '835.json'), JSON.stringify({ tplid: '835', available: false, error: 'no access' }));
     writeFileSync(join(baseDir, 'catalog', '796.json'), JSON.stringify({ tplid: '796', available: true, tabs: { content: ['title'], settings: [] }, defaults: {}, cardKeys: [] }));
-    assert.throws(() => prepare({ page, ops: [{ newRecord: { tplid: '835', fields: [] } }] }, { baseDir }), /недоступен на тарифе/);
+    assert.throws(() => prepare({ page, ops: [{ newRecord: { tplid: '835', fields: [] } }] }, { baseDir }), (e) => e.code === 'TEMPLATE_UNAVAILABLE' && e.key === 'apply.templateUnavailable');
     const [payload] = prepare({ page, ops: [{ newRecord: { tplid: '796', fields: [{ name: 'title', value: 'a' }, { name: 'foo', value: 'b' }] } }] }, { baseDir });
     assert.equal(payload.mode, 'new');
   }));
@@ -158,12 +158,12 @@ test('newRecord verify compares reread fields and cards', () =>
     writeFileSync(join(reread, '7009.record.json'), JSON.stringify({ record: { ...good.record, title: 'Другой' } }));
     const p1 = verify(plan, { baseDir });
     assert.equal(p1.length, 1);
-    assert.equal(p1[0].problem, 'значение поля не совпало');
+    assert.equal(p1[0].problem.key, 'apply.problem.fieldValueMismatch');
     assert.equal(p1[0].field, 'title');
 
     writeFileSync(join(reread, '7009.record.json'), JSON.stringify({ record: { ...good.record, list: '[]' } }));
     const p2 = verify(plan, { baseDir });
-    assert.ok(p2.some((p) => p.problem === 'число карточек не совпало'));
+    assert.ok(p2.some((p) => p.problem.key === 'apply.problem.cardCountMismatch'));
   }));
 
 // [FIX] Поле, записанное с onlythisfield, Tilda хранит экранированным (`&lt;a …&gt;`, `&lt;br /&gt;`),
@@ -186,7 +186,7 @@ test('field verify accepts the escaped form Tilda stores and still catches a dif
     writeFileSync(join(reread, '7002.record.json'), JSON.stringify({ record: { descr: stored.replace('page100003', 'page100004') } }));
     const problems = verify(plan, { baseDir });
     assert.equal(problems.length, 1);
-    assert.equal(problems[0].problem, 'поле не сохранилось');
+    assert.equal(problems[0].problem.key, 'apply.problem.fieldNotSaved');
   } finally {
     if (original === undefined) delete process.env.TILDA_PROTECTED_PAGES;
     else process.env.TILDA_PROTECTED_PAGES = original;
@@ -208,7 +208,7 @@ test('field verify treats a field missing from the record as the written empty v
     writeFileSync(join(reread, '7003.record.json'), JSON.stringify({ record: { blocks: '3' } }));
     assert.deepEqual(verify(plan, { baseDir }), []);
     writeFileSync(join(reread, '7003.record.json'), JSON.stringify({ record: { margintop: '135px' } }));
-    assert.equal(verify(plan, { baseDir })[0]?.problem, 'поле не сохранилось');
+    assert.equal(verify(plan, { baseDir })[0]?.problem.key, 'apply.problem.fieldNotSaved');
   } finally {
     if (original === undefined) delete process.env.TILDA_PROTECTED_PAGES;
     else process.env.TILDA_PROTECTED_PAGES = original;
@@ -223,7 +223,7 @@ test('applyImageUpload substitutes plain and card images', () => {
   assert.equal(op.newRecord.fields.find((f) => f.name === 'img').value, 'https://cdn.test/x.png');
   assert.equal(op.newRecord.cards[0].li_img, 'https://cdn.test/y.png');
   assert.equal(op.newRecord.images[0].url, 'https://cdn.test/x.png');
-  assert.throws(() => applyImageUpload(op, { card: 5, field: 'li_img' }, 'u'), /карточки #5/);
+  assert.throws(() => applyImageUpload(op, { card: 5, field: 'li_img' }, 'u'), (e) => e.code === 'PLAN_INVALID' && e.key === 'apply.imageCardMissing' && e.params.card === 5);
 });
 
 test('applyImageUpload writes tu upload fields for a plain image field', () => {
@@ -262,7 +262,7 @@ test('newRecord verify compares card li_link that travels inside list', () =>
     writeFileSync(join(reread, '7009.record.json'), JSON.stringify(record('https://example.com/other')));
     const problems = verify(plan, { baseDir });
     assert.equal(problems.length, 1);
-    assert.equal(problems[0].problem, 'карточка не совпала');
+    assert.equal(problems[0].problem.key, 'apply.problem.cardMismatch');
     assert.equal(problems[0].field, 'li_link');
   }));
 
@@ -295,7 +295,7 @@ test('formContent lets newRecord and field write formmsgurl but never receivers'
   withNewRecordEnv((baseDir) => {
     const url = { name: 'formmsgurl', value: '/thanks' };
     assert.throws(() => prepare({ page, ops: [{ newRecord: { tplid: '702', fields: [url] } }] }, { baseDir }), /FORM_FIELD_REJECTED/);
-    assert.throws(() => prepare({ page, ops: [{ formContent: 'x', newRecord: { tplid: '702', fields: [url] } }] }, { baseDir }), /formContent допускает только 'reference'/);
+    assert.throws(() => prepare({ page, ops: [{ formContent: 'x', newRecord: { tplid: '702', fields: [url] } }] }, { baseDir }), (e) => e.code === 'PLAN_INVALID' && e.key === 'apply.formContentOnlyReference');
     assert.throws(() => prepare({ page, ops: [{ formContent: 'reference', newRecord: { tplid: '702', fields: [{ name: 'receivers', value: 'x' }] } }] }, { baseDir }), /FORM_FIELD_REJECTED/);
     const items = [{ li_type: 'nm', li_nm: 'Имя', li_req: 'y' }];
     const [payload] = prepare({ page, ops: [{ id: 'f1', formContent: 'reference', newRecord: { tplid: '702', fields: [url, { name: 'forminputs', value: JSON.stringify(items) }] } }] }, { baseDir });
@@ -320,7 +320,7 @@ test('a field op with formContent carries the flag to its payload call', () =>
 
 test('newRecord code goes only to 131, without script, and is verified against the reread code', () =>
   withNewRecordEnv((baseDir) => {
-    assert.throws(() => prepare({ page, ops: [{ newRecord: { tplid: '796', fields: [], code: '<div></div>' } }] }, { baseDir }), /op#0 .*code пишется только в HTML-блок 131/);
+    assert.throws(() => prepare({ page, ops: [{ newRecord: { tplid: '796', fields: [], code: '<div></div>' } }] }, { baseDir }), (e) => e.code === 'PLAN_INVALID' && e.key === 'apply.codeOnlyIn131' && e.params.tplid === '796');
     assert.throws(() => prepare({ page, ops: [{ newRecord: { tplid: '131', fields: [], code: '<script>1</script>' } }] }, { baseDir }), /SCRIPT_REJECTED/);
     const [payload] = prepare({ page, ops: [{ id: 'h1', newRecord: { tplid: '131', fields: [], code: '<div>код</div>' } }] }, { baseDir });
     assert.equal(payload.code, '<div>код</div>');
@@ -334,5 +334,5 @@ test('newRecord code goes only to 131, without script, and is verified against t
     assert.deepEqual(verify({ page, ops: [{ id: 'h1', newRecord: { tplid: '131', fields: [], code: '<div>код</div>' } }] }, { baseDir }), []);
     writeFileSync(join(rereadDir, '7011.record.json'), JSON.stringify({ record: { tplid: '131' }, t123code: '<div>другой</div>' }));
     const problems = verify({ page, ops: [{ id: 'h1', newRecord: { tplid: '131', fields: [], code: '<div>код</div>' } }] }, { baseDir });
-    assert.equal(problems[0].problem, 'код HTML-блока не совпал');
+    assert.equal(problems[0].problem.key, 'apply.problem.htmlCodeMismatch');
   }));

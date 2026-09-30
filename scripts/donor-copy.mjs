@@ -15,6 +15,7 @@ import { createLogger } from './lib/log.mjs';
 import { baselineDir } from './lib/paths.mjs';
 import * as snapshot from './snapshot.mjs';
 import { pageTitleFor } from './page-ops.mjs';
+import { attachMessage, messageText, msg } from './lib/i18n.mjs';
 
 const log = createLogger('donor-copy');
 
@@ -23,7 +24,8 @@ export const PASTE_CHECKED_LIMIT = 60;
 
 export class DonorCopyError extends Error {
   constructor(code, message, data = {}) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
     this.name = 'DonorCopyError';
     this.code = code;
     this.exitCode = 1;
@@ -31,14 +33,22 @@ export class DonorCopyError extends Error {
   }
 }
 
+/**
+ * Причины отказа и итоги переноса: имя → ключ словаря. Подстановки: `targetNotEmpty` {n},
+ * `protectedTarget` {id}, `replaceIncomplete` {n}, `notWritten` {reason}. `written`, `kept` и
+ * `notWritten` — итог записи заголовка и адреса приёмника (`title`, `alias` результата).
+ */
 export const COPY_REASONS = {
-  targetNotEmpty: (n) => `на приёмнике уже ${n} блоков — повторите с --replace или укажите пустую страницу --to`,
-  zeroOnTarget: 'на приёмнике есть Zero Block (396): удаление и снимок Zero Block командой не предусмотрены',
-  donorChanged: 'состав страницы донора изменился во время переноса — остановлено; проверьте страницу донора вручную',
-  orderMismatch: 'порядок или состав блоков на приёмнике не совпал с донором',
-  sourceEmpty: 'на странице донора нет блоков',
-  protectedTarget: (id) => `страница ${id} защищена (TILDA_PROTECTED_PAGES)`,
-  replaceIncomplete: (n) => `после удаления на приёмнике осталось ${n} блоков — перенос не начат`,
+  targetNotEmpty: 'donorCopy.reason.targetNotEmpty',
+  zeroOnTarget: 'donorCopy.reason.zeroOnTarget',
+  donorChanged: 'donorCopy.reason.donorChanged',
+  orderMismatch: 'donorCopy.reason.orderMismatch',
+  sourceEmpty: 'donorCopy.reason.sourceEmpty',
+  protectedTarget: 'donorCopy.reason.protectedTarget',
+  replaceIncomplete: 'donorCopy.reason.replaceIncomplete',
+  written: 'donorCopy.reason.written',
+  kept: 'donorCopy.reason.kept',
+  notWritten: 'donorCopy.reason.notWritten',
 };
 
 const toHidden = (v) => v === true || v === 'y';
@@ -99,17 +109,17 @@ export async function copyDonorPage({ test, donor }, params) {
   const { sourcePageid, targetPageid, replace = false, dryRun = false, protectedPages = [], label = null, baseDir, now = new Date() } = params;
   const source = String(sourcePageid);
   const target = String(targetPageid);
-  if (protectedPages.map(String).includes(target)) throw new DonorCopyError('PROTECTED_TARGET', COPY_REASONS.protectedTarget(target), { target });
+  if (protectedPages.map(String).includes(target)) throw new DonorCopyError('PROTECTED_TARGET', msg(COPY_REASONS.protectedTarget, { id: target }), { target });
   log.info('copyDonorPage', 'начало', { label, source, target, replace, dryRun });
 
   await test.openEditor(target);
   const before = composition(await test.call('listRecords'));
-  if (before.length && !replace) throw new DonorCopyError('TARGET_NOT_EMPTY', COPY_REASONS.targetNotEmpty(before.length), { target, blocks: before.length });
-  if (replace && before.some((r) => r.tplid === '396')) throw new DonorCopyError('ZERO_ON_TARGET', COPY_REASONS.zeroOnTarget, { target });
+  if (before.length && !replace) throw new DonorCopyError('TARGET_NOT_EMPTY', msg(COPY_REASONS.targetNotEmpty, { n: before.length }), { target, blocks: before.length });
+  if (replace && before.some((r) => r.tplid === '396')) throw new DonorCopyError('ZERO_ON_TARGET', msg(COPY_REASONS.zeroOnTarget), { target });
 
   await donor.openEditor(source);
   const src = composition(await donor.call('listRecords'));
-  if (!src.length) throw new DonorCopyError('SOURCE_EMPTY', COPY_REASONS.sourceEmpty, { source });
+  if (!src.length) throw new DonorCopyError('SOURCE_EMPTY', msg(COPY_REASONS.sourceEmpty), { source });
   log.debug('copyDonorPage', 'состав донора', { source, tplids: src.map((r) => r.tplid) });
   if (src.length > PASTE_CHECKED_LIMIT) log.warn('copyDonorPage', 'страница больше проверенного размера одной вставки', { blocks: src.length, checked: PASTE_CHECKED_LIMIT });
 
@@ -127,7 +137,7 @@ export async function copyDonorPage({ test, donor }, params) {
     for (const r of before) await test.call('deleteRecord', [target, r.recordid], { attempts: 1 });
     await test.openEditor(target);
     const left = composition(await test.call('listRecords'));
-    if (left.length) throw new DonorCopyError('REPLACE_INCOMPLETE', COPY_REASONS.replaceIncomplete(left.length), { target, left: left.map((r) => r.recordid) });
+    if (left.length) throw new DonorCopyError('REPLACE_INCOMPLETE', msg(COPY_REASONS.replaceIncomplete, { n: left.length }), { target, left: left.map((r) => r.recordid) });
     log.info('copyDonorPage', 'приёмник очищен после снимков', { target, removed: before.length });
   }
 
@@ -140,7 +150,7 @@ export async function copyDonorPage({ test, donor }, params) {
     const cmp = sameComposition(src, now_);
     if (!cmp.equal) {
       log.error('copyDonorPage', 'состав страницы донора изменился', { stage, added: cmp.added, removed: cmp.removed, reordered: cmp.reordered });
-      throw new DonorCopyError('DONOR_CHANGED', COPY_REASONS.donorChanged, { stage, ...cmp });
+      throw new DonorCopyError('DONOR_CHANGED', msg(COPY_REASONS.donorChanged), { stage, ...cmp });
     }
     log.debug('copyDonorPage', 'состав донора не изменился', { stage, blocks: now_.length });
   };
@@ -162,7 +172,7 @@ export async function copyDonorPage({ test, donor }, params) {
   const order = orderMatches(src, result);
   const ok = pastedRecords.length === src.length && order.equal;
   if (ok) log.info('copyDonorPage', 'verify: порядок совпал', { blocks: result.length });
-  else log.error('copyDonorPage', COPY_REASONS.orderMismatch, { expected: order.expected, actual: order.actual, hiddenMismatch: order.hiddenMismatch, pasted: pastedRecords.length });
+  else log.error('copyDonorPage', messageText(msg(COPY_REASONS.orderMismatch)), { expected: order.expected, actual: order.actual, hiddenMismatch: order.hiddenMismatch, pasted: pastedRecords.length });
 
   // Заголовок по метке: только если приёмник ещё «Blank page» — владелец мог назвать страницу сам.
   let title = null;
@@ -173,14 +183,14 @@ export async function copyDonorPage({ test, donor }, params) {
       if (/^blank page$/i.test(current) || params.forceTitle) {
         const wanted = pageTitleFor({ label, role: params.role, donorTitle: params.donorTitle });
         await test.setTitle(target, wanted);
-        title = 'записан';
+        title = msg(COPY_REASONS.written);
         log.info('copyDonorPage', 'заголовок приёмника записан', { target, length: wanted.length });
       } else {
-        title = 'оставлен';
+        title = msg(COPY_REASONS.kept);
         log.debug('copyDonorPage', 'заголовок приёмника не Blank page — оставлен', { target });
       }
     } catch (e) {
-      title = `не записан: ${String(e.message || e).slice(0, 120)}`;
+      title = msg(COPY_REASONS.notWritten, { reason: String(e.message || e).slice(0, 120) });
       log.warn('copyDonorPage', 'заголовок приёмника не записан', { target, error: String(e.message || e).slice(0, 160) });
     }
   }
@@ -193,14 +203,14 @@ export async function copyDonorPage({ test, donor }, params) {
       const current = String((await test.pageAlias(target)) ?? '').trim();
       if (!current) {
         await test.setAlias(target, params.alias);
-        alias = 'записан';
+        alias = msg(COPY_REASONS.written);
         log.info('copyDonorPage', 'адрес приёмника записан', { target });
       } else {
-        alias = 'оставлен';
+        alias = msg(COPY_REASONS.kept);
         log.debug('copyDonorPage', 'у приёмника уже есть адрес — оставлен', { target });
       }
     } catch (e) {
-      alias = `не записан: ${String(e.message || e).slice(0, 120)}`;
+      alias = msg(COPY_REASONS.notWritten, { reason: String(e.message || e).slice(0, 120) });
       log.warn('copyDonorPage', 'адрес приёмника не записан', { target, code: e.code, error: String(e.message || e).slice(0, 160) });
     }
   }

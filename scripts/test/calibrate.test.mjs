@@ -58,7 +58,7 @@ test('calibrateCatalog writes a settings map, paces previews and deletes the tem
   const r = await calibrateCatalog(driver, { pageid: PAGE, tplids: ['686', '770', '999'], delayMs: 11, batch: 3, pauseS: 2, sleep: async (ms) => sleeps.push(ms), now: () => 'NOW' }, opts);
 
   assert.deepEqual(r.calibrated.map((c) => c.tplid), ['686']);
-  assert.deepEqual(r.skipped, [{ tplid: '770', reason: 'шаблон недоступен' }, { tplid: '999', reason: 'каталог не снят' }]);
+  assert.deepEqual(r.skipped.map((s) => [s.tplid, s.reason.key]), [['770', 'calibrate.reason.templateUnavailable'], ['999', 'calibrate.reason.catalogNotCaptured']]);
   assert.deepEqual(r.failed, []);
   assert.equal(r.previews, 5, 'база дважды + blocks=3 + два цвета');
 
@@ -80,7 +80,7 @@ test('calibrateCatalog writes a settings map, paces previews and deletes the tem
   assert.equal(listCatalog(opts).find((row) => row.tplid === '686').calibrated, true);
 
   const again = await calibrateCatalog(driver, { pageid: PAGE, tplids: ['686'], sleep: async () => {} }, opts);
-  assert.deepEqual(again.skipped, [{ tplid: '686', reason: 'уже откалиброван' }]);
+  assert.deepEqual(again.skipped.map((s) => [s.tplid, s.reason.key]), [['686', 'calibrate.reason.alreadyCalibrated']]);
 });
 
 test('calibrateCatalog deletes the block and reports failure when previews keep failing', async () => {

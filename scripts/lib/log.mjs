@@ -27,7 +27,7 @@ let threshold = resolveThreshold();
 /** Переустановить порог (нужно тестам). */
 export function setLogLevel(level) {
   const key = String(level).toUpperCase();
-  if (!(key in LEVELS)) throw new Error(`неизвестный уровень лога: ${level}`);
+  if (!(key in LEVELS)) throw new Error(`unknown log level: ${level}`);
   threshold = LEVELS[key];
 }
 

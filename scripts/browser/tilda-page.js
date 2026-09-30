@@ -42,7 +42,7 @@
     const text = await r.text();
     if (looksLikeHtml(text)) {
       const head = text.slice(0, 12);
-      LOG('error', 'post', 'SESSION_LOST: вместо данных пришёл HTML (<!--tlp--> = страница логина, <!--tpbaa--> = чужой аккаунт)', { url, status: r.status, head });
+      LOG('error', 'post', 'SESSION_LOST: got HTML instead of data (<!--tlp--> = login page, <!--tpbaa--> = another account)', { url, status: r.status, head });
       throw new Error(`SESSION_LOST ${url} status=${r.status} head=${JSON.stringify(head)}`);
     }
     return { status: r.status, text };
@@ -51,11 +51,11 @@
   const assertWritable = (pageid, fn) => {
     if (!Array.isArray(T.protectedPages)) throw new Error('CONFIG_ERROR protected pages are not configured');
     if (T.protectedPages.includes(String(pageid))) {
-      LOG('error', fn, 'запись в защищённую страницу запрещена', { pageid, protectedPages: T.protectedPages });
+      LOG('error', fn, 'write to a protected page is forbidden', { pageid, protectedPages: T.protectedPages });
       throw new Error(`PROTECTED_PAGE ${pageid}`);
     }
     if (Array.isArray(T.writablePages) && !T.writablePages.includes(String(pageid))) {
-      LOG('error', fn, 'запись разрешена только в явно перечисленные страницы', { pageid, writablePages: T.writablePages });
+      LOG('error', fn, 'write is allowed only to explicitly listed pages', { pageid, writablePages: T.writablePages });
       throw new Error(`WRITE_NOT_ALLOWED ${pageid}`);
     }
   };
@@ -66,7 +66,7 @@
     try {
       return JSON.parse(text);
     } catch {
-      LOG('error', ctx.fn, 'ответ не JSON', { ...ctx, head: text.slice(0, 120) });
+      LOG('error', ctx.fn, 'response is not JSON', { ...ctx, head: text.slice(0, 120) });
       throw new Error(`BAD_JSON ${ctx.fn} ${ctx.recordid}`);
     }
   };
@@ -81,11 +81,11 @@
   /** Настройки блока. tab: 'settings' (по умолчанию) или 'content'. */
   T.getRecord = async (pageid, recordid, tab = 'settings') => {
     pageid = String(pageid || window.pageid);
-    LOG('debug', 'getRecord', 'запрос', { pageid, recordid, tab });
+    LOG('debug', 'getRecord', 'request', { pageid, recordid, tab });
     const { text } = await post('/page/edit/', { comm: 'editrecordsettings', pageid, recordid, tab });
     const json = parseJson(text, { fn: 'getRecord', pageid, recordid });
     const rec = json.record || {};
-    LOG('info', 'getRecord', 'получено', { recordid, tplid: rec.tplid, fields: Object.keys(rec).length, hasTpl: 'tpl' in json });
+    LOG('info', 'getRecord', 'received', { recordid, tplid: rec.tplid, fields: Object.keys(rec).length, hasTpl: 'tpl' in json });
     return json;
   };
 
@@ -99,8 +99,8 @@
     pageid = String(pageid || window.pageid);
     const j = await T.getRecord(pageid, recordid, 'settings');
     if (typeof window.edrec__drawUI__getFieldObj !== 'function') {
-      LOG('error', 'readSettingsSchema', 'словарь полей редактора не найден', { recordid });
-      throw new Error('NO_FIELD_DICTIONARY: словарь полей редактора не найден');
+      LOG('error', 'readSettingsSchema', 'editor field dictionary not found', { recordid });
+      throw new Error('NO_FIELD_DICTIONARY: the editor field dictionary was not found');
     }
     const tpl = j.tpl || {};
     const record = j.record || {};
@@ -111,7 +111,7 @@
     try {
       replaces = typeof tpl.replaces === 'string' ? JSON.parse(tpl.replaces || '[]') : tpl.replaces || [];
     } catch (e) {
-      LOG('warn', 'readSettingsSchema', 'tpl.replaces не JSON, поправки шаблона не учтены', { recordid, error: String(e.message).slice(0, 80) });
+      LOG('warn', 'readSettingsSchema', 'tpl.replaces is not JSON, template corrections skipped', { recordid, error: String(e.message).slice(0, 80) });
     }
     if (!Array.isArray(replaces)) replaces = Object.values(replaces || {});
     const describe = (name) => {
@@ -131,7 +131,7 @@
     for (const f of [...fields]) {
       if (f.mobile && !fields.some((x) => x.name === f.mobile)) fields.push({ ...describe(f.mobile), type: f.type, options: f.options, desktop: f.name });
     }
-    LOG('info', 'readSettingsSchema', 'схема прочитана', { tplid: record.tplid, fields: fields.length, replaces: replaces.length });
+    LOG('info', 'readSettingsSchema', 'schema read', { tplid: record.tplid, fields: fields.length, replaces: replaces.length });
     return { tplid: String(record.tplid || ''), fields };
   };
 
@@ -139,22 +139,22 @@
   T.saveField = async (pageid, recordid, field, value, opts = {}) => {
     pageid = String(pageid || window.pageid);
     assertWritable(pageid, 'saveField');
-    if (!field || field === 'code') throw new Error('saveField: для code используйте saveT123Code');
-    if (T.FORM_CONTENT_FIELDS.includes(String(field)) && opts.allowFormContent === true) LOG('warn', 'saveField', 'поле формы пропущено по флагу formContent', { recordid, field });
+    if (!field || field === 'code') throw new Error('BAD_ARGUMENT: saveField cannot write code, use saveT123Code');
+    if (T.FORM_CONTENT_FIELDS.includes(String(field)) && opts.allowFormContent === true) LOG('warn', 'saveField', 'form field let through by the formContent flag', { recordid, field });
     if (isForbiddenFormField(field, opts)) {
-      LOG('warn', 'saveField', 'отказ: поле формы не пишется', { recordid, field, path: 'saveField' });
+      LOG('warn', 'saveField', 'refused: form field is not written', { recordid, field, path: 'saveField' });
       throw new Error(`FORM_FIELD_REJECTED ${field}`);
     }
     if (/<script/i.test(String(value))) {
-      LOG('error', 'saveField', 'отказ: значение содержит <script', { recordid, field });
+      LOG('error', 'saveField', 'refused: value contains <script', { recordid, field });
       throw new Error('SCRIPT_REJECTED');
     }
-    LOG('debug', 'saveField', 'запись', { pageid, recordid, field, bytes: String(value).length });
+    LOG('debug', 'saveField', 'write', { pageid, recordid, field, bytes: String(value).length });
     const { text, status } = await post('/page/submit/', {
       comm: 'saverecord', pageid, recordid, onlythisfield: field, [field]: value,
     });
     if (text.trim() !== 'OK') {
-      LOG('error', 'saveField', 'ответ не OK', { pageid, recordid, field, status, body: text.slice(0, 200) });
+      LOG('error', 'saveField', 'response is not OK', { pageid, recordid, field, status, body: text.slice(0, 200) });
       throw new Error(`SAVE_FAILED saverecord ${recordid}.${field}: ${text.slice(0, 200)}`);
     }
     LOG('info', 'saveField', 'OK', { pageid, recordid, field });
@@ -170,17 +170,17 @@
   T.saveRecordFull = async (pageid, recordid, fields, opts = {}) => {
     pageid = String(pageid || window.pageid);
     assertWritable(pageid, 'saveRecordFull');
-    if (!Array.isArray(fields) || fields.length === 0) throw new Error('saveRecordFull: нужен массив полей {name, value}');
+    if (!Array.isArray(fields) || fields.length === 0) throw new Error('BAD_ARGUMENT: saveRecordFull needs an array of fields {name, value}');
     const names = fields.map((f) => String(f.name));
     const forbidden = names.filter((n) => isForbiddenFormField(n, opts));
     const allowed = names.filter((n) => T.FORM_CONTENT_FIELDS.includes(n) && opts.allowFormContent === true);
-    if (allowed.length) LOG('warn', 'saveRecordFull', 'поля формы пропущены по флагу formContent', { recordid, fields: allowed });
+    if (allowed.length) LOG('warn', 'saveRecordFull', 'form fields let through by the formContent flag', { recordid, fields: allowed });
     if (forbidden.length) {
-      LOG('warn', 'saveRecordFull', 'отказ: поля формы не пишутся', { recordid, fields: forbidden, path: 'saveRecordFull' });
+      LOG('warn', 'saveRecordFull', 'refused: form fields are not written', { recordid, fields: forbidden, path: 'saveRecordFull' });
       throw new Error(`FORM_FIELD_REJECTED ${forbidden.join(', ')}`);
     }
     if (fields.some((f) => /<script/i.test(String(f.value)))) {
-      LOG('error', 'saveRecordFull', 'отказ: значение содержит <script', { recordid });
+      LOG('error', 'saveRecordFull', 'refused: value contains <script', { recordid });
       throw new Error('SCRIPT_REJECTED');
     }
     const params = new URLSearchParams();
@@ -189,16 +189,16 @@
     params.append('pageid', pageid);
     params.append('comm', 'saverecord');
     const body = params.toString();
-    LOG('debug', 'saveRecordFull', 'запись', { pageid, recordid, fields: fields.length, bytes: body.length, head: body.slice(0, 200) });
-    if (body.length > 100 * 1024) LOG('warn', 'saveRecordFull', 'тело больше 100 КБ', { bytes: body.length });
+    LOG('debug', 'saveRecordFull', 'write', { pageid, recordid, fields: fields.length, bytes: body.length, head: body.slice(0, 200) });
+    if (body.length > 100 * 1024) LOG('warn', 'saveRecordFull', 'body is larger than 100 KB', { bytes: body.length });
     const r = await fetch('/page/submit/', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body });
     const text = await r.text();
     if (/^\s*<|<html|<!doctype/i.test(text.slice(0, 300))) {
-      LOG('error', 'saveRecordFull', 'SESSION_LOST: вместо данных пришёл HTML', { recordid, status: r.status });
+      LOG('error', 'saveRecordFull', 'SESSION_LOST: got HTML instead of data', { recordid, status: r.status });
       throw new Error(`SESSION_LOST /page/submit/ status=${r.status}`);
     }
     if (text.trim() !== 'OK') {
-      LOG('error', 'saveRecordFull', 'ответ не OK', { pageid, recordid, status: r.status, body: text.slice(0, 200) });
+      LOG('error', 'saveRecordFull', 'response is not OK', { pageid, recordid, status: r.status, body: text.slice(0, 200) });
       throw new Error(`SAVE_FAILED saverecord ${recordid}: ${text.slice(0, 200)}`);
     }
     LOG('info', 'saveRecordFull', 'OK', { pageid, recordid, fields: fields.length, bytes: body.length });
@@ -214,22 +214,22 @@
   T.saveRecordsSort = async (pageid, order) => {
     pageid = String(pageid || window.pageid);
     assertWritable(pageid, 'saveRecordsSort');
-    if (!Array.isArray(order) || order.length === 0) throw new Error('saveRecordsSort: нужен полный список recordid');
+    if (!Array.isArray(order) || order.length === 0) throw new Error('BAD_ARGUMENT: saveRecordsSort needs the full list of recordid');
     const dom = [...document.querySelectorAll('[data-record-type]')].filter((el) => /^record\d+$/.test(el.id)).map((el) => el.id.replace(/^record/, ''));
     const want = order.map(String);
     const a = [...dom].sort().join(',');
     const b = [...want].sort().join(',');
     if (a !== b) {
-      LOG('error', 'saveRecordsSort', 'STALE_INVENTORY: состав блоков в списке не совпал с DOM редактора', { dom: dom.length, order: want.length });
-      throw new Error(`STALE_INVENTORY: в DOM ${dom.length} блоков, в списке ${want.length}, состав отличается`);
+      LOG('error', 'saveRecordsSort', 'STALE_INVENTORY: block set in the list does not match the editor DOM', { dom: dom.length, order: want.length });
+      throw new Error(`STALE_INVENTORY: the DOM has ${dom.length} blocks, the list has ${want.length}, the contents differ`);
     }
     const params = new URLSearchParams({ comm: 'saverecordssort', pageid });
     want.forEach((id, i) => params.append(`sorts[${i}]`, id));
-    LOG('debug', 'saveRecordsSort', 'запись порядка', { pageid, blocks: want.length, before: dom.join(',').slice(0, 200), after: want.join(',').slice(0, 200) });
+    LOG('debug', 'saveRecordsSort', 'writing order', { pageid, blocks: want.length, before: dom.join(',').slice(0, 200), after: want.join(',').slice(0, 200) });
     const { text, status } = await post('/page/submit/', Object.fromEntries(params));
     const answer = text.trim();
     if (answer !== '' && answer !== 'OK') {
-      LOG('error', 'saveRecordsSort', 'ответ не OK', { pageid, status, body: answer.slice(0, 200) });
+      LOG('error', 'saveRecordsSort', 'response is not OK', { pageid, status, body: answer.slice(0, 200) });
       throw new Error(`SAVE_FAILED saverecordssort: ${answer.slice(0, 200)}`);
     }
     LOG('info', 'saveRecordsSort', 'OK', { pageid, blocks: want.length });
@@ -245,7 +245,7 @@
   T.__previewBackup = T.__previewBackup || {};
   T.previewRecord = async (pageid, recordid, fields, opts = {}) => {
     pageid = String(pageid || window.pageid);
-    if (!Array.isArray(fields) || fields.length === 0) throw new Error('previewRecord: нужен массив полей {name, value}');
+    if (!Array.isArray(fields) || fields.length === 0) throw new Error('BAD_ARGUMENT: previewRecord needs an array of fields {name, value}');
     if (fields.some((f) => /<script/i.test(String(f.value)))) throw new Error('SCRIPT_REJECTED');
     const params = new URLSearchParams();
     for (const f of fields) if (!['comm', 'pageid', 'recordid'].includes(f.name)) params.append(f.name, f.value == null ? '' : String(f.value));
@@ -253,7 +253,7 @@
     params.append('pageid', pageid);
     params.append('comm', 'previewrecord');
     const body = params.toString();
-    LOG('debug', 'previewRecord', 'запрос', { pageid, recordid, fields: fields.length, bytes: body.length, head: body.slice(0, 200) });
+    LOG('debug', 'previewRecord', 'request', { pageid, recordid, fields: fields.length, bytes: body.length, head: body.slice(0, 200) });
     const r = await fetch('/page/submit/', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body });
     const text = await r.text();
     if (/^\s*<|<html|<!doctype/i.test(text.slice(0, 300))) throw new Error(`SESSION_LOST /page/submit/ status=${r.status}`);
@@ -261,11 +261,11 @@
     try {
       json = JSON.parse(text);
     } catch (e) {
-      LOG('error', 'previewRecord', 'ответ не JSON', { recordid, status: r.status, head: text.slice(0, 160) });
+      LOG('error', 'previewRecord', 'response is not JSON', { recordid, status: r.status, head: text.slice(0, 160) });
       throw new Error(`PREVIEW_FAILED ${recordid}: ${text.slice(0, 160)}`);
     }
     if (!json || typeof json.html !== 'string') {
-      LOG('error', 'previewRecord', 'в ответе нет html', { recordid, status: r.status, body: text.slice(0, 200) });
+      LOG('error', 'previewRecord', 'no html in the response', { recordid, status: r.status, body: text.slice(0, 200) });
       throw new Error(`PREVIEW_FAILED ${recordid}: ${text.slice(0, 200)}`);
     }
     let rendered = false;
@@ -280,10 +280,10 @@
         current.replaceWith(fresh);
         rendered = true;
       } else {
-        LOG('warn', 'previewRecord', 'не удалось подставить предпросмотр в DOM', { recordid, wrapper: Boolean(wrapper), current: Boolean(current), fresh: Boolean(fresh) });
+        LOG('warn', 'previewRecord', 'could not substitute the preview into the DOM', { recordid, wrapper: Boolean(wrapper), current: Boolean(current), fresh: Boolean(fresh) });
       }
     }
-    LOG('info', 'previewRecord', 'предпросмотр получен, записи не было', { pageid, recordid, htmlBytes: json.html.length, rendered });
+    LOG('info', 'previewRecord', 'preview received, nothing was written', { pageid, recordid, htmlBytes: json.html.length, rendered });
     return { htmlBytes: json.html.length, rendered, html: opts.withHtml ? json.html : undefined };
   };
 
@@ -295,7 +295,7 @@
     const current = wrapper && wrapper.querySelector('.r');
     if (current) current.replaceWith(original);
     delete T.__previewBackup[recordid];
-    LOG('debug', 'restorePreview', 'исходный DOM возвращён', { recordid });
+    LOG('debug', 'restorePreview', 'original DOM restored', { recordid });
     return true;
   };
 
@@ -307,7 +307,7 @@
     const json = parseJson(text, { fn: 'getT123Code', pageid, recordid });
     const encoded = (json.record && json.record.code) || '';
     const code = decodeEntities(encoded);
-    LOG('debug', 'getT123Code', 'код получен', { recordid, tplid: json.record && json.record.tplid, encodedBytes: encoded.length, bytes: code.length });
+    LOG('debug', 'getT123Code', 'code received', { recordid, tplid: json.record && json.record.tplid, encodedBytes: encoded.length, bytes: code.length });
     return { code, tplid: json.record && json.record.tplid };
   };
 
@@ -317,13 +317,13 @@
     projectid = String(projectid || window.projectid);
     assertWritable(pageid, 'saveT123Code');
     if (html.length > T123_LIMIT) {
-      LOG('error', 'saveT123Code', 'код больше лимита', { recordid, bytes: html.length, limit: T123_LIMIT });
+      LOG('error', 'saveT123Code', 'code is over the limit', { recordid, bytes: html.length, limit: T123_LIMIT });
       throw new Error(`TOO_MUCH_DATA ${html.length} > ${T123_LIMIT}`);
     }
-    LOG('debug', 'saveT123Code', 'запись', { pageid, recordid, bytes: html.length });
+    LOG('debug', 'saveT123Code', 'write', { pageid, recordid, bytes: html.length });
     const { text, status } = await post('/page/submit/', { comm: 'saverecord', pageid, projectid, recordid, code: html });
     if (text.trim() !== 'OK') {
-      LOG('error', 'saveT123Code', 'ответ не OK', { recordid, status, body: text.slice(0, 200) });
+      LOG('error', 'saveT123Code', 'response is not OK', { recordid, status, body: text.slice(0, 200) });
       throw new Error(`SAVE_FAILED T123 ${recordid}: ${text.slice(0, 200)}`);
     }
     LOG('info', 'saveT123Code', 'OK', { pageid, recordid });
@@ -346,23 +346,23 @@
     assertWritable(pageid, 'addRecord');
     // Логика редактора (tp__addRecord): with_code нужен, только пока шаблон не подключён к странице.
     const withCode = typeof window.tp__checkBlockAvailabilityOnPage === 'function' && window.tp__checkBlockAvailabilityOnPage(Number(tplid)) ? '' : 'yes';
-    LOG('debug', 'addRecord', 'создание блока', { pageid, tplid, afterid, withCode });
+    LOG('debug', 'addRecord', 'creating block', { pageid, tplid, afterid, withCode });
     const { text, status } = await post('/page/submit/', {
       comm: 'addnewrecord', pageid, afterid: afterid || '', beforeid: '', tplid: String(tplid), with_code: withCode,
     });
-    const json = parseJson(text, { fn: 'addRecord', pageid, recordid: '(новый)' });
+    const json = parseJson(text, { fn: 'addRecord', pageid, recordid: '(new)' });
     if (json.error) {
       // Текст ошибки нужен наверху: «You do not have access to this block» — шаблон недоступен
       // (тариф или служебный шаблон вроде меню 770), каталог помечает его available: false.
-      LOG('warn', 'addRecord', 'Тильда отказала', { pageid, tplid, status, error: String(json.error).slice(0, 120) });
+      LOG('warn', 'addRecord', 'Tilda refused', { pageid, tplid, status, error: String(json.error).slice(0, 120) });
       throw new Error(`ADD_FAILED addnewrecord tpl=${tplid}: ${json.error}`);
     }
     const recordid = ((json.html || '').match(/recordid="(\d+)"/) || [])[1];
     if (!recordid) {
-      LOG('error', 'addRecord', 'в ответе нет recordid', { pageid, tplid, status, head: String(json.html).slice(0, 120) });
-      throw new Error(`ADD_FAILED addnewrecord tpl=${tplid}: recordid не найден`);
+      LOG('error', 'addRecord', 'no recordid in the response', { pageid, tplid, status, head: String(json.html).slice(0, 120) });
+      throw new Error(`ADD_FAILED addnewrecord tpl=${tplid}: recordid not found`);
     }
-    LOG('info', 'addRecord', 'блок создан', { pageid, tplid, afterid: afterid || '(в конец)', recordid });
+    LOG('info', 'addRecord', 'block created', { pageid, tplid, afterid: afterid || '(at end)', recordid });
     return { recordid, tplid: String(tplid) };
   };
 
@@ -373,10 +373,10 @@
     const { text, status } = await post('/page/submit/', { comm: 'deleterecord', pageid, recordid });
     const answer = text.trim();
     if (!['', 'ok', 'OK'].includes(answer)) {
-      LOG('error', 'deleteRecord', 'ответ не OK', { pageid, recordid, status, body: answer.slice(0, 200) });
+      LOG('error', 'deleteRecord', 'response is not OK', { pageid, recordid, status, body: answer.slice(0, 200) });
       throw new Error(`DELETE_FAILED deleterecord ${recordid}: ${answer.slice(0, 200)}`);
     }
-    LOG('info', 'deleteRecord', 'блок удалён', { pageid, recordid });
+    LOG('info', 'deleteRecord', 'block deleted', { pageid, recordid });
     return 'OK';
   };
 
@@ -394,7 +394,7 @@
       if (value === '' || value === null || value === undefined) continue;
       fields[name] = decodeEntities(String(value));
     }
-    LOG('debug', 'readRecordFields', 'поля прочитаны', { pageid, recordid, fields: Object.keys(fields).length });
+    LOG('debug', 'readRecordFields', 'fields read', { pageid, recordid, fields: Object.keys(fields).length });
     return fields;
   };
 
@@ -409,7 +409,7 @@
     const content = await T.getRecord(pageid, recordid, 'content');
     const settings = await T.getRecord(pageid, recordid, 'settings');
     const record = { ...(settings.record || {}), ...(content.record || {}) };
-    LOG('info', 'readRecordSnapshot', 'снимок собран', { pageid, recordid, tplid: record.tplid, fields: Object.keys(record).length });
+    LOG('info', 'readRecordSnapshot', 'snapshot built', { pageid, recordid, tplid: record.tplid, fields: Object.keys(record).length });
     return {
       record,
       tpl: content.tpl || settings.tpl,
@@ -436,13 +436,13 @@
     assertWritable(dstPageid, 'copyRecordViaBuffer');
     const toBuf = await post('/page/submit/', { comm: 'copyrecord_tobuf', pageid: srcPageid, recordid: srcRecordid });
     if (toBuf.text.trim() !== 'OK') {
-      LOG('error', 'copyRecordViaBuffer', 'copyrecord_tobuf не OK', { srcPageid, srcRecordid, body: toBuf.text.slice(0, 200) });
+      LOG('error', 'copyRecordViaBuffer', 'copyrecord_tobuf is not OK', { srcPageid, srcRecordid, body: toBuf.text.slice(0, 200) });
       throw new Error(`COPY_TO_BUF_FAILED ${srcRecordid}: ${toBuf.text.slice(0, 200)}`);
     }
     const { text, status } = await post('/page/submit/', { comm: 'pasterecord_frombuf', pageid: dstPageid, afterid: afterid || '', beforeid: '' });
-    const json = parseJson(text, { fn: 'copyRecordViaBuffer', pageid: dstPageid, recordid: '(новый)' });
+    const json = parseJson(text, { fn: 'copyRecordViaBuffer', pageid: dstPageid, recordid: '(new)' });
     if (json.error) {
-      LOG('error', 'copyRecordViaBuffer', 'pasterecord_frombuf вернул ошибку', { dstPageid, status, error: json.error });
+      LOG('error', 'copyRecordViaBuffer', 'pasterecord_frombuf returned an error', { dstPageid, status, error: json.error });
       throw new Error(`PASTE_FAILED ${srcRecordid} → ${dstPageid}: ${json.error}`);
     }
     const html = String(json.html || '');
@@ -452,10 +452,10 @@
     // который всегда создаёт видимый блок) — читаем её из ответа, чтобы не переключать вслепую.
     const hidden = (html.match(/\boff="([yn])"/) || [])[1] || 'n';
     if (!recordid) {
-      LOG('error', 'copyRecordViaBuffer', 'в ответе нет recordid', { dstPageid, status, head: html.slice(0, 120) });
-      throw new Error(`PASTE_FAILED ${srcRecordid} → ${dstPageid}: recordid не найден`);
+      LOG('error', 'copyRecordViaBuffer', 'no recordid in the response', { dstPageid, status, head: html.slice(0, 120) });
+      throw new Error(`PASTE_FAILED ${srcRecordid} → ${dstPageid}: recordid not found`);
     }
-    LOG('info', 'copyRecordViaBuffer', 'блок скопирован через буфер', { srcPageid, srcRecordid, dstPageid, recordid, tplid, hidden });
+    LOG('info', 'copyRecordViaBuffer', 'block copied via the buffer', { srcPageid, srcRecordid, dstPageid, recordid, tplid, hidden });
     return { recordid, tplid: tplid || '', hidden, written: null, skipped: [] };
   };
 
@@ -487,24 +487,24 @@
         } catch (e) {
           // Отдельное поле может быть отвергнуто шаблоном — блок из-за этого не бракуем,
           // расхождение поймает сверка на стороне Node.
-          LOG('warn', 'copyRecord', 'поле не записалось', { recordid, field: name, error: String(e.message).slice(0, 120) });
+          LOG('warn', 'copyRecord', 'field was not written', { recordid, field: name, error: String(e.message).slice(0, 120) });
           skipped.push({ field: name, error: String(e.message).slice(0, 120) });
         }
       }
     } catch (e) {
-      LOG('error', 'copyRecord', 'запись сорвалась, удаляю созданный блок', { dstPageid, recordid, error: String(e.message).slice(0, 160) });
+      LOG('error', 'copyRecord', 'write failed, deleting the created block', { dstPageid, recordid, error: String(e.message).slice(0, 160) });
       try {
         await T.deleteRecord(dstPageid, recordid);
       } catch (delErr) {
-        LOG('error', 'copyRecord', 'созданный блок остался на странице, убрать вручную', { dstPageid, recordid, error: String(delErr.message).slice(0, 120) });
+        LOG('error', 'copyRecord', 'created block was left on the page, remove it manually', { dstPageid, recordid, error: String(delErr.message).slice(0, 120) });
       }
       throw e;
     }
-    LOG('info', 'copyRecord', 'блок скопирован', { srcPageid, srcRecordid, dstPageid, recordid, tplid, written: written.length, skipped: skipped.length });
+    LOG('info', 'copyRecord', 'block copied', { srcPageid, srcRecordid, dstPageid, recordid, tplid, written: written.length, skipped: skipped.length });
     return { recordid, tplid: String(tplid), written, skipped };
   };
 
-  LOG('info', 'install', 'API установлен', { pageid: window.pageid, projectid: window.projectid });
+  LOG('info', 'install', 'API installed', { pageid: window.pageid, projectid: window.projectid });
   return {
     installed: ['getRecord', 'readSettingsSchema', 'saveField', 'saveRecordFull', 'saveRecordsSort', 'previewRecord', 'restorePreview', 'getT123Code', 'saveT123Code', 'addRecord', 'deleteRecord', 'readRecordFields', 'readRecordSnapshot', 'copyRecord'],
     pageid: window.pageid,

@@ -70,7 +70,7 @@ test('captureCatalog writes entries, marks unavailable, isolates failures and re
     assert.deepEqual(r.captured.map((c) => c.tplid), ['796']);
     assert.deepEqual(r.unavailable, [{ tplid: '835' }]);
     assert.deepEqual(r.failed.map((f) => f.tplid), ['999']);
-    assert.deepEqual(r.skipped, [{ tplid: '396', reason: 'Zero Block не каталогизируется' }]);
+    assert.deepEqual(r.skipped.map((s) => [s.tplid, s.reason.key]), [['396', 'catalog.reason.zeroBlock']]);
     assert.ok(sleeps > 0);
 
     assert.equal(JSON.parse(readFileSync(catalogPath('796', { baseDir }), 'utf8')).available, true);
@@ -86,7 +86,7 @@ test('captureCatalog writes entries, marks unavailable, isolates failures and re
     assert.deepEqual(rows.map((x) => [x.tplid, x.available, x.fields]), [['796', true, 4], ['835', false, 0]]);
 
     const again = await captureCatalog(makeDriver().driver, { pageid: '200002', tplids: ['796', '835'], delayMs: 0, sleep: async () => {} }, { baseDir });
-    assert.deepEqual(again.skipped, [{ tplid: '796', reason: 'уже снят' }, { tplid: '835', reason: 'уже снят' }]);
+    assert.deepEqual(again.skipped.map((s) => [s.tplid, s.reason.key]), [['796', 'catalog.reason.alreadyCaptured'], ['835', 'catalog.reason.alreadyCaptured']]);
     assert.equal(again.captured.length, 0);
 
     const forced = await captureCatalog(makeDriver().driver, { pageid: '200002', tplids: ['796'], delayMs: 0, force: true, sleep: async () => {} }, { baseDir });

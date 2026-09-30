@@ -15,6 +15,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, readdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { createLogger } from './lib/log.mjs';
+import { ToolError } from './lib/tool-error.mjs';
+import { msg } from './lib/i18n.mjs';
 import { baselineDir } from './lib/paths.mjs';
 
 const log = createLogger('snapshot');
@@ -25,7 +27,7 @@ function root(opts) {
 }
 
 export function snapshotPath({ kind, pageid, recordid }, opts) {
-  if (!KIND_DIR[kind]) throw new Error(`snapshot: неизвестный kind ${kind}`);
+  if (!KIND_DIR[kind]) throw new ToolError('BAD_KIND', msg('snapshot.unknownKind', { kind }));
   return join(root(opts), KIND_DIR[kind], String(pageid), `${recordid}.json`);
 }
 
@@ -75,7 +77,7 @@ export function load({ kind, pageid, recordid }, opts) {
   const path = snapshotPath({ kind, pageid, recordid }, opts);
   if (!existsSync(path)) {
     log.error('load', 'снимка нет', { path });
-    throw new Error(`NO_SNAPSHOT ${path}`);
+    throw new ToolError('NO_SNAPSHOT', msg('snapshot.noSnapshot', { path }));
   }
   const data = JSON.parse(readFileSync(path, 'utf8'));
   log.debug('load', 'снимок прочитан', { path, keys: Object.keys(data).length });
@@ -91,7 +93,7 @@ export function load({ kind, pageid, recordid }, opts) {
  */
 export function importDump(dump, opts) {
   const pageid = String(dump.pageid);
-  if (!pageid || pageid === 'undefined') throw new Error('importDump: в дампе нет pageid');
+  if (!pageid || pageid === 'undefined') throw new ToolError('BAD_DUMP', msg('snapshot.dumpNoPageid'));
   const source = `snapshotPage ${dump.at || ''}`.trim();
   let zero = 0;
   let records = 0;

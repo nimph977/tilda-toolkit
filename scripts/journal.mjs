@@ -14,6 +14,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 
 import { join, basename, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { createLogger } from './lib/log.mjs';
+import { ToolError } from './lib/tool-error.mjs';
+import { msg, isMessage, messageText } from './lib/i18n.mjs';
 import { baselineDir, repoRoot } from './lib/paths.mjs';
 
 const log = createLogger('journal');
@@ -44,6 +46,14 @@ export function planSlug(planPath, plan) {
   if (plan && plan.name) return String(plan.name);
   if (planPath) return basename(planPath).replace(/\.json$/i, '');
   return 'plan';
+}
+
+/**
+ * Расхождения verify как данные для файла: `problem` — английский текст, а не `Message`
+ * (в файл идёт один язык, перевод остаётся только в итоге команды).
+ */
+export function verifyData(problems) {
+  return (problems || []).map((p) => (isMessage(p.problem) ? { ...p, problem: messageText(p.problem) } : p));
 }
 
 /**
@@ -100,7 +110,7 @@ export function buildRecord({ plan, planPath, payloads, summary, before = {}, at
     blocks,
     ops,
     written: summary.written,
-    verify: summary.verify || [],
+    verify: verifyData(summary.verify),
   };
   const incomplete = ops.filter((o) => o.from === null || o.from === undefined);
   if (incomplete.length) log.warn('buildRecord', 'запись журнала неполна: у части операций нет from', { ops: incomplete.map((o) => `${o.kind}:${o.recordid || o.id}`) });
@@ -121,9 +131,9 @@ export function writeRecord(record, opts = {}) {
 
 export function readRecord(path) {
   const p = resolve(path);
-  if (!existsSync(p)) throw new Error(`запись журнала не найдена: ${p}`);
+  if (!existsSync(p)) throw new ToolError('JOURNAL_NOT_FOUND', msg('journal.recordNotFound', { path: p }));
   const record = JSON.parse(readFileSync(p, 'utf8'));
-  if (record.format !== JOURNAL_FORMAT) throw new Error(`неизвестный формат журнала ${record.format} (ожидается ${JOURNAL_FORMAT})`);
+  if (record.format !== JOURNAL_FORMAT) throw new ToolError('BAD_JOURNAL_FORMAT', msg('journal.unknownFormat', { format: record.format, expected: JOURNAL_FORMAT }));
   return record;
 }
 
@@ -159,7 +169,7 @@ export function reversePlan(record) {
       for (const c of op.changes) {
         if (c.elem_id && added.has(String(c.elem_id))) continue;
         if (c.elem_id && (op.removed || []).includes(String(c.elem_id))) {
-          skipped.push({ kind: 'zero', recordid: op.recordid, key: c.key, field: c.field, reason: 'удалённый элемент не восстанавливается' });
+          skipped.push({ kind: 'zero', recordid: op.recordid, key: c.key, field: c.field, reason: msg('journal.skip.removedElement') });
           continue;
         }
         if (!c.elem_id && c.field === '' && c.from !== undefined && c.from !== null && typeof c.from !== 'object') {
@@ -168,7 +178,7 @@ export function reversePlan(record) {
           continue;
         }
         if (c.from === undefined || c.from === null || !c.elem_id) {
-          skipped.push({ kind: 'zero', recordid: op.recordid, key: c.key, field: c.field, reason: !c.elem_id ? 'структурный ключ блока' : 'нет from' });
+          skipped.push({ kind: 'zero', recordid: op.recordid, key: c.key, field: c.field, reason: !c.elem_id ? msg('journal.skip.structuralKey') : msg('journal.skip.noFrom') });
           continue;
         }
         if (!byElem.has(c.elem_id)) byElem.set(c.elem_id, {});
@@ -178,39 +188,37 @@ export function reversePlan(record) {
       if (Object.keys(blockSet).length) ops.push({ block: { recordid: op.recordid }, blockSet });
     } else if (op.kind === 'record') {
       if (op.from === null || op.from === undefined) {
-        skipped.push({ kind: 'record', recordid: op.recordid, field: op.field, reason: 'нет from' });
+        skipped.push({ kind: 'record', recordid: op.recordid, field: op.field, reason: msg('journal.skip.noFrom') });
         continue;
       }
       ops.push({ block: { recordid: op.recordid }, field: { name: op.field, value: op.from } });
     } else if (op.kind === 'list') {
       if (!Array.isArray(op.from)) {
-        skipped.push({ kind: 'list', recordid: op.recordid, reason: 'нет from' });
+        skipped.push({ kind: 'list', recordid: op.recordid, reason: msg('journal.skip.noFrom') });
         continue;
       }
       // Полная замена состава карточек прежним — порядок, lid и тексты возвращаются как были.
       ops.push({ block: { recordid: op.recordid }, listSet: { cards: op.from } });
     } else if (op.kind === 'sort') {
       if (!Array.isArray(op.from)) {
-        skipped.push({ kind: 'sort', recordid: 'страница', reason: 'нет from' });
+        skipped.push({ kind: 'sort', recordid: 'page', reason: msg('journal.skip.noFrom') });
         continue;
       }
       ops.push({ setOrder: op.from });
     } else if (op.kind === 'block') {
       if (op.from === null || op.from === undefined) {
-        skipped.push({ kind: 'block', recordid: op.recordid, reason: 'нет from' });
+        skipped.push({ kind: 'block', recordid: op.recordid, reason: msg('journal.skip.noFrom') });
         continue;
       }
       ops.push({ block: { recordid: op.recordid }, blockHidden: op.from });
     } else if (op.kind === 'create') {
-      skipped.push({ kind: 'create', id: op.id, recordid: op.recordid, reason: 'созданный блок удаляется человеком кнопкой' });
+      skipped.push({ kind: 'create', id: op.id, recordid: op.recordid, reason: msg('journal.skip.createdBlock') });
     }
   }
-  if (skipped.length) log.warn('reversePlan', 'часть операций не откатывается', { skipped: skipped.map((s) => `${s.kind}:${s.recordid || s.id}${s.field ? '.' + s.field : ''} (${s.reason})`) });
+  if (skipped.length) log.warn('reversePlan', 'часть операций не откатывается', { skipped: skipped.map((s) => `${s.kind}:${s.recordid || s.id}${s.field ? '.' + s.field : ''} (${messageText(s.reason)})`) });
   if (ops.length === 0) {
     log.error('reversePlan', 'откат невозможен: ни одной операции с from', { record: record.at, plan: record.plan.name });
-    const e = new Error(`ROLLBACK_IMPOSSIBLE: в записи ${record.plan.name} (${record.at}) нет ни одной обратимой операции`);
-    e.code = 'ROLLBACK_IMPOSSIBLE';
-    throw e;
+    throw new ToolError('ROLLBACK_IMPOSSIBLE', msg('journal.rollbackImpossible', { name: record.plan.name, at: record.at }));
   }
   // Обратный план пишет поля ровно как в журнале: изменённые -res-* варианты там перечислены явно,
   // а неизменённые пересчитывать нельзя (2026-09-11: откат картинки масштабировал height-res-*).

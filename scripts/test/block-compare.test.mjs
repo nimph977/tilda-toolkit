@@ -26,25 +26,47 @@ test('compareBlock names a value that differs, a missing map and a substitute', 
   assert.equal(c.score, 0.25);
   assert.ok(c.reasons.includes(COMPARE_REASONS.valueDiffers + ' ×2'), JSON.stringify(c.reasons));
   assert.ok(c.reasons.includes(COMPARE_REASONS.markupDiffers));
+  assert.deepEqual([...c.reasonCodes].sort(), ['markupDiffers', 'valueDiffers']);
+  assert.deepEqual(c.reasonItems.find((i) => i.code === 'valueDiffers'), { code: 'valueDiffers', params: {}, count: 2 });
+  assert.deepEqual(c.reasonItems.find((i) => i.code === 'markupDiffers'), { code: 'markupDiffers', params: {}, count: 1 });
   assert.deepEqual(compareBlock(ref, built, { map: null }).reasons, [COMPARE_REASONS.noMap]);
+  assert.deepEqual(compareBlock(ref, built, { map: null }).reasonCodes, ['noMap']);
   assert.deepEqual(compareBlock(ref, built, { substituted: { from: '770', to: '3535' } }).reasons, [COMPARE_REASONS.substituted('770', '3535')]);
+  assert.deepEqual(compareBlock(ref, built, { substituted: { from: '770', to: '3535' } }).reasonCodes, ['substituted']);
   assert.deepEqual(compareBlock(ref, { features: ref.features }, { map }).reasons, []);
+  assert.deepEqual(compareBlock(ref, { features: ref.features }, { map }).reasonCodes, []);
 });
 
-test('renderCompareReport lists not built blocks and carries no long numbers', () => {
-  const md = renderCompareReport({
-    label: 'P00',
-    rows: [
-      { order: 1, tplid: '686', common: 3, refOnly: 1, builtOnly: 0, score: 0.75, reasons: [COMPARE_REASONS.valueDiffers] },
-      { order: 2, tplid: '746', notBuilt: 'содержимое вне полей field= — не переносится' },
-    ],
-    builtOnly: [{ tplid: '212' }],
-    at: '2026-01-01',
-  });
+const REPORT_INPUT = {
+  label: 'P00',
+  rows: [
+    { order: 1, tplid: '686', common: 3, refOnly: 1, builtOnly: 0, score: 0.75, reasons: [COMPARE_REASONS.valueDiffers], reasonItems: [{ code: 'valueDiffers', params: {}, count: 2 }, { code: 'undecided', params: { field: 'blocks' }, count: 1 }] },
+    { order: 2, tplid: '746', notBuilt: 'content outside the field= fields is not transferred' },
+  ],
+  builtOnly: [{ tplid: '212' }],
+  at: '2026-01-01',
+};
+
+test('renderCompareReport in Russian lists not built blocks and carries no long numbers', () => {
+  const md = renderCompareReport({ ...REPORT_INPUT, lang: 'ru' });
   assert.match(md, /# Сверка разметки P00/);
-  assert.match(md, /блок не собран: содержимое вне полей/);
+  assert.match(md, /Снято: 2026-01-01\./);
+  assert.match(md, /<!-- taken-at: 2026-01-01 -->/);
+  assert.match(md, /блок не собран: content outside/);
+  assert.match(md, /значение настройки отличается ×2; настройка blocks не распознана картой/);
   assert.match(md, /Средняя доля совпавших признаков: 75%/);
   assert.doesNotMatch(md, /\b\d{7,10}\b/);
+});
+
+test('renderCompareReport in English has no Cyrillic and translates the reasons by code', () => {
+  const md = renderCompareReport({ ...REPORT_INPUT, lang: 'en' });
+  assert.match(md, /# Markup comparison P00/);
+  assert.match(md, /the block is not built: content outside/);
+  assert.match(md, /the setting value differs ×2; setting blocks is not recognized by the map/);
+  assert.doesNotMatch(md, /[А-Яа-яЁё]/);
+  const plain = renderCompareReport({ label: 'P01', rows: [{ order: 1, tplid: '30', common: 1, refOnly: 0, builtOnly: 0, score: 1, reasons: ['old text'] }] });
+  assert.match(plain, /old text/, 'строка без reasonItems выводится как записана');
+  assert.doesNotMatch(plain, /taken-at/, 'без времени метки нет');
 });
 
 test('builtBlocksFromHtml takes content records of the preview and drops header and footer zones', () => {

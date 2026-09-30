@@ -9,6 +9,7 @@
  */
 import { createLogger } from './lib/log.mjs';
 import { decodeEntities } from './lib/entities.mjs';
+import { msg, messageText } from './lib/i18n.mjs';
 
 const log = createLogger('link-check');
 
@@ -67,7 +68,7 @@ async function probe(url, { timeoutMs, fetchImpl }) {
     if ([400, 403].includes(r.status)) r = await doFetch(url, { method: 'GET', redirect: 'manual', signal: ctrl.signal });
     return { status: r.status, location: r.headers.get('location') || undefined };
   } catch (e) {
-    return { status: 0, error: e.name === 'AbortError' ? `таймаут ${timeoutMs} мс` : e.message };
+    return { status: 0, error: e.name === 'AbortError' ? msg('linkCheck.note.timeout', { ms: timeoutMs }) : e.message };
   } finally {
     clearTimeout(timer);
   }
@@ -84,16 +85,16 @@ export async function checkUrls(items, opts = {}) {
       const i = next++;
       const it = items[i];
       if (it.internal) {
-        results[i] = { ...it, status: null, level: 'internal', note: 'страница сайта в режиме предпросмотра — снаружи не проверяется' };
+        results[i] = { ...it, status: null, level: 'internal', note: msg('linkCheck.note.internal') };
         continue;
       }
       const r = await probe(it.url, { timeoutMs, fetchImpl: opts.fetchImpl });
       const level = r.status >= 200 && r.status < 300 ? 'ok' : (r.status >= 300 && r.status < 400) || r.status === 403 ? 'warn' : 'error';
-      results[i] = { ...it, status: r.status, level, note: r.error || (r.status === 403 ? '403 — возможно защита от ботов, проверить руками' : r.location ? `→ ${r.location}` : '') };
+      results[i] = { ...it, status: r.status, level, note: r.error || (r.status === 403 ? msg('linkCheck.note.botProtection') : r.location ? `→ ${r.location}` : '') };
       const line = `${it.kind} ${r.status} ${it.url}`;
       if (level === 'ok') log.debug('checkUrls', line, {});
       else if (level === 'warn') log.warn('checkUrls', `редирект: ${line}`, { location: r.location });
-      else log.error('checkUrls', `битый адрес: ${line}`, { error: r.error });
+      else log.error('checkUrls', `битый адрес: ${line}`, { error: r.error && messageText(r.error) });
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
@@ -112,7 +113,13 @@ export function summarize(results) {
     brokenImages: by('image', 'error'),
     brokenAssets: by('asset', 'error'),
     warnings: results.filter((x) => x.level === 'warn').length,
-    broken: results.filter((x) => x.level === 'error').slice(0, 20).map((x) => `${x.kind} ${x.status} ${x.url}${x.note ? ' — ' + x.note : ''}`),
-    warned: results.filter((x) => x.level === 'warn').slice(0, 10).map((x) => `${x.kind} ${x.status} ${x.url}${x.note ? ' — ' + x.note : ''}`),
+    broken: results.filter((x) => x.level === 'error').slice(0, 20).map(resultLine),
+    warned: results.filter((x) => x.level === 'warn').slice(0, 10).map(resultLine),
   };
+}
+
+/** Строка сводки об одном адресе; примечание — `Message` или готовый текст (ответ сервера, адрес перенаправления). */
+function resultLine(x) {
+  const params = { kind: x.kind, status: x.status, url: x.url, note: x.note };
+  return x.note ? msg('linkCheck.lineNote', params) : msg('linkCheck.line', params);
 }

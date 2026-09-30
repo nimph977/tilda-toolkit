@@ -11,6 +11,7 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createLogger } from './lib/log.mjs';
+import { attachMessage, messageText, msg } from './lib/i18n.mjs';
 import { extractFeatures, diffFeatures } from './lib/markup-features.mjs';
 import { normalizeSchema } from './lib/settings-schema.mjs';
 import { probeVariants, sampleContent, buildSettingsMap } from './lib/settings-calibration.mjs';
@@ -42,7 +43,9 @@ export function toFieldList(fields) {
 
 class CalibrationError extends Error {
   constructor(code, message) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
+    this.name = 'CalibrationError';
     this.code = code;
   }
 }
@@ -75,15 +78,15 @@ export async function calibrateCatalog(
     const tplid = String(raw);
     const entry = loadCatalog(tplid, opts);
     if (!entry) {
-      result.skipped.push({ tplid, reason: 'каталог не снят' });
+      result.skipped.push({ tplid, reason: msg('calibrate.reason.catalogNotCaptured') });
       continue;
     }
     if (entry.available === false) {
-      result.skipped.push({ tplid, reason: 'шаблон недоступен' });
+      result.skipped.push({ tplid, reason: msg('calibrate.reason.templateUnavailable') });
       continue;
     }
     if (!force && hasSettingsMap(tplid, opts)) {
-      result.skipped.push({ tplid, reason: 'уже откалиброван' });
+      result.skipped.push({ tplid, reason: msg('calibrate.reason.alreadyCalibrated') });
       continue;
     }
     const started = Date.now();
@@ -130,7 +133,7 @@ export async function calibrateCatalog(
           failed.push({ field: v.field, key: v.key, error: e.code || String(e.message).slice(0, 60) });
           failuresInRow += 1;
           log.warn('calibrateCatalog', 'предпросмотр не получен', { tplid, field: v.field, key: v.key, error: String(e.message).slice(0, 120) });
-          if (failuresInRow > MAX_PREVIEW_FAILURES) throw new CalibrationError('PREVIEW_FAILED', `больше ${MAX_PREVIEW_FAILURES} отказов предпросмотра подряд`);
+          if (failuresInRow > MAX_PREVIEW_FAILURES) throw new CalibrationError('PREVIEW_FAILED', msg('calibrate.previewFailed', { max: MAX_PREVIEW_FAILURES }));
         }
       }
       const map = buildSettingsMap({ tplid, schema, baseFeatures, observations, current: base, noiseFeatures, failed, skipped, now: now() });

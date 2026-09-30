@@ -34,7 +34,7 @@
     const text = await r.text();
     if (looksLikeHtml(text)) {
       const head = text.slice(0, 12);
-      LOG('error', 'post', 'SESSION_LOST: вместо данных пришёл HTML (<!--tlp--> = страница логина, <!--tpbaa--> = чужой аккаунт)', { url, status: r.status, head });
+      LOG('error', 'post', 'SESSION_LOST: got HTML instead of data (<!--tlp--> = login page, <!--tpbaa--> = another account)', { url, status: r.status, head });
       throw new Error(`SESSION_LOST ${url} status=${r.status} head=${JSON.stringify(head)}`);
     }
     return { status: r.status, text };
@@ -43,11 +43,11 @@
   const assertWritable = (pageid, fn) => {
     if (!Array.isArray(T.protectedPages)) throw new Error('CONFIG_ERROR protected pages are not configured');
     if (T.protectedPages.includes(String(pageid))) {
-      LOG('error', fn, 'запись в защищённую страницу запрещена', { pageid, protectedPages: T.protectedPages });
+      LOG('error', fn, 'write to a protected page is forbidden', { pageid, protectedPages: T.protectedPages });
       throw new Error(`PROTECTED_PAGE ${pageid}`);
     }
     if (Array.isArray(T.writablePages) && !T.writablePages.includes(String(pageid))) {
-      LOG('error', fn, 'запись разрешена только в явно перечисленные страницы', { pageid, writablePages: T.writablePages });
+      LOG('error', fn, 'write is allowed only to explicitly listed pages', { pageid, writablePages: T.writablePages });
       throw new Error(`WRITE_NOT_ALLOWED ${pageid}`);
     }
   };
@@ -75,23 +75,23 @@
         preview: (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60),
       };
     });
-    LOG('info', 'listRecords', 'инвентарь собран', { records: list.length, zero: zeroIndex, hidden: list.filter((r) => r.hidden).length, pageid: window.pageid });
+    LOG('info', 'listRecords', 'inventory built', { records: list.length, zero: zeroIndex, hidden: list.filter((r) => r.hidden).length, pageid: window.pageid });
     return list;
   };
 
   /** Читает модель Zero Block. */
   T.getZero = async (pageid, recordid) => {
     pageid = String(pageid || window.pageid);
-    LOG('debug', 'getZero', 'запрос', { pageid, recordid });
+    LOG('debug', 'getZero', 'request', { pageid, recordid });
     const { text } = await post('/zero/get/', { comm: 'getzerocode', pageid, recordid });
     let model;
     try {
       model = JSON.parse(text);
     } catch (e) {
-      LOG('error', 'getZero', 'ответ не JSON', { pageid, recordid, head: text.slice(0, 120) });
+      LOG('error', 'getZero', 'response is not JSON', { pageid, recordid, head: text.slice(0, 120) });
       throw new Error(`BAD_JSON getzerocode ${recordid}`);
     }
-    LOG('debug', 'getZero', 'модель получена', { recordid, keys: Object.keys(model).length, elemIds: elemIds(model) });
+    LOG('debug', 'getZero', 'model received', { recordid, keys: Object.keys(model).length, elemIds: elemIds(model) });
     return model;
   };
 
@@ -118,28 +118,28 @@
   T.saveZero = async (pageid, recordid, model, opts = {}) => {
     pageid = String(pageid || window.pageid);
     assertWritable(pageid, 'saveZero');
-    if (!model || typeof model !== 'object') throw new Error('saveZero: модель должна быть объектом');
+    if (!model || typeof model !== 'object') throw new Error('BAD_ARGUMENT: saveZero needs the model to be an object');
     const code = typeof model === 'string' ? model : JSON.stringify(model);
     if (/<script/i.test(code)) {
-      LOG('error', 'saveZero', 'отказ: модель содержит <script', { pageid, recordid });
-      throw new Error('SCRIPT_REJECTED: модель содержит <script');
+      LOG('error', 'saveZero', 'refused: model contains <script', { pageid, recordid });
+      throw new Error('SCRIPT_REJECTED: the model contains <script');
     }
     if (!opts.allowFormFields) {
       const current = await T.getZero(pageid, recordid);
       const changed = formFieldChanges(current, model);
       if (changed.length) {
-        LOG('warn', 'saveZero', 'отказ: запись меняет поля формы', { pageid, recordid, changed, path: 'saveZero' });
+        LOG('warn', 'saveZero', 'refused: write changes form fields', { pageid, recordid, changed, path: 'saveZero' });
         throw new Error(`FORM_FIELD_REJECTED ${recordid}: ${changed.join(', ')}`);
       }
     } else {
-      LOG('warn', 'saveZero', 'поля формы переносятся как есть (копия блока)', { pageid, recordid });
+      LOG('warn', 'saveZero', 'form fields are carried over as is (block copy)', { pageid, recordid });
     }
-    LOG('debug', 'saveZero', 'запись', { pageid, recordid, keys: Object.keys(model).length, elemIds: elemIds(model), bytes: code.length });
+    LOG('debug', 'saveZero', 'write', { pageid, recordid, keys: Object.keys(model).length, elemIds: elemIds(model), bytes: code.length });
     const { text, status } = await post('/zero/submit/', {
       comm: 'savezerocode', pageid, recordid, onlythisfield: 'code', fromzero: 'yes', code,
     });
     if (text.trim() !== 'OK') {
-      LOG('error', 'saveZero', 'ответ не OK', { pageid, recordid, status, body: text.slice(0, 200) });
+      LOG('error', 'saveZero', 'response is not OK', { pageid, recordid, status, body: text.slice(0, 200) });
       throw new Error(`SAVE_FAILED savezerocode ${recordid}: ${text.slice(0, 200)}`);
     }
     LOG('info', 'saveZero', 'OK', { pageid, recordid });
@@ -158,26 +158,26 @@
     const want = hidden === true || hidden === 'y' ? 'y' : 'n';
     const el = document.getElementById(`record${recordid}`);
     if (!el) {
-      LOG('error', 'setBlockHidden', 'блок не найден в DOM редактора', { recordid });
+      LOG('error', 'setBlockHidden', 'block not found in the editor DOM', { recordid });
       throw new Error(`NO_RECORD_IN_DOM ${recordid}`);
     }
     const before = el.getAttribute('off') === 'y' ? 'y' : 'n';
     if (before === want) {
-      LOG('info', 'setBlockHidden', 'уже в нужном состоянии, запрос не нужен', { recordid, hidden: want });
+      LOG('info', 'setBlockHidden', 'already in the required state, no request needed', { recordid, hidden: want });
       return { before, after: want, toggled: false };
     }
     const { text, status } = await post('/page/submit/', { comm: 'offrecord', pageid, recordid });
     const answer = text.trim();
     // Ответ редактора: '', 'y', 'n', 'on', 'off'; иное — текст ошибки.
     if (!['', 'y', 'n', 'on', 'off'].includes(answer)) {
-      LOG('error', 'setBlockHidden', 'ответ не распознан', { recordid, status, body: answer.slice(0, 200) });
+      LOG('error', 'setBlockHidden', 'response not recognized', { recordid, status, body: answer.slice(0, 200) });
       throw new Error(`SAVE_FAILED offrecord ${recordid}: ${answer.slice(0, 200)}`);
     }
     const after = answer === '' ? want : answer === 'y' || answer === 'off' ? 'y' : 'n';
     el.setAttribute('off', after);
     if (after !== want) {
-      LOG('error', 'setBlockHidden', 'состояние после переключения не совпало с ожидаемым', { recordid, want, after, answer });
-      throw new Error(`TOGGLE_MISMATCH ${recordid}: хотели ${want}, получили ${after}`);
+      LOG('error', 'setBlockHidden', 'state after toggling does not match the expected one', { recordid, want, after, answer });
+      throw new Error(`TOGGLE_MISMATCH ${recordid}: wanted ${want}, got ${after}`);
     }
     LOG('info', 'setBlockHidden', 'OK', { pageid, recordid, before, after });
     return { before, after, toggled: true };
@@ -196,26 +196,26 @@
     dstPageid = String(dstPageid || window.pageid);
     assertWritable(dstPageid, 'copyZero');
     if (typeof T.addRecord !== 'function') {
-      LOG('error', 'copyZero', 'нет T.addRecord: установите scripts/browser/tilda-page.js', {});
-      throw new Error('NO_ADD_RECORD: сначала установите tilda-page.js');
+      LOG('error', 'copyZero', 'T.addRecord is missing: install scripts/browser/tilda-page.js', {});
+      throw new Error('NO_ADD_RECORD: install tilda-page.js first');
     }
     const model = await T.getZero(srcPageid, srcRecordid);
     const { recordid } = await T.addRecord(dstPageid, '396', afterid);
     try {
       await T.saveZero(dstPageid, recordid, model, { allowFormFields: true });
     } catch (e) {
-      LOG('error', 'copyZero', 'модель не записалась, удаляю созданный блок', { dstPageid, recordid, error: String(e.message).slice(0, 160) });
+      LOG('error', 'copyZero', 'model was not written, deleting the created block', { dstPageid, recordid, error: String(e.message).slice(0, 160) });
       try {
         await T.deleteRecord(dstPageid, recordid);
       } catch (delErr) {
-        LOG('error', 'copyZero', 'созданный блок остался на странице, убрать вручную', { dstPageid, recordid, error: String(delErr.message).slice(0, 120) });
+        LOG('error', 'copyZero', 'created block was left on the page, remove it manually', { dstPageid, recordid, error: String(delErr.message).slice(0, 120) });
       }
       throw e;
     }
-    LOG('info', 'copyZero', 'Zero Block скопирован', { srcPageid, srcRecordid, dstPageid, recordid, keys: Object.keys(model).length, elems: elemIds(model).length });
+    LOG('info', 'copyZero', 'Zero Block copied', { srcPageid, srcRecordid, dstPageid, recordid, keys: Object.keys(model).length, elems: elemIds(model).length });
     return { recordid, tplid: '396', keys: Object.keys(model).length, elemIds: elemIds(model) };
   };
 
-  LOG('info', 'install', 'API установлен', { pageid: window.pageid, projectid: window.projectid, protectedPages: T.protectedPages });
+  LOG('info', 'install', 'API installed', { pageid: window.pageid, projectid: window.projectid, protectedPages: T.protectedPages });
   return { installed: ['listRecords', 'getZero', 'saveZero', 'setBlockHidden', 'copyZero'], pageid: window.pageid, projectid: window.projectid };
 }

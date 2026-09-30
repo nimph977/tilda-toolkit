@@ -53,8 +53,9 @@ test('parseRoleArg keeps ids, turns none into empty and leaves undefined alone',
 test('validateRoles rejects pages outside the options and one page for both roles', () => {
   const s = settings('', '');
   assert.deepEqual(validateRoles({ header: '100002', footer: '' }, s), []);
-  assert.match(validateRoles({ header: '100009' }, s)[0], /^NOT_IN_OPTIONS/);
-  assert.match(validateRoles({ header: '100002', footer: '100002' }, s)[0], /^SAME_PAGE/);
+  assert.equal(validateRoles({ header: '100009' }, s)[0].key, 'pageRole.notInHeaders');
+  assert.deepEqual(validateRoles({ header: '100009' }, s)[0].params, { value: '100009' });
+  assert.equal(validateRoles({ header: '100002', footer: '100002' }, s)[0].key, 'pageRole.sameHeaderFooter');
   assert.deepEqual(validateRoles({ header: '' }, { headerOptions: null }), []);
 });
 
@@ -105,7 +106,9 @@ test('assignPageRoles reports a failed save and a role that did not apply', () =
     const stale = fakeDriver([settings('', ''), settings('', '')]);
     await assert.rejects(assignPageRoles(stale, { header: '100002', confirmed: true, projectid: '100001', recordDir: dir }), (e) => e.code === 'ROLE_NOT_APPLIED');
     const invalid = fakeDriver([settings('', '')]);
-    await assert.rejects(assignPageRoles(invalid, { header: '100009', confirmed: true, projectid: '100001', recordDir: dir }), (e) => e.code === 'ROLE_INVALID');
+    await assert.rejects(assignPageRoles(invalid, { header: '100009', confirmed: true, projectid: '100001', recordDir: dir }), (e) => e.code === 'ROLE_INVALID' && e.key === 'pageRole.notInHeaders');
+    const many = fakeDriver([settings('', '')]);
+    await assert.rejects(assignPageRoles(many, { header: '100009', footer: '100009', confirmed: true, projectid: '100001', recordDir: dir }), (e) => e.code === 'ROLE_INVALID' && e.key === 'pageRole.invalidJoin' && /^NOT_IN_OPTIONS: .*; NOT_IN_OPTIONS: .*; SAME_PAGE/.test(e.message));
     assert.ok(!invalid.calls.some((c) => c.fn === 'setPageRoles'));
   }));
 
@@ -127,10 +130,11 @@ const indexSettings = (indexpageid, fingerprints = { sitename: 'aaaa', indexpage
 test('validateRoles checks the index page against its options and the current header and footer', () => {
   const s = indexSettings('100004');
   assert.deepEqual(validateRoles({ index: '100005' }, s), []);
-  assert.match(validateRoles({ index: '100009' }, s)[0], /^NOT_IN_OPTIONS/);
-  assert.match(validateRoles({ index: '' }, s)[0], /^NOT_IN_OPTIONS/);
-  assert.match(validateRoles({ index: '100002' }, s).join(' '), /SAME_PAGE/);
-  assert.match(validateRoles({ index: '100005' }, { ...s, indexOptions: null })[0], /^NOT_IN_OPTIONS/);
+  assert.equal(validateRoles({ index: '100009' }, s)[0].key, 'pageRole.notInIndexes');
+  assert.equal(validateRoles({ index: '' }, s)[0].key, 'pageRole.indexRequired');
+  assert.deepEqual(validateRoles({ index: '100002' }, s).map((m) => m.key), ['pageRole.indexIsHeader']);
+  assert.deepEqual(validateRoles({ index: '100003' }, s).map((m) => m.key), ['pageRole.notInIndexes', 'pageRole.indexIsFooter']);
+  assert.equal(validateRoles({ index: '100005' }, { ...s, indexOptions: null })[0].key, 'pageRole.notInIndexes');
 });
 
 test('assignPageRoles sets the index page, rereads it and offers a rollback to the old one', () =>
@@ -183,5 +187,20 @@ test('assignPageRoles leaves the index page alone when it is already set and rep
     assert.equal(r.changed, false);
     assert.ok(!same.calls.some((c) => c.fn === 'setPageRoles'));
     const stale = fakeDriver([indexSettings('100004'), indexSettings('100004')]);
-    await assert.rejects(assignPageRoles(stale, { index: '100005', confirmed: true, projectid: '100001', recordDir: dir }), (e) => e.code === 'ROLE_NOT_APPLIED' && /главная 100004/.test(e.message));
+    await assert.rejects(assignPageRoles(stale, { index: '100005', confirmed: true, projectid: '100001', recordDir: dir }), (e) => e.code === 'ROLE_NOT_APPLIED' && e.key === 'pageRole.notApplied' && e.params.got.key === 'pageRole.gotIndex' && e.params.got.params.index === '100004');
+  }));
+
+test('assignPageRoles returns the settings count and the missing rollback as messages, and writes English text to the record', () =>
+  withDir(async (dir) => {
+    const driver = fakeDriver([
+      indexSettings('', { sitename: 'aaaa', indexpageid: 'i0' }),
+      indexSettings('100005', { sitename: 'aaaa', indexpageid: 'i1', extra: 'zz' }),
+    ]);
+    const r = await assignPageRoles(driver, { index: '100005', confirmed: true, projectid: '100001', recordDir: dir });
+    assert.equal(r.otherChanged[0], 'extra');
+    assert.equal(r.otherChanged[1].key, 'pageRole.settingsCount');
+    assert.deepEqual(r.otherChanged[1].params, { before: 2, after: 3 });
+    assert.equal(r.rollback.key, 'pageRole.noPreviousIndex');
+    const saved = JSON.parse(readFileSync(r.record, 'utf8'));
+    assert.deepEqual(saved.otherChanged, ['extra', '<settings count 2 → 3>']);
   }));

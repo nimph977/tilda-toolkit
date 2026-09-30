@@ -29,7 +29,7 @@
     const publickey = window.Tildaupload_PUBLICKEY;
     const uploadkey = window.Tildaupload_UPLOADKEY;
     if (!publickey || !uploadkey) {
-      LOG('error', 'keys', 'на странице нет ключей загрузки — открыт ли редактор страницы?', {
+      LOG('error', 'keys', 'no upload keys on the page, is the page editor open?', {
         hasPublicKey: !!publickey, hasUploadKey: !!uploadkey,
       });
       throw new Error('NO_UPLOAD_KEYS');
@@ -43,7 +43,7 @@
     const fd = new FormData();
     fd.append('file', blob, filename);
     const target = `${url}?publickey=${encodeURIComponent(publickey)}&uploadkey=${encodeURIComponent(uploadkey)}`;
-    LOG('debug', 'post', 'загрузка файла', { filename, bytes: blob.size, type: blob.type, endpoint: url });
+    LOG('debug', 'post', 'uploading file', { filename, bytes: blob.size, type: blob.type, endpoint: url });
     const r = await fetch(target, {
       method: 'POST',
       body: fd,
@@ -51,23 +51,23 @@
     });
     const text = await r.text();
     if (r.status === 403) {
-      LOG('error', 'post', '403 при загрузке: ключи устарели либо запрос ушёл не со страницы редактора (заголовок Origin)', { status: r.status, body: text.slice(0, 200) });
+      LOG('error', 'post', '403 on upload: keys are stale or the request did not come from the editor page (Origin header)', { status: r.status, body: text.slice(0, 200) });
       throw new Error(`UPLOAD_FORBIDDEN ${r.status}`);
     }
     let data;
     try {
       data = JSON.parse(text);
     } catch (e) {
-      LOG('error', 'post', 'ответ не JSON (страница логина?)', { status: r.status, head: text.slice(0, 120) });
+      LOG('error', 'post', 'response is not JSON (login page?)', { status: r.status, head: text.slice(0, 120) });
       throw new Error(`UPLOAD_BAD_JSON ${r.status}`);
     }
     const item = data && data.result && data.result[0];
     if (data.errorExists || !item || !item.cdnUrl) {
-      LOG('error', 'post', 'загрузка не удалась', { status: r.status, body: text.slice(0, 200) });
+      LOG('error', 'post', 'upload failed', { status: r.status, body: text.slice(0, 200) });
       throw new Error(`UPLOAD_FAILED ${text.slice(0, 200)}`);
     }
     const out = { cdnUrl: item.cdnUrl, width: item.width, height: item.height, size: item.size, ext: item.ext, uuid: item.uuid };
-    LOG('info', 'post', 'загружено', out);
+    LOG('info', 'post', 'uploaded', out);
     return out;
   };
 
@@ -77,14 +77,14 @@
    * cdnUrl → img, width → filewidth, height → fileheight.
    */
   T.uploadImageFromDataUrl = async (dataUrl, filename) => {
-    if (typeof dataUrl !== 'string' || !/^data:/.test(dataUrl)) throw new Error('uploadImageFromDataUrl: нужен data:-адрес');
+    if (typeof dataUrl !== 'string' || !/^data:/.test(dataUrl)) throw new Error('BAD_ARGUMENT: uploadImageFromDataUrl needs a data: URL');
     const blob = await (await fetch(dataUrl)).blob();
     const eps = endpoints();
     try {
       return await post(blob, filename || 'upload.png', eps.image);
     } catch (e) {
       if (/UPLOAD_FORBIDDEN|Failed to fetch|NetworkError/i.test(String(e.message))) {
-        LOG('warn', 'uploadImageFromDataUrl', 'основной адрес не ответил, пробую запасной', { fallback: eps.imageFallback });
+        LOG('warn', 'uploadImageFromDataUrl', 'primary address did not respond, trying the fallback', { fallback: eps.imageFallback });
         return post(blob, filename || 'upload.png', eps.imageFallback);
       }
       throw e;
@@ -101,13 +101,13 @@
     try {
       blob = await (await fetch(url, { mode: 'cors' })).blob();
     } catch (e) {
-      LOG('error', 'uploadImageFromUrl', 'не удалось скачать картинку из страницы редактора (CORS?) — передайте её как data:-адрес', { url: String(url).slice(0, 120), error: String(e.message) });
+      LOG('error', 'uploadImageFromUrl', 'could not download the image from the editor page (CORS?), pass it as a data: URL', { url: String(url).slice(0, 120), error: String(e.message) });
       throw new Error('SOURCE_FETCH_FAILED');
     }
     const name = filename || (String(url).split('/').pop() || 'upload.png').split('?')[0];
     return post(blob, name, endpoints().image);
   };
 
-  LOG('info', 'install', 'API загрузки установлен', { endpoints: endpoints(), hasKeys: !!(window.Tildaupload_PUBLICKEY && window.Tildaupload_UPLOADKEY) });
+  LOG('info', 'install', 'upload API installed', { endpoints: endpoints(), hasKeys: !!(window.Tildaupload_PUBLICKEY && window.Tildaupload_UPLOADKEY) });
   return { installed: ['uploadImageFromDataUrl', 'uploadImageFromUrl'], endpoints: endpoints() };
 }

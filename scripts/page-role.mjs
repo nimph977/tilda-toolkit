@@ -13,12 +13,13 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from './lib/log.mjs';
+import { attachMessage, messageText, msg } from './lib/i18n.mjs';
 import { baselineDir } from './lib/paths.mjs';
 
 const log = createLogger('page-role');
 
 /** Маркер подтверждения — тот же, что в scripts/browser/tilda-project.js (T.ROLE_CONFIRM). */
-export const ROLE_CONFIRM = 'назначить';
+export const ROLE_CONFIRM = 'assign';
 const HEADER_FIELDS = ['headerpageid', 'footerpageid'];
 const INDEX_FIELDS = ['indexpageid'];
 export const ROLE_FIELDS = [...HEADER_FIELDS, ...INDEX_FIELDS];
@@ -31,7 +32,8 @@ const INDEX_DERIVED = ['indexpagenotpublished'];
 
 export class PageRoleError extends Error {
   constructor(code, message) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
     this.name = 'PageRoleError';
     this.code = code;
     this.exitCode = 1;
@@ -46,31 +48,29 @@ export function parseRoleArg(value) {
 }
 
 /**
- * Ошибки проверки запрошенных ролей по списку опций страницы настроек.
+ * Ошибки проверки запрошенных ролей по списку опций страницы настроек — сообщения (`Message`).
  * NOT_IN_OPTIONS — страницы нет в списке (главная проекта или страница другого проекта);
  * SAME_PAGE — шапка и подвал одна страница, либо главная совпадает с текущей шапкой или подвалом.
  * Пустое значение шапки и подвала («снять») допустимо всегда; главную снять нельзя.
  */
 export function validateRoles({ header, footer, index }, settings) {
   const errors = [];
-  const check = (value, options, label) => {
+  const check = (value, options, notInList) => {
     if (value === undefined || value === '') return;
-    if (!Array.isArray(options) || !options.includes(String(value))) {
-      errors.push(`NOT_IN_OPTIONS: страницы ${value} нет в списке ${label} — главная проекта или страница другого проекта`);
-    }
+    if (!Array.isArray(options) || !options.includes(String(value))) errors.push(notInList(value));
   };
-  check(header, settings.headerOptions, 'шапок');
-  check(footer, settings.footerOptions, 'подвалов');
-  if (header && footer && String(header) === String(footer)) errors.push('SAME_PAGE: шапка и подвал — одна страница');
+  check(header, settings.headerOptions, (value) => msg('pageRole.notInHeaders', { value }));
+  check(footer, settings.footerOptions, (value) => msg('pageRole.notInFooters', { value }));
+  if (header && footer && String(header) === String(footer)) errors.push(msg('pageRole.sameHeaderFooter'));
   if (index !== undefined) {
     if (index === '') {
-      errors.push('NOT_IN_OPTIONS: главную страницу снять нельзя — укажите pageid');
+      errors.push(msg('pageRole.indexRequired'));
     } else {
       if (!Array.isArray(settings.indexOptions) || !settings.indexOptions.includes(String(index))) {
-        errors.push(`NOT_IN_OPTIONS: страницы ${index} нет в списке главных — страница другого проекта или вкладка «Главная страница» не открыта`);
+        errors.push(msg('pageRole.notInIndexes', { value: index }));
       }
-      const role = [[settings.headerpageid, 'шапка'], [settings.footerpageid, 'подвал']].find(([id]) => id && String(id) === String(index));
-      if (role) errors.push(`SAME_PAGE: страница ${index} — ${role[1]} проекта, главной она быть не может`);
+      if (settings.headerpageid && String(settings.headerpageid) === String(index)) errors.push(msg('pageRole.indexIsHeader', { value: index }));
+      else if (settings.footerpageid && String(settings.footerpageid) === String(index)) errors.push(msg('pageRole.indexIsFooter', { value: index }));
     }
   }
   return errors;
@@ -85,29 +85,32 @@ export function diffFingerprints(before = {}, after = {}, ignore = ROLE_FIELDS) 
 const pickFields = (s, fields) => Object.fromEntries(fields.map((f) => [f, s[f]]));
 const orNone = (v) => (v ? v : 'none');
 
-/** Команда отката: для главной — прежняя главная; главной не было — снять её командой нельзя. */
+/**
+ * Откат: строка-команда (`page role …`); для главной — прежняя главная, а если главной не было,
+ * снять её командой нельзя — тогда `Message` с объяснением для человека.
+ */
 function rollbackFor(before, indexMode) {
   if (!indexMode) return `page role --header ${orNone(before.headerpageid)} --footer ${orNone(before.footerpageid)} --confirm`;
   return before.indexpageid
     ? `page role --index ${before.indexpageid} --confirm`
-    : 'главной до назначения не было — снять её командой нельзя: настройки сайта, «Главное» → «Главная страница»';
+    : msg('pageRole.noPreviousIndex');
 }
 
 /**
  * Назначить роли. `driver` — `{ call, callWithResponse, reload }` над страницей настроек проекта
  * (для `index` — вкладка `ss_menu_index`). `protectedIds` — защищённые страницы: главной их не
  * назначить и не снять с роли главной.
- * @returns {Promise<{changed: boolean, before: object, after: object, otherChanged: string[], record: string|null, rollback: string}>}
+ * @returns {Promise<{changed: boolean, before: object, after: object, otherChanged: Array<string|Message>, record: string|null, rollback: string|Message}>}
  */
 export async function assignPageRoles(driver, { header, footer, index, confirmed, projectid, protectedIds = [], recordDir, now = () => new Date() } = {}) {
   if (confirmed !== true) {
     log.warn('assignPageRoles', 'назначение без подтверждения — отказ до обращения к браузеру');
-    throw new PageRoleError('ROLE_NOT_CONFIRMED', 'page role: нужен --confirm — назначение меняет шапку, подвал или главную всего сайта');
+    throw new PageRoleError('ROLE_NOT_CONFIRMED', msg('pageRole.notConfirmed'));
   }
   const indexMode = index !== undefined;
   if (indexMode && (header !== undefined || footer !== undefined)) {
     log.error('assignPageRoles', 'главная вместе с шапкой или подвалом — отказ', { header, footer, index });
-    throw new PageRoleError('ROLE_INVALID', 'главная назначается отдельно от шапки и подвала: поля на разных вкладках настроек');
+    throw new PageRoleError('ROLE_INVALID', msg('pageRole.indexSeparate'));
   }
   const fields = indexMode ? INDEX_FIELDS : HEADER_FIELDS;
   const pick = (s) => pickFields(s, fields);
@@ -116,7 +119,8 @@ export async function assignPageRoles(driver, { header, footer, index, confirmed
   const errors = validateRoles({ header, footer, index }, before);
   if (errors.length) {
     log.error('assignPageRoles', 'роли не прошли проверку', { errors });
-    throw new PageRoleError('ROLE_INVALID', errors.join('; '));
+    // Несколько причин склеиваются вложенными сообщениями: «первая; вторая».
+    throw new PageRoleError('ROLE_INVALID', errors.reduce((first, second) => msg('pageRole.invalidJoin', { first, second })));
   }
   const requested = indexMode
     ? { indexpageid: String(index) }
@@ -134,7 +138,7 @@ export async function assignPageRoles(driver, { header, footer, index, confirmed
     const hit = [requested.indexpageid, before.indexpageid].find((id) => id && guard.has(String(id)));
     if (hit) {
       log.error('assignPageRoles', 'главная затрагивает защищённую страницу — отказ до записи', { pageid: hit });
-      throw new PageRoleError('PROTECTED_PAGE', `страница ${hit} защищена (TILDA_PROTECTED_PAGES): главную с ней не меняем`);
+      throw new PageRoleError('PROTECTED_PAGE', msg('pageRole.protectedPage', { hit }));
     }
   }
 
@@ -152,7 +156,7 @@ export async function assignPageRoles(driver, { header, footer, index, confirmed
   const r = await driver.callWithResponse('setPageRoles', [args], { urlPart: '/projects/submit/', bodyPart: 'comm=saveprojectsettings' });
   if (String(r.text ?? '').trim() !== 'OK') {
     log.error('assignPageRoles', 'сервер ответил не OK', { status: r.status, bytes: String(r.text ?? '').length });
-    throw new PageRoleError('SAVE_FAILED', `настройки не сохранены: сервер ответил не OK (HTTP ${r.status}); запись для отката: ${record}`);
+    throw new PageRoleError('SAVE_FAILED', msg('pageRole.saveFailed', { status: r.status, record }));
   }
   log.info('assignPageRoles', 'роли записаны', requested);
 
@@ -160,14 +164,17 @@ export async function assignPageRoles(driver, { header, footer, index, confirmed
   const after = await driver.call('readProjectSettings');
   if (fields.some((f) => after[f] !== requested[f])) {
     log.error('assignPageRoles', 'роли после записи не совпали', { requested, after: pick(after) });
-    const got = indexMode ? `главная ${after.indexpageid || '—'}` : `шапка ${after.headerpageid || '—'}, подвал ${after.footerpageid || '—'}`;
-    throw new PageRoleError('ROLE_NOT_APPLIED', `после сохранения роли не совпали с запрошенными: ${got}`);
+    const got = indexMode
+      ? msg('pageRole.gotIndex', { index: after.indexpageid || '—' })
+      : msg('pageRole.gotHeaderFooter', { header: after.headerpageid || '—', footer: after.footerpageid || '—' });
+    throw new PageRoleError('ROLE_NOT_APPLIED', msg('pageRole.notApplied', { got }));
   }
   const ignore = indexMode ? [...fields, ...INDEX_DERIVED] : fields;
   const otherChanged = diffFingerprints(before.fingerprints, after.fingerprints, ignore);
   const counted = (s) => s.count - ignore.filter((n) => Object.hasOwn(s.fingerprints ?? {}, n)).length;
-  if (counted(after) !== counted(before)) otherChanged.push(`<число настроек ${before.count} → ${after.count}>`);
-  if (otherChanged.length) log.warn('assignPageRoles', 'изменились другие настройки', { names: otherChanged });
-  writeFileSync(record, JSON.stringify({ ...entry, after: pick(after), otherChanged }, null, 2) + '\n', 'utf8');
+  if (counted(after) !== counted(before)) otherChanged.push(msg('pageRole.settingsCount', { before: before.count, after: after.count }));
+  if (otherChanged.length) log.warn('assignPageRoles', 'изменились другие настройки', { names: otherChanged.map(messageText) });
+  // В файл записи для отката идёт английский текст, в итог команды — `Message`.
+  writeFileSync(record, JSON.stringify({ ...entry, after: pick(after), otherChanged: otherChanged.map(messageText) }, null, 2) + '\n', 'utf8');
   return { changed: true, before: pick(before), after: pick(after), otherChanged, record, rollback };
 }
