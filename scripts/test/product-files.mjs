@@ -8,8 +8,8 @@ import { extname, join, relative } from 'node:path';
 export const ROOT = join(import.meta.dirname, '..', '..');
 
 export const PRODUCT_ROOTS = [
-  'scripts', 'docs', 'examples', 'skills', '.github',
-  'README.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
+  'scripts', 'docs', 'examples', 'skills', 'locales', '.github',
+  'README.md', 'README.ru.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
   'package.json', '.env.example', '.gitignore', '.gitattributes',
 ];
 

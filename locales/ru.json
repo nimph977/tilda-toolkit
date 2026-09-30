@@ -1,0 +1,5 @@
+{
+  "i18n.badEnv": "TILDA_LANG ждёт en или ru, получено {value}",
+  "i18n.badFlag": "--lang ждёт en или ru, получено {value}",
+  "i18n.unknownError": "{code}: {message}"
+}
