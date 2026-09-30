@@ -1,42 +1,14 @@
 /**
  * Продукт не ссылается на рабочую среду автора: инструменты, заметки, ID решений,
  * личные пути и адреса. Совпадения собираются все сразу — один прогон даёт весь список.
+ * Сами правила — в `content-rules.mjs`, общие с проверкой всей истории.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT, listProductFiles, rel } from './product-files.mjs';
-
-const j = (...parts) => parts.join('');
-const RULES = [
-  ['toolchain', new RegExp(j('ai', '-fac', 'tory', '|', 'AI', ' Fac', 'tory'), 'i')],
-  ['toolchain-command', new RegExp(j('(^|[^a-z0-9])', 'ai', 'f-[a-z]'), 'i')],
-  ['agent-dirs', new RegExp(j('\\.', '(cla', 'ude|age', 'nts|co', 'dex)/'), 'i')],
-  ['mcp-config', new RegExp(j('\\.', 'mc', 'p\\.json'), 'i')],
-  ['work-notes', new RegExp(j('(back', 'log|BU', 'GS|RU', 'LES|ROAD', 'MAP|DESCRIP', 'TION|ARCHI', 'TECTURE)\\.md|known-', 'limits'))],
-  ['decision-id', new RegExp(j('\\b(D', 'EC|R', 'EQ|O', 'Q|RI', 'SK|FI', 'ND)-\\d{3}\\b|\\bA', 'DR-\\d{4}\\b'))],
-  ['task-ref', new RegExp(j('[Зз]ада', 'ч[аеиуй]?\\s+\\d|\\bTa', 'sk \\d'))],
-  ['plan-ref', new RegExp(j('(пла', 'н|бан', 'дл|разве', 'дк)[а-я]*\\s+`?[a-z0-9]+(?:-[a-z0-9]+)+`?'), 'i')],
-  ['coauthor', new RegExp(j('co-', 'authored-', 'by'), 'i')],
-  ['personal-path', new RegExp(j('\\b[A-Za-z]:[\\\\/](Us', 'ers[\\\\/](?!<you>)|AI_', 'Projects|Cla', 'ude_)|/Us', 'ers/[a-z]|/ho', 'me/[a-z]'))],
-];
-/**
- * Два пути, куда `setup` ставит копию скилла; остальные упоминания папок агентов остаются находками.
- * Граница `(?![\w-])` не даёт разрешить соседнее имя вроде `tilda-manager-x`.
- */
-const ALLOWED_AGENT_PATHS = new RegExp(j('\\.', '(cla', 'ude|age', 'nts)/skills/tilda-manager(?![\\w-])/?'), 'gi');
-/** CI сам проверяет отсутствие рабочих файлов и должен их называть. */
-const SELF_CHECKS = new Set(['.github/workflows/ci.yml']);
-
-const EMAIL =/[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}/g;
-const ALLOWED_EMAIL_DOMAIN = /@(?:[A-Za-z0-9-]+\.)*(?:test|invalid|example|example\.(?:com|org|net)|users\.noreply\.github\.com)$/i;
-
-/** Имена правил, сработавших на строке, после вычёркивания разрешённых путей установки скилла. */
-function lineHits(line) {
-  const checked = line.replace(ALLOWED_AGENT_PATHS, '');
-  return RULES.filter(([, re]) => re.test(checked)).map(([name]) => name);
-}
+import { SELF_CHECKS, emailHits, j, lineHits } from './content-rules.mjs';
 
 function scan() {
   const hits = [];
@@ -47,8 +19,8 @@ function scan() {
       for (const name of lineHits(line)) {
         hits.push(`${rel(path)}:${index + 1}: ${name}: ${line.trim().slice(0, 100)}`);
       }
-      for (const match of line.matchAll(EMAIL)) {
-        if (!ALLOWED_EMAIL_DOMAIN.test(match[0])) hits.push(`${rel(path)}:${index + 1}: email: ${match[0]}`);
+      for (const address of emailHits(line)) {
+        hits.push(`${rel(path)}:${index + 1}: email: ${address}`);
       }
     });
   }

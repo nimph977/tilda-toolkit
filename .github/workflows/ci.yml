@@ -109,3 +109,8 @@ jobs:
           /tmp/gitleaks version
       - name: gitleaks (full history)
         run: /tmp/gitleaks git --redact --verbose --exit-code 1 .
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: History scan
+        run: node .github/scripts/history-scan.mjs

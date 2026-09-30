@@ -2,14 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { listProductFiles, rel } from './product-files.mjs';
-
-/** Числа из 7–10 знаков — форма настоящих ID страниц, блоков и элементов Tilda. */
-const ID_PATTERN = /\b\d{7,10}\b/g;
-
-/** Разрешённые значения; список не расширять — синтетические ID берите 13-значные. */
-const ALLOWLIST = new Set([
-  '2147483647', // CSS z-index max в scripts/map-blocks.mjs:90, не ID Tilda
-]);
+import { ID_ALLOWLIST, ID_PATTERN } from './content-rules.mjs';
 
 test('source files contain no 7-10 digit numbers that look like real Tilda ids', () => {
   const violations = [];
@@ -17,7 +10,7 @@ test('source files contain no 7-10 digit numbers that look like real Tilda ids',
     const lines = readFileSync(file, 'utf8').split('\n');
     lines.forEach((line, index) => {
       for (const match of line.matchAll(ID_PATTERN)) {
-        if (ALLOWLIST.has(match[0])) continue;
+        if (ID_ALLOWLIST.has(match[0])) continue;
         violations.push(`${rel(file)}:${index + 1}: ${match[0]}`);
       }
     });
