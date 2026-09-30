@@ -2,6 +2,10 @@
 
 # Getting started
 
+tilda-toolkit is an unofficial tool that lets an AI agent (Claude Code or Codex) read and carefully edit
+pages of your Tilda site through Google Chrome. This page takes you from an empty folder to a working
+install. You know the install worked when the check command, `doctor`, prints `result: ok`.
+
 ## Install with an AI agent
 
 Open Claude Code or Codex in an empty folder and paste this request:
@@ -19,13 +23,23 @@ Install tilda-toolkit from https://github.com/nimph977/tilda-toolkit.
 ```
 <!-- agent-prompt:end -->
 
-The project ID is the `projectid` number in the address of the project's page list in the Tilda
-account: `https://tilda.ru/projects/?projectid=<ID>`.
+The agent will ask you for two things:
 
-`setup` installs the `tilda-manager` skill into the agent folder inside the repository
-(`.claude/skills/tilda-manager` or `.agents/skills/tilda-manager`). After installation, restart
-the agent session in the repository folder. Running `setup` again updates the copy, and `doctor`
-reports when it is out of date.
+- The **site folder**: a new folder on your computer, outside the cloned repository, where the tool keeps the
+  settings of one Tilda site (a file named `.env`). You only choose the path, for example `~/tilda-sites/my-site`;
+  `setup` creates the folder.
+- The **project ID**: the `projectid` number in the address of the project's page list in the Tilda
+  account: `https://tilda.ru/projects/?projectid=<ID>`.
+
+At the end the agent shows you what `doctor` printed. It is a success when you see `result: ok`, exit code 0,
+and exactly one `WARN` saying that the protection list is empty. That list holds the IDs of pages the tool
+must never change; for a test project (a Tilda project you only use to try the tool) it is normal to leave it empty. If you see `FAIL`, the agent shows you a
+fix command from `doctor` and waits for your consent; it installs no programs by itself.
+
+`setup` also installs the `tilda-manager` **skill**: a set of instructions that teaches the agent how to work
+with Tilda safely. It goes into the agent folder inside the repository (`.claude/skills/tilda-manager` or
+`.agents/skills/tilda-manager`). After installation, restart the agent session in the repository folder, so
+the agent picks the skill up. Running `setup` again updates the copy, and `doctor` reports when it is out of date.
 
 Other agents: have them read [AGENTS.md](../../AGENTS.md) and [skills/tilda-manager/SKILL.md](../../skills/tilda-manager/SKILL.md).
 
@@ -48,8 +62,9 @@ automatically: the one installed in the system is used.
 ## Installation
 
 The second way, for working in a terminal: run the steps one at a time. The commands are for bash
-(macOS, Linux; on Windows use Git Bash, or let an agent translate them to PowerShell). Replace
-`<project ID>` with your project ID; the site folder `~/tilda-sites/example-site` is created by `setup`.
+(macOS, Linux; on Windows use Git Bash, the terminal that comes with git for Windows, or let an agent translate them to PowerShell). Replace
+`<project ID>` with your project ID. The site folder `~/tilda-sites/example-site` (the place for one
+site's settings, see above) is created by `setup`; you can choose another path outside the repository.
 
 <!-- newcomer-path:start -->
 ```bash
@@ -66,8 +81,12 @@ The expected result of each step:
 | Step | Result |
 | --- | --- |
 | `npm ci` | no errors |
-| `setup` | a few `INFO [...]` lines (the log, written to stderr; not errors), then the summary `status: done`; exit code 0 |
+| `setup` | a few `INFO [...]` lines (the log, written to stderr, the error stream; not errors), then the summary `status: done`; exit code 0 |
 | `doctor` | `result: ok`, exit code 0, and exactly one `WARN site … protection list is empty`, which is normal for a test project |
+
+Lines that start with `INFO [...]` are the tool's log. They go to stderr, the error stream, so they can
+appear on screen next to the results; they do not mean that something went wrong. Only `FAIL` lines and a
+non-zero exit code do.
 
 Right after `npm ci`, `doctor` without `--site` checks only the programs (`skip site`) and also gives
 `result: ok`. That is an intermediate check for those who have no Tilda account yet, not the end of the path.
