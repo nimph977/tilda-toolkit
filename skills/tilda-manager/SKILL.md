@@ -1,89 +1,98 @@
 ---
 name: tilda-manager
-description: Работать с сайтом Tilda через локальный tilda-toolkit — править страницы, собирать страницу по опубликованному референсу и переносить сайт через кабинет донора, когда пользователь явно поручил работу с сайтом.
+description: Work with a Tilda site through the local tilda-toolkit - edit pages, build a page from a published reference and transfer a site through the donor account, when the user has explicitly asked for site work.
 ---
 
-# Работа с Tilda
+# Working with Tilda
 
-Работайте всегда с выбранной **папкой сайта** (она лежит вне репозитория и хранит `.env`, снимки,
-слепки и профиль браузера этого сайта): `node scripts/tilda.mjs --site <папка сайта> <команда>` из корня
-репозитория или `node <путь-к-репо>/scripts/tilda.mjs --site <папка сайта> …` из любой папки; в сессии
-можно один раз задать `TILDA_SITE_DIR`. Если пользователь не назвал папку, спросите, какой сайт, и не
-запускайте команды с данными без неё; если папки нет, заведите её по
-[docs/getting-started.md](../../docs/getting-started.md). Живой сайт клиента и тестовый проект — разные
-папки сайтов. `.env` из корня репозитория не читается. Для онлайн-команд нужны `TILDA_PROJECT_ID` и явная
-`TILDA_PROTECTED_PAGES` в `.env` папки сайта; пустое значение второй переменной снимает защиту всех
-страниц. Перед записью подтвердите, что страница не находится в защищённом списке.
+Always work with the chosen **site folder** (it lives outside the repository and holds the `.env`,
+snapshots, reference snapshots and browser profile of that site): `node scripts/tilda.mjs --site <site folder> <command>`
+from the repository root, or `node <path-to-repo>/scripts/tilda.mjs --site <site folder> …` from any folder;
+within a session you can set `TILDA_SITE_DIR` once. If the user has not named the folder, ask which site
+and do not run commands that use site data without it; if the folder does not exist, create it following
+[docs/getting-started.md](../../docs/en/getting-started.md). The client's live site and the test project are
+different site folders. The `.env` in the repository root is not read. Online commands need
+`TILDA_PROJECT_ID` and an explicit `TILDA_PROTECTED_PAGES` in the `.env` of the site folder; an empty value of
+the second variable removes the protection of all pages. Before a write, confirm that the page is not in the
+protected list.
 
-Если команда падает или окружение новое, начните с `node scripts/tilda.mjs --site <папка сайта> doctor`
-(`node scripts/doctor.mjs`, если `tilda.mjs` не запускается). Он только проверяет и печатает команду
-исправления; недостающую программу не ставьте без согласия пользователя.
+Read CLI results with `--json`; rely on `status`, `code`, `key` — the human text depends on `--lang`.
+An error is printed as `status: error` plus `code:` and `key:` lines (it is not JSON even with `--json`);
+decide by the `code` and `key` values, never by the wording of `message`. Every `doctor --json` check has
+`id`, `status` and `key`.
 
-Донор — аккаунт Tilda с сайтом-образцом, к кабинету которого у владельца есть доступ.
-Тестовый проект — проект владельца, куда собирается копия.
+`--lang en|ru` sets the language of CLI answers and reports (otherwise `TILDA_LANG`, then the system language):
+choose it to match the user's language. The log on stderr is always English.
 
-## Сначала сам, человек — при упоре или в критический момент
+If a command fails or the environment is new, start with `node scripts/tilda.mjs --site <site folder> doctor`
+(`node scripts/doctor.mjs` if `tilda.mjs` does not start). It only checks and prints a fix command; do not
+install a missing program without the user's consent.
 
-Всё, что можете сделать командой, делайте сами: найти ID проекта в слепке, сопоставить
-страницы, прочитать настройки, сверить результат. Человек нужен в двух случаях:
+The donor is a Tilda account with a model site to whose dashboard the owner has access.
+The test project is the owner's project where the copy is built.
 
-- **упор:** вход и пароль, оплата, выдача доступа сотрудника;
-- **критический момент:** необратимое действие, любое действие под входом донора
-  (`donor copy`), запись оформления (`donor style --apply --confirm`), публикация,
-  изменение не тестового проекта.
+## Do it yourself first, involve the human only at a dead end or a critical moment
 
-Перед критическим действием покажите владельцу точную команду и что она изменит, затем
-ждите явного «делай». Одно «делай» может покрывать пакет, если вы заранее показали список
-меток и число блоков. Каждое место, где понадобился человек, запишите в журнал
-[references/manual-steps.md](references/manual-steps.md) с причиной и отметкой
-«без человека никак / можно автоматизировать».
+Do everything you can with a command: find the project ID in the reference snapshot, match pages, read
+settings, check the result. The human is needed in two cases:
 
-## Выбор сценария
+- **dead end:** signing in and the password, payment, granting an employee access;
+- **critical moment:** an irreversible action, any action under the donor's sign-in
+  (`donor copy`), writing the styling (`donor style --apply --confirm`), publishing,
+  changing a project that is not the test one.
 
-| Условие | Сценарий | Где описан |
+Before a critical action show the owner the exact command and what it will change, then
+wait for an explicit "go". One "go" can cover a batch if you showed the list of
+labels and the number of blocks beforehand. Record every place where a human was needed in the log
+[references/manual-steps.md](references/manual-steps.md) with the reason and the mark
+"unavoidable without a human / can be automated".
+
+## Choosing a scenario
+
+| Condition | Scenario | Where it is described |
 | --- | --- | --- |
-| Нужно поменять текст, картинку или блок на готовой странице | правка страницы | раздел «Правка страницы» ниже, схема плана — [references/plan-schema.md](references/plan-schema.md) |
-| Владелец дал доступ к кабинету донора (аккаунт донора — сотрудник тестового проекта) | перенос через кабинет донора | [references/scenarios.md](references/scenarios.md) |
-| Доступа к кабинету нет, есть только опубликованный сайт | сборка по опубликованному референсу | [references/scenarios.md](references/scenarios.md) |
+| Change a text, an image or a block on an existing page | editing a page | the "Editing a page" section below, plan schema - [references/plan-schema.md](references/plan-schema.md) |
+| The owner gave access to the donor's dashboard (the donor account is an employee of the test project) | transfer through the donor account | [references/scenarios.md](references/scenarios.md) |
+| No dashboard access, only a published site | building from a published reference | [references/scenarios.md](references/scenarios.md) |
 
-Форматы остальных операций и ограничения — [references/operations.md](references/operations.md);
-читайте его только когда задача требует такой операции.
+Formats of the other operations and their limits - [references/operations.md](references/operations.md);
+read it only when the task needs such an operation.
 
-## Правка страницы
+## Editing a page
 
-До каждой правки снимите состояние страницы (`snapshot`). Сначала подготовьте план,
-затем выполните `preview`, `apply` и `verify`. Если результат `verify` содержит
-расхождения, не публикуйте страницу; изучите журнал или откатите запись.
+Before each edit take a snapshot of the page (`snapshot`). First prepare a plan,
+then run `preview`, `apply` and `verify`. If the `verify` result contains
+mismatches (its `status` is `verifyMismatch`), do not publish the page; study the journal or roll the write back.
 
-Снимок — данные для сверки и формирования отката, а не экспорт и не полное
-восстановление сайта.
+A snapshot is data for comparison and for building a rollback, not an export and not a full
+restore of the site.
 
-## Инварианты
+## Invariants
 
-- Проект донора только читается и копируется в буфер аккаунта. Дублей, правок, передачи
-  и публикации у донора нет. Сессия донора пишет только в разрешённую страницу-приёмник;
-  остальная запись отказывает `WRITE_NOT_ALLOWED`.
-- Держатели браузера не закрываются между командами и остаются свёрнутыми. Окно
-  показывается только на время входа человека (`session`, `session --donor`) или по его
-  просьбе (`browser show`). Новые вкладки не открываются.
-- До записи снимок, после записи сверка. `donor copy --replace` снимает блоки приёмника
-  в `<папка сайта>/site-baseline/records/` до удаления.
-- Публикация — отдельная команда `page publish --confirm` только по слову владельца и
-  после визуальной проверки.
-- Темп CLI не ускоряйте, в том числе для крупного чтения. Между страницами пакета пауза
-  не меньше 3 секунд.
-- Получателей заявок форм, CRM, платежи, домены и настройки страницы инструмент не
-  изменяет. Такие задачи выполняйте в интерфейсе Tilda вручную. Поля ввода формы,
-  сообщение об успехе и (только флагом `formContent: "reference"`) адрес перехода после
-  отправки переносит сборка по референсу — см. [references/operations.md](references/operations.md).
-- В репозиторий не вносятся ID проектов и страниц, домены, почта, пути профилей.
-  Слепки, доклады и записи переноса лежат вне git. Данные сайта никогда не кладутся в папку
-  репозитория: только в папку сайта и в общую папку каталога шаблонов (`TILDA_CATALOG_DIR`).
+- The donor project is only read and copied to the account buffer. There are no duplicates, edits,
+  transfers or publishing on the donor. The donor session writes only to the permitted receiver page;
+  any other write is refused with `WRITE_NOT_ALLOWED`.
+- Browser holders are not closed between commands and stay minimized. The window is
+  shown only while the human signs in (`session`, `session --donor`) or when they
+  ask (`browser show`). New tabs are not opened.
+- A snapshot before the write, verification after it. `donor copy --replace` takes snapshots of the receiver blocks
+  into `<site folder>/site-baseline/records/` before deleting.
+- Publishing is the separate command `page publish --confirm`, only on the owner's word and
+  after a visual check.
+- Do not speed up the CLI pace, including for large reads. Pause between the pages of a batch
+  at least 3 seconds.
+- Form request recipients, CRM, payments, domains and page settings are not
+  changed by the tool. Do such tasks by hand in the Tilda interface. Form input fields, the
+  success message and (only with the flag `formContent: "reference"`) the redirect address after
+  submitting are transferred by the reference build - see [references/operations.md](references/operations.md).
+- Project and page IDs, domains, email and profile paths are not put into the repository.
+  Snapshots, reports and transfer records live outside git. Site data is never put into the repository
+  folder: only into the site folder and into the shared template catalog folder (`TILDA_CATALOG_DIR`).
 
-## Приёмка переноса
+## Acceptance of a transfer
 
-Порядок приёмки — [references/scenarios.md](references/scenarios.md), раздел «Приёмка»;
-владелец подтверждает вывод, а не сверяет кадры сам.
+The acceptance procedure is in [references/scenarios.md](references/scenarios.md), section "Acceptance";
+the owner confirms the conclusion instead of comparing frames themselves.
 
-Команды, флаги и файлы результата — [docs/cli.md](../../docs/cli.md); подробный разбор
-сценариев — [docs/workflow.md](../../docs/workflow.md).
+Commands, flags and result files - [docs/cli.md](../../docs/en/cli.md); a detailed walkthrough
+of the scenarios - [docs/workflow.md](../../docs/en/workflow.md).

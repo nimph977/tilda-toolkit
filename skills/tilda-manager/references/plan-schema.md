@@ -1,14 +1,14 @@
-# Схема плана операций
+# Operations plan schema
 
-План применяется циклом `snapshot` → `preview` → `apply` → `verify`; сам цикл описан в
-[../SKILL.md](../SKILL.md), раздел «Правка страницы».
+A plan is applied by the cycle `snapshot` → `preview` → `apply` → `verify`; the cycle itself is described in
+[../SKILL.md](../SKILL.md), section "Editing a page".
 
-План содержит `page` и непустой массив `ops`. У каждой операции ровно один вид:
+A plan contains `page` and a non-empty `ops` array. Each operation has exactly one kind:
 `set`, `field`, `listSet`, `blockSet`, `blockHidden`, `duplicateElement`,
-`removeElement`, `gallerySet`, `moveBlock`, `setOrder`, `addZero`, `addRecord` или
+`removeElement`, `gallerySet`, `moveBlock`, `setOrder`, `addZero`, `addRecord` or
 `newRecord`.
 
-Обычная правка элемента Zero Block использует адрес блока и селектор элемента:
+An ordinary edit of a Zero Block element uses the block address and an element selector:
 
 ```json
 {
@@ -18,21 +18,42 @@
     {
       "block": { "recordid": "9000000000001" },
       "elem": { "elem_id": "9000000000011" },
-      "set": { "text": "Новый текст" }
+      "set": { "text": "New text" }
     }
   ]
 }
 ```
 
-`block` задаётся как `recordid` или `zeroIndex`; для `set`, `duplicateElement`,
-`removeElement` и `gallerySet` нужен `elem`. Операция `field` использует
-`field: { "name": "...", "value": "..." }`; она применима к обычному блоку.
-Полный пример с синтетическими ID: [../../../examples/basic-text-edit.json](../../../examples/basic-text-edit.json).
-Пример операции `newRecord` из сборки по референсу:
+`block` is given as `recordid` or `zeroIndex`; `set`, `duplicateElement`,
+`removeElement` and `gallerySet` need `elem`. The `field` operation uses
+`field: { "name": "...", "value": "..." }`; it applies to an ordinary block.
+A full example with synthetic IDs: [../../../examples/basic-text-edit.json](../../../examples/basic-text-edit.json).
+An example of a `newRecord` operation from a reference build:
 [../../../examples/reference-new-record.json](../../../examples/reference-new-record.json).
 
-Не копируйте пример в рабочий план без замены всех ID на данные своего проекта.
-Предпросмотр не заменяет визуальную проверку в редакторе.
+Do not copy the example into a working plan without replacing all IDs with data of your own project.
+The preview does not replace a visual check in the editor.
 
-Для форматов остальных операций и ограничений читайте
-[operations.md](operations.md) только когда задача требует такой операции.
+## Reason items: `code` and `reason`
+
+`reference plan` does not write into the plan what it could not transfer; it returns it in its result
+(`--json`) as two lists: `skipped` (a whole block was skipped) and `unmapped` (a single field, link, image or
+card was not transferred). `reference plan --update` returns `unmapped` in the same way. Each item has
+the position and template (`order`, `tplid`), sometimes `field`, `card` and `text` (a fragment of the source),
+and two fields that explain the omission:
+
+- `code` — a stable machine name of the reason (for example `zeroBlock`), independent of the CLI language.
+  Branch on it in scenarios;
+- `reason` — the same reason as English text for a human; it is not a language-dependent CLI message, but
+  its wording may change, so do not compare it.
+
+The list of codes is not duplicated here; the source is the constants in `scripts/reference-plan.mjs`
+(`SKIP_REASONS`, `FIELD_REASONS`, `LINK_REASONS` (imported from `scripts/lib/reference-links.mjs`),
+`BUTTON_REASONS`, `VIDEO_REASONS`, `CARD_REASONS`, `MENU_REASONS`, `SOCLINKS_REASONS`, `STYLE_REASONS`,
+`SHAPE_REASONS`, `CODE_REASONS`, `FORM_REASONS`, `SETTINGS_REASONS`), `UPDATE_REASONS` in
+`scripts/lib/plan-update.mjs` and `LINK_REWRITE_REASONS` in `scripts/donor-links.mjs`. The `donor links` command
+prints the links it left as lines `<recordid>.<field>: <reason>`; the codes of those reasons are
+`noPage`, `form` and `otherHost`.
+
+For formats of the other operations and their limits read
+[operations.md](operations.md) only when the task needs such an operation.

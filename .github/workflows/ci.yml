@@ -31,6 +31,11 @@ jobs:
       - run: npm --version
       - run: npm ci
       - run: npm test
+      - name: Tests with Russian messages
+        if: matrix.os == 'ubuntu-latest'
+        run: npm test
+        env:
+          TILDA_LANG: ru
       - name: Install check (setup + doctor)
         run: node .github/scripts/install-check.mjs
         env:

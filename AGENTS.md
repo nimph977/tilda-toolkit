@@ -14,7 +14,8 @@ of a particular site.
 
 - `npm ci` — install the single dependency.
 - `npm test` — run the test suite (`node --test scripts/test/*.test.mjs`), no network.
-- `node scripts/tilda.mjs --help` — list commands, flags and exit codes.
+- `node scripts/tilda.mjs --help` — list commands, flags and exit codes. `--lang en|ru` selects the
+  language of CLI messages (see `TILDA_LANG` below).
 - `node scripts/tilda.mjs --site <site folder> <command>` — run a command against one site;
   its settings come from `<site folder>/.env`. The `.env` in the repository root is not read.
 - `node scripts/tilda.mjs setup --site <site folder> --project <id> --agent claude|codex|all` — create the
@@ -49,8 +50,10 @@ of a site folder outside the repository.
 - `TILDA_DONOR_PROJECT_ID`, `TILDA_DONOR_BROWSER_PROFILE` — for donor commands
   (`browser --donor`, `session --donor`, `donor …`); both differ from the test project ones.
 - `LOG_LEVEL` — `DEBUG`, `INFO` (default), `WARN`, `ERROR`.
+- `TILDA_LANG` — `en` or `ru`; empty means the system language (`ru*` gives `ru`, anything else `en`).
+  `--lang` wins over it; a value in the environment wins over the site `.env` without a refusal.
 
-Details: [docs/configuration.md](docs/configuration.md).
+Details: [docs/en/configuration.md](docs/en/configuration.md).
 
 ## Project layout
 
@@ -61,9 +64,10 @@ scripts/
   lib/               # core without CLI: config, paths, log, browser, browser-daemon, html-blocks, …
   browser/           # code evaluated inside the Tilda editor (tilda-*.js)
   test/              # node --test, synthetic identifiers only
+locales/             # CLI message dictionaries (en, ru)
 skills/tilda-manager/ # agent skill: scenarios, plan schema, operations, manual steps
 examples/            # synthetic plan examples
-docs/                # user documentation
+docs/                # user documentation: docs/en and docs/ru
 ```
 
 ## Invariants
@@ -90,6 +94,8 @@ docs/                # user documentation
 - Examples and tests use synthetic IDs only: 13-digit numbers or short ones like `100001`,
   never 7–10 digits.
 - Do not add dependencies without a real need.
+- A new user-facing message gets a key in both dictionaries (`locales/en.json`, `locales/ru.json`);
+  `npm test` checks keys, placeholders and unused keys.
 - Check every change with `npm test`; for CLI changes also run `node scripts/tilda.mjs --help`.
 
 ## Code conventions
@@ -108,7 +114,8 @@ docs/                # user documentation
 - Log only through `createLogger('<module>')` from `scripts/lib/log.mjs`, to stderr;
   stdout holds a short command summary or JSON with `--json`. Never log cookies or secrets.
 - Tests: `node --test` with `node:assert/strict`, no network, synthetic IDs.
-- Comments, JSDoc and CLI messages are in Russian for now; identifiers are in English.
+- CLI messages go through the `locales/en.json` and `locales/ru.json` dictionaries (keys, not text, in code
+  and tests); the log (`log.*`) is in English; comments and JSDoc are still in Russian; identifiers are in English.
 
 ## When a tool is missing
 
@@ -119,16 +126,16 @@ from that program's official documentation. Do not install system programs silen
 
 ## Documentation
 
-Docs are in Russian for now.
+Docs are in English (`docs/en`) and Russian (`docs/ru`).
 
 | Document | Path |
 | --- | --- |
-| README | [README.md](README.md) |
-| Getting started | [docs/getting-started.md](docs/getting-started.md) |
-| Configuration | [docs/configuration.md](docs/configuration.md) |
-| Workflow | [docs/workflow.md](docs/workflow.md) |
-| CLI commands | [docs/cli.md](docs/cli.md) |
-| Architecture map | [docs/architecture.md](docs/architecture.md) |
+| README | [README.md](README.md), [README.ru.md](README.ru.md) |
+| Getting started | [docs/en/getting-started.md](docs/en/getting-started.md) |
+| Configuration | [docs/en/configuration.md](docs/en/configuration.md) |
+| Workflow | [docs/en/workflow.md](docs/en/workflow.md) |
+| CLI commands | [docs/en/cli.md](docs/en/cli.md) |
+| Architecture map | [docs/en/architecture.md](docs/en/architecture.md) |
 | Agent skill | [skills/tilda-manager/SKILL.md](skills/tilda-manager/SKILL.md) |
 | Third-party notices | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) |
 | License | [LICENSE](LICENSE) — MIT |
