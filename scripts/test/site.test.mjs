@@ -8,8 +8,10 @@ import { setLogLevel } from '../lib/log.mjs';
 
 setLogLevel('ERROR');
 
-const isConfigError = (variable, text) => (e) =>
-  e.code === 'CONFIG_ERROR' && e.exitCode === 2 && e.variable === variable && (!text || text.test(e.message));
+/** `check` — ключ словаря (строка) или регулярное выражение по английскому `message`. */
+const isConfigError = (variable, check) => (e) =>
+  e.code === 'CONFIG_ERROR' && e.exitCode === 2 && e.variable === variable
+  && (!check || (typeof check === 'string' ? e.key === check : check.test(e.message)));
 
 /** Временная папка + папка сайта `s1` с `.env`; удаляется в finally. */
 function withTmp(fn) {
@@ -49,10 +51,10 @@ test('resolveSiteDir: флаг и TILDA_SITE_DIR на разные папки �
 
 test('resolveSiteDir: нет папки и нет .env — отказ', () => {
   withTmp((tmp, site) => {
-    assert.throws(() => resolveSiteDir({ flag: join(tmp, 'нет'), env: {}, cwd: tmp }), isConfigError('TILDA_SITE_DIR', /не найдена/));
+    assert.throws(() => resolveSiteDir({ flag: join(tmp, 'нет'), env: {}, cwd: tmp }), isConfigError('TILDA_SITE_DIR', 'site.notFound'));
     const bare = join(tmp, 'bare');
     mkdirSync(bare);
-    assert.throws(() => resolveSiteDir({ flag: bare, env: {}, cwd: tmp, root: '/nowhere' }), isConfigError('TILDA_SITE_DIR', /нет \.env/));
+    assert.throws(() => resolveSiteDir({ flag: bare, env: {}, cwd: tmp, root: '/nowhere' }), isConfigError('TILDA_SITE_DIR', 'site.noEnv'));
   });
 });
 
@@ -61,10 +63,10 @@ test('resolveSiteDir: папка внутри репозитория — отк�
     const inner = join(tmp, 'inner');
     mkdirSync(inner);
     writeFileSync(join(inner, '.env'), '');
-    assert.throws(() => resolveSiteDir({ flag: inner, env: {}, cwd: tmp, root: tmp }), isConfigError('TILDA_SITE_DIR', /внутри репозитория/));
+    assert.throws(() => resolveSiteDir({ flag: inner, env: {}, cwd: tmp, root: tmp }), isConfigError('TILDA_SITE_DIR', 'paths.insideRepo'));
     const bareInner = join(tmp, 'bare-inner');
     mkdirSync(bareInner);
-    assert.throws(() => resolveSiteDir({ flag: bareInner, env: {}, cwd: tmp, root: tmp }), isConfigError('TILDA_SITE_DIR', /внутри репозитория/));
+    assert.throws(() => resolveSiteDir({ flag: bareInner, env: {}, cwd: tmp, root: tmp }), isConfigError('TILDA_SITE_DIR', 'paths.insideRepo'));
   });
 });
 
@@ -128,7 +130,7 @@ test('siteEnvChanges: идентифицирующая переменная то
   for (const key of ['TILDA_PROJECT_ID', 'TILDA_PROTECTED_PAGES', 'TILDA_DONOR_PROJECT_ID']) {
     assert.throws(
       () => siteEnvChanges({ siteDir: '/s', text: 'TILDA_CATALOG_DIR=/c\n', env: { [key]: '100001' } }),
-      (e) => isConfigError(key, /только в окружении/)(e) && !/100001/.test(e.message),
+      (e) => isConfigError(key, 'site.identityOnlyInEnv')(e) && !/100001/.test(e.message),
       key,
     );
   }
@@ -186,5 +188,42 @@ test('applySite: NODE_OPTIONS из .env сайта не попадает в ок
     assert.equal(env.NODE_OPTIONS, undefined);
     assert.equal(env.TILDA_PROJECT_ID, '100001');
     assert.deepEqual(result.ignored, ['NODE_OPTIONS']);
+  });
+});
+
+test('siteEnvChanges: TILDA_LANG ведёт себя как LOG_LEVEL — окружение главнее файла без отказа', () => {
+  const text = 'TILDA_LANG=ru\n';
+  const run = (env) => siteEnvChanges({ siteDir: '/s', text, env });
+  // только в .env сайта → берётся из файла
+  assert.deepEqual(run({}).set, { TILDA_LANG: 'ru' });
+  // только в окружении → молча (не попадает в inherited)
+  const onlyEnv = siteEnvChanges({ siteDir: '/s', text: 'TILDA_CATALOG_DIR=/c\n', env: { TILDA_LANG: 'en' } });
+  assert.deepEqual(onlyEnv.inherited, []);
+  // в обоих, равны → ничего не меняется
+  assert.deepEqual(run({ TILDA_LANG: 'ru' }), { set: {}, kept: [], inherited: [], ignored: [] });
+  // в обоих, разные → побеждает окружение, отказа нет
+  const differ = run({ TILDA_LANG: 'en' });
+  assert.deepEqual(differ.set, {});
+  assert.deepEqual(differ.kept, ['TILDA_LANG']);
+  // пустое в окружении → окружение, отказа нет
+  assert.deepEqual(run({ TILDA_LANG: '' }).kept, ['TILDA_LANG']);
+});
+
+test('siteEnvChanges: TILDA_LANGX по-прежнему предупреждение, а расхождение ID рядом с TILDA_LANG — отказ только по ID', () => {
+  const onlyEnv = siteEnvChanges({ siteDir: '/s', text: 'TILDA_CATALOG_DIR=/c\n', env: { TILDA_LANGX: '1' } });
+  assert.deepEqual(onlyEnv.inherited, ['TILDA_LANGX']);
+  assert.throws(
+    () => siteEnvChanges({ siteDir: '/s', text: 'TILDA_LANG=ru\nTILDA_PROJECT_ID=100001\n', env: { TILDA_LANG: 'en', TILDA_PROJECT_ID: '100002' } }),
+    (e) => isConfigError('TILDA_PROJECT_ID', 'site.envConflict')(e) && e.params.names === 'TILDA_PROJECT_ID',
+  );
+});
+
+test('applySite: TILDA_LANG в окружении и в .env сайта — команда работает, язык из окружения', () => {
+  withTmp((tmp, site) => {
+    writeFileSync(join(site, '.env'), 'TILDA_PROJECT_ID=100001\nTILDA_LANG=ru\n');
+    const env = { TILDA_PROJECT_ID: '100001', TILDA_LANG: 'en' };
+    const result = applySite({ flag: site, env, cwd: tmp, root: '/nowhere' });
+    assert.equal(env.TILDA_LANG, 'en');
+    assert.deepEqual(result.kept, ['TILDA_LANG']);
   });
 });

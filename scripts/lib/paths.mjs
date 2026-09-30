@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
 import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
 import { ConfigError, getProtectedPages } from './config.mjs';
+import { msg } from './i18n.mjs';
 
 export function repoRoot() {
   return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -53,10 +54,7 @@ export function assertOutsideRepo(path, variable, { root = repoRoot(), platform 
   const real = platform === process.platform;
   const inside = isInside(path, root, platform) || (real && isInside(realPathDeep(path), realPathDeep(root), platform));
   if (inside) {
-    throw new ConfigError(
-      `${variable}: папка данных внутри репозитория продукта (${path}) — вынесите данные в папку сайта вне репозитория`,
-      variable,
-    );
+    throw new ConfigError(msg('paths.insideRepo', { variable, path }), variable);
   }
   return path;
 }
@@ -67,42 +65,42 @@ export function siteDir(env = process.env) {
   return value ? resolve(value) : null;
 }
 
-/** Явная переменная → подпапка папки сайта → отказ. */
+/** Явная переменная → подпапка папки сайта → отказ. `what` — `Message` с названием данных для текста отказа. */
 function dataDir(env, variable, siteSub, what) {
   const explicit = env[variable]?.trim();
   if (explicit) return assertOutsideRepo(resolve(explicit), variable);
   const site = siteDir(env);
   if (site) return join(site, siteSub);
-  throw new ConfigError(`${what}: не выбран сайт — укажите --site <папка сайта> или ${variable}`, variable);
+  throw new ConfigError(msg('paths.noSite', { what, variable }), variable);
 }
 
 /** Снимки и журнал сайта: TILDA_BASELINE_DIR или `<папка сайта>/site-baseline`. */
 export function baselineDir(env = process.env) {
-  return dataDir(env, 'TILDA_BASELINE_DIR', 'site-baseline', 'снимки сайта');
+  return dataDir(env, 'TILDA_BASELINE_DIR', 'site-baseline', msg('paths.what.baseline'));
 }
 
 /** Слепки референс-сайтов: TILDA_REFERENCE_DIR или `<папка сайта>/site-reference`. */
 export function referenceDir(env = process.env) {
-  return dataDir(env, 'TILDA_REFERENCE_DIR', 'site-reference', 'слепки референса');
+  return dataDir(env, 'TILDA_REFERENCE_DIR', 'site-reference', msg('paths.what.reference'));
 }
 
 /** Профиль тестового держателя: TILDA_BROWSER_PROFILE или `<папка сайта>/.browser-profile`. */
 export function testProfileDir(env = process.env) {
-  return dataDir(env, 'TILDA_BROWSER_PROFILE', '.browser-profile', 'профиль браузера');
+  return dataDir(env, 'TILDA_BROWSER_PROFILE', '.browser-profile', msg('paths.what.profile'));
 }
 
 /** Каталог шаблонов, общий для всех сайтов: только TILDA_CATALOG_DIR, без значения по умолчанию. */
 export function catalogRoot(env = process.env) {
   const value = env.TILDA_CATALOG_DIR?.trim();
   if (value) return assertOutsideRepo(resolve(value), 'TILDA_CATALOG_DIR');
-  throw new ConfigError('каталог шаблонов: задайте TILDA_CATALOG_DIR — общую папку каталога для всех сайтов', 'TILDA_CATALOG_DIR');
+  throw new ConfigError(msg('paths.catalogDirRequired'), 'TILDA_CATALOG_DIR');
 }
 
 /** Сгенерированные планы: `<папка сайта>/plans`. */
 export function plansDir(env = process.env) {
   const site = siteDir(env);
   if (site) return join(site, 'plans');
-  throw new ConfigError('папка планов: не выбран сайт — укажите --site <папка сайта> или --out <файл>', 'TILDA_SITE_DIR');
+  throw new ConfigError(msg('paths.plansNoSite'), 'TILDA_SITE_DIR');
 }
 
 /** Страницы, защита которых снята на этот запуск процесса явным флагом команды. */

@@ -100,3 +100,9 @@ test('requireDonorConfig without the donor profile still needs a distinct donor 
   configError(() => requireDonorConfig({ env: { TILDA_PROJECT_ID: '100001', TILDA_DONOR_PROJECT_ID: '100002' }, withTest: true, withProfile: false }));
   assert.throws(() => requireDonorConfig({ env, withTest: true }), (e) => e instanceof ConfigError && /TILDA_DONOR_BROWSER_PROFILE/.test(e.message), 'по умолчанию профиль обязателен');
 });
+
+test('configuration errors carry a dictionary key and parameters next to the English message', () => {
+  assert.throws(() => parseNumericId('abc', 'TILDA_PROJECT_ID'), (e) => e.key === 'config.idNotNumeric'
+    && e.params.name === 'TILDA_PROJECT_ID' && e.message === 'TILDA_PROJECT_ID must be a positive numeric ID, got "abc"');
+  assert.throws(() => assertRole('other'), (e) => e.key === 'config.unknownRole' && e.params.role === 'other');
+});

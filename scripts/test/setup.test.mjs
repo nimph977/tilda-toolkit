@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigError } from '../lib/config.mjs';
 import { SkillInstallError } from '../lib/skill-install.mjs';
-import { SetupError, planEnvUpdate, prepareSite, renderSiteEnv, runSetup, writeSite } from '../setup.mjs';
+import { SetupError, planEnvUpdate, planLangUpdate, prepareSite, renderSiteEnv, runSetup, writeSite } from '../setup.mjs';
 
 const TEMPLATE = [
   '# comment TILDA_PROJECT_ID=1',
@@ -15,6 +15,7 @@ const TEMPLATE = [
   '# TILDA_DONOR_PROJECT_ID=100002',
   'TILDA_SITE_DIR=./x',
   'LOG_LEVEL=INFO',
+  'TILDA_LANG=',
   '',
 ].join('\n');
 
@@ -33,6 +34,7 @@ test('renderSiteEnv sets the project id, clears identity keys and drops TILDA_SI
     'TILDA_DEFAULT_PAGE=',
     '# TILDA_DONOR_PROJECT_ID=100002',
     'LOG_LEVEL=INFO',
+    'TILDA_LANG=',
     '',
   ].join('\n'));
 });
@@ -41,14 +43,21 @@ test('renderSiteEnv leaves the project id empty without a flag', () => {
   assert.match(renderSiteEnv(TEMPLATE), /^TILDA_PROJECT_ID=$/m);
 });
 
-test('renderSiteEnv appends the two keys a template lacks and ends with one newline', () => {
+test('renderSiteEnv appends the keys a template lacks and ends with one newline', () => {
   const text = renderSiteEnv('# only a comment\n\n\n');
-  assert.equal(text, '# only a comment\nTILDA_PROJECT_ID=\nTILDA_PROTECTED_PAGES=\n');
+  assert.equal(text, '# only a comment\nTILDA_PROJECT_ID=\nTILDA_PROTECTED_PAGES=\nTILDA_LANG=\n');
+});
+
+test('renderSiteEnv writes the language into TILDA_LANG, replacing the template line or adding one', () => {
+  assert.match(renderSiteEnv(TEMPLATE, { lang: 'ru' }), /^TILDA_LANG=ru$/m);
+  assert.equal(renderSiteEnv(TEMPLATE, { lang: 'ru' }).match(/TILDA_LANG/g).length, 1);
+  const without = renderSiteEnv('LOG_LEVEL=INFO\n', { lang: 'en' });
+  assert.equal(without, 'LOG_LEVEL=INFO\nTILDA_PROJECT_ID=\nTILDA_PROTECTED_PAGES=\nTILDA_LANG=en\n');
 });
 
 test('renderSiteEnv keeps CRLF line endings without mixing', () => {
   const text = renderSiteEnv(TEMPLATE.replace(/\n/g, '\r\n'), { projectId: '1000000000001' });
-  assert.ok(text.endsWith('LOG_LEVEL=INFO\r\n'));
+  assert.ok(text.endsWith('TILDA_LANG=\r\n'));
   assert.doesNotMatch(text.replace(/\r\n/g, ''), /[\r\n]/, 'все переводы строки должны быть CRLF');
 });
 
@@ -68,6 +77,24 @@ test('planEnvUpdate covers kept, unchanged, filled and conflict', () => {
     planEnvUpdate('TILDA_PROJECT_ID=1000000000001\n', { projectId: '1000000000002' }),
     { action: 'conflict', current: '1000000000001' },
   );
+});
+
+test('planLangUpdate covers kept, unchanged, filled, added and replaced without ever refusing', () => {
+  assert.deepEqual(planLangUpdate('TILDA_LANG=ru\n'), { action: 'kept' });
+  assert.deepEqual(planLangUpdate('TILDA_LANG=ru\n', { lang: 'ru' }), { action: 'unchanged' });
+
+  const filled = planLangUpdate('LOG_LEVEL=INFO\nTILDA_LANG=\n', { lang: 'en' });
+  assert.equal(filled.action, 'filled');
+  assert.equal(filled.text, 'LOG_LEVEL=INFO\nTILDA_LANG=en\n');
+
+  const added = planLangUpdate('LOG_LEVEL=INFO\r\n# TILDA_LANG=ru\r\n', { lang: 'ru' });
+  assert.equal(added.action, 'added');
+  assert.equal(added.text, 'LOG_LEVEL=INFO\r\n# TILDA_LANG=ru\r\nTILDA_LANG=ru\r\n');
+
+  const replaced = planLangUpdate('TILDA_LANG=en\nLOG_LEVEL=INFO\n', { lang: 'ru' });
+  assert.equal(replaced.action, 'replaced');
+  assert.equal(replaced.previous, 'en');
+  assert.equal(replaced.text, 'TILDA_LANG=ru\nLOG_LEVEL=INFO\n');
 });
 
 test('prepareSite refuses folders inside the repository and files', (t) => {
@@ -123,7 +150,7 @@ test('runSetup creates the site and both skill copies, and a repeat changes noth
   const args = { site: dir, project: '1000000000001', agent: 'all', env: {}, cwd: root, root };
 
   const first = await runSetup(args);
-  assert.equal(first.status, 'готово');
+  assert.equal(first.status.key, 'setup.status.done');
   assert.deepEqual(first.site, { dir, folder: 'created', env: 'created' });
   assert.deepEqual(first.skills.map((s) => s.action), ['installed', 'installed']);
   assert.match(first.next, /doctor/);
@@ -134,6 +161,34 @@ test('runSetup creates the site and both skill copies, and a repeat changes noth
   const second = await runSetup(args);
   assert.equal(second.site.env, 'unchanged');
   assert.deepEqual(second.skills.map((s) => s.action), ['unchanged', 'unchanged']);
+});
+
+test('runSetup --lang writes TILDA_LANG into a new .env and replaces another language later without refusing', async (t) => {
+  const root = makeRoot(t);
+  const dir = join(tempDir(t, 'setup-out-'), 'site');
+  const args = { site: dir, project: '1000000000001', env: {}, cwd: root, root };
+
+  const first = await runSetup({ ...args, lang: 'ru' });
+  assert.deepEqual(first.site.lang, { action: 'filled', value: 'ru' });
+  assert.match(readFileSync(join(dir, '.env'), 'utf8'), /^TILDA_LANG=ru$/m);
+
+  const same = await runSetup({ ...args, lang: 'ru' });
+  assert.deepEqual(same.site.lang, { action: 'unchanged', value: 'ru' });
+
+  const second = await runSetup({ ...args, lang: 'en' });
+  assert.deepEqual(second.site.lang, { action: 'replaced', value: 'en', previous: 'ru' });
+  assert.match(readFileSync(join(dir, '.env'), 'utf8'), /^TILDA_LANG=en$/m);
+
+  const kept = await runSetup(args);
+  assert.equal(kept.site.lang, undefined);
+  assert.match(readFileSync(join(dir, '.env'), 'utf8'), /^TILDA_LANG=en$/m);
+});
+
+test('runSetup --lang without --site writes no files and refuses other languages', async (t) => {
+  const root = makeRoot(t);
+  const result = await runSetup({ agent: 'claude', lang: 'ru', env: {}, cwd: root, root });
+  assert.equal(result.site, undefined);
+  await assert.rejects(runSetup({ agent: 'claude', lang: 'de', env: {}, cwd: root, root }), (error) => error instanceof ConfigError && error.key === 'i18n.badFlag');
 });
 
 test('runSetup refuses a different project id and leaves .env untouched', async (t) => {

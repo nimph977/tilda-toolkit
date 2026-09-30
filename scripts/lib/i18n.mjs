@@ -168,7 +168,7 @@ export function t(lang, key, params = {}) {
 
 /** Английский текст сообщения (для журнала и стека); строка возвращается как есть. */
 export function messageText(m) {
-  if (isMessage(m)) return t('en', m.key, m.params);
+  if (isMessage(m)) return render('en', m);
   return typeof m === 'string' ? m : String(m);
 }
 

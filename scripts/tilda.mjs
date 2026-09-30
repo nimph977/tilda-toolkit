@@ -64,6 +64,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createLogger } from './lib/log.mjs';
+import { LANGS, resolveLang, peekLang, render, renderError, msg, isMessage, messageText, attachMessage, setI18nLogger } from './lib/i18n.mjs';
 import { protectedPages, plansDir, repoRoot } from './lib/paths.mjs';
 import { applySite, cliHint } from './lib/site.mjs';
 import { getDefaultPage, requireOnlineConfig } from './lib/config.mjs';
@@ -71,6 +72,7 @@ import { isLabel } from './lib/reference-store.mjs';
 import { SETUP_AGENTS, runSetup } from './setup.mjs';
 
 const log = createLogger('tilda');
+setI18nLogger(createLogger('i18n'));
 
 export const EXIT = { OK: 0, REFUSED: 1, USAGE: 2, SESSION_LOST: 3 };
 export const COMMANDS = ['browser', 'session', 'inventory', 'snapshot', 'apply', 'verify', 'rollback', 'journal', 'find', 'replace', 'upload', 'preview', 'shot', 'links', 'map', 'page', 'promote', 'stage', 'reference', 'catalog', 'donor', 'doctor', 'setup'];
@@ -129,22 +131,27 @@ export const OPTIONS = {
   title: { type: 'string' },
   agent: { type: 'string' },
   project: { type: 'string' },
+  lang: { type: 'string' },
   help: { type: 'boolean', short: 'h', default: false },
 };
 
 /** Команды, у которых допустим флаг --donor (держатель и вход аккаунта донора). */
 export const DONOR_FLAG_COMMANDS = ['browser', 'session'];
 
-/** Ошибка разбора аргументов → код выхода 2. */
+/** Ошибка разбора аргументов → код выхода 2. Принимает строку или `Message`. */
 export class UsageError extends Error {
   constructor(message) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
     this.name = 'UsageError';
+    this.code = 'USAGE_ERROR';
     this.exitCode = EXIT.USAGE;
   }
 }
 
-export function usage() {
+/** Справка. Параметр `lang` зарезервирован: справка пока печатается на одном языке. */
+export function usage(lang = 'en') {
+  void lang;
   return [
     'Использование: node scripts/tilda.mjs --site <папка сайта> <команда> [флаги]',
     '',
@@ -173,7 +180,7 @@ export function usage() {
     '  donor verify --slug <слепок> --source <метка> [--width 1440,320]  состав блоков против слепка, сверка разметки, кадры сборки и референса, доклад reports/<метка>.transfer.md',
     '  catalog calibrate --page <черновая> --slug|--tplid [--force] [--delay мс] [--batch n] [--pause с]  карта «значение настройки → разметка» по предпросмотру (временный блок создаётся и удаляется)',
     '  doctor [--site <папка>] [--json] — проверить Node.js, зависимости, Chrome, git, папку сайта, .env и скилл; только проверяет и печатает команды исправления',
-    '  setup [--site <папка>] [--project <ID>] [--agent claude|codex|all] — создать папку сайта и .env из .env.example (существующий .env не перезаписывается), поставить скилл tilda-manager в папку агента внутри репозитория',
+    '  setup [--site <папка>] [--project <ID>] [--agent claude|codex|all] [--lang en|ru] — создать папку сайта и .env из .env.example (существующий .env не перезаписывается), поставить скилл tilda-manager в папку агента внутри репозитория',
     '',
     'Флаги:',
     '  --site <папка>    папка сайта вне репозитория: .env, site-baseline, site-reference, .browser-profile, plans (или TILDA_SITE_DIR); без неё команды с данными сайта отказывают с кодом 2',
@@ -181,7 +188,8 @@ export function usage() {
     '  --plan <файл>     план операций JSON (apply, verify)',
     '  --out <путь>      куда положить результат',
     '  --json            итог в stdout как JSON',
-    '  --dry-run         ничего не писать в Тильду',
+    '  --lang en|ru      язык сообщений CLI (иначе TILDA_LANG, затем язык системы, затем английский)',
+    '  --dry-run        ничего не писать в Тильду',
     '  --wait <сек>      session: сколько ждать входа человека (по умолчанию 600)',
     '  --agent <имя>     setup: claude, codex или all',
     '  --project <ID>    setup: ID проекта Tilda для нового .env',
@@ -233,6 +241,11 @@ export function parseCli(argv) {
     throw new UsageError(e.message);
   }
   const { values, positionals } = parsed;
+  if (values.lang !== undefined) {
+    const lang = values.lang.trim().toLowerCase();
+    if (!LANGS.includes(lang)) throw new UsageError(msg('i18n.badFlag', { value: values.lang }));
+    values.lang = lang;
+  }
   if (values.help) return { cmd: 'help', values, positionals: [] };
   const [cmd, ...rest] = positionals;
   if (!cmd) throw new UsageError('не указана команда');
@@ -336,10 +349,31 @@ export function exitCodeFor(error) {
   return EXIT.REFUSED;
 }
 
-/** Короткий итог для stdout: текст не длиннее ~20 строк либо JSON по --json. */
-export function formatSummary(summary, asJson) {
-  if (asJson) return JSON.stringify(summary, null, 2);
-  const lines = Object.entries(summary).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+/** Машинный код статуса: последний сегмент ключа (`cli.browser.status.holderRunning` → `holderRunning`). */
+export function statusCode(key) {
+  return String(key).split('.').pop();
+}
+
+/**
+ * Короткий итог для stdout: текст не длиннее ~20 строк либо JSON по --json.
+ * Поля-`Message` переводятся на `lang`; в JSON `status`-`Message` даёт код `status` и текст `statusText`.
+ */
+export function formatSummary(summary, asJson, lang = 'en') {
+  const rendered = render(lang, summary);
+  if (asJson) {
+    if (!isMessage(summary.status)) return JSON.stringify(rendered, null, 2);
+    const out = {};
+    for (const [k, v] of Object.entries(rendered)) {
+      if (k === 'status') {
+        out.status = statusCode(summary.status.key);
+        out.statusText = v;
+      } else {
+        out[k] = v;
+      }
+    }
+    return JSON.stringify(out, null, 2);
+  }
+  const lines = Object.entries(rendered).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
   return lines.slice(0, 20).join('\n');
 }
 
@@ -1678,28 +1712,39 @@ async function cmdCatalog(values, positionals) {
   });
 }
 
-export async function run(argv) {
+/**
+ * Выполнить команду. `ctx` — изменяемый контекст вызывающего: сюда `run` кладёт выбранный язык,
+ * чтобы `main` перевёл и ошибку, случившуюся уже после выбора языка.
+ */
+export async function run(argv, ctx = {}) {
   const parsed = parseCli(argv);
   const { cmd, positionals } = parsed;
   let { values } = parsed;
+  // Справка идёт до resolveLang: она печатается и при неверном TILDA_LANG.
   if (cmd === 'help') {
-    console.log(usage());
+    console.log(usage(peekLang(argv)));
     return EXIT.OK;
   }
+  const resolved = resolveLang({ flag: values.lang });
+  ctx.lang = resolved.lang;
+  log.debug('run', 'language', { lang: ctx.lang, source: resolved.source });
   // doctor идёт до applySite: битая или ещё не созданная папка сайта — результат проверки, а не ранняя ConfigError.
   if (cmd === 'doctor') {
-    const { runDoctor, formatReport } = await import('./doctor.mjs');
+    const { runDoctor, formatReport, renderReport } = await import('./doctor.mjs');
     const report = await runDoctor({ site: values.site });
-    console.log(values.json ? JSON.stringify(report, null, 2) : formatReport(report));
+    console.log(values.json ? JSON.stringify(renderReport(report, ctx.lang), null, 2) : formatReport(report, ctx.lang));
     return report.status === 'fail' ? EXIT.REFUSED : EXIT.OK;
   }
   // setup тоже до applySite: папки сайта ещё может не быть, а окружение он не использует.
   if (cmd === 'setup') {
-    const summary = await runSetup({ site: values.site, project: values.project, agent: values.agent });
-    console.log(formatSummary(summary, values.json));
+    const summary = await runSetup({ site: values.site, project: values.project, agent: values.agent, lang: values.lang });
+    console.log(formatSummary(summary, values.json, ctx.lang));
     return EXIT.OK;
   }
   const site = applySite({ flag: values.site });
+  // .env сайта мог задать TILDA_LANG: язык выбирается заново.
+  ctx.lang = resolveLang({ flag: values.lang }).lang;
+  log.debug('run', 'language after site', { lang: ctx.lang });
   warnRepoEnv();
   log.debug('run', 'сайт', { site: site?.siteDir ?? null });
   const stageOnline = cmd === 'stage' && positionals[0] === 'apply';
@@ -1736,14 +1781,14 @@ export async function run(argv) {
   log.debug('run', 'команда', { cmd, page: values.page, plan: values.plan, dryRun: values['dry-run'], donor: values.donor });
   if (NOT_IMPLEMENTED.has(cmd)) {
     log.error('run', `команда ${cmd} не реализована`, { exitCode: EXIT.REFUSED });
-    console.log(formatSummary({ status: 'не реализовано', command: cmd }, values.json));
+    console.log(formatSummary({ status: msg('cli.main.status.notImplemented'), command: cmd }, values.json, ctx.lang));
     return EXIT.REFUSED;
   }
   const handlers = { browser: cmdBrowser, session: cmdSession, inventory: cmdInventory, snapshot: cmdSnapshot, apply: cmdApply, verify: cmdVerify, rollback: cmdRollback, journal: cmdJournal, find: cmdFind, replace: cmdReplace, upload: cmdUpload, preview: cmdPreview, shot: cmdShot, links: cmdLinks, map: cmdMap, page: cmdPage, promote: cmdPromote, stage: cmdStage, reference: cmdReference, catalog: cmdCatalog, donor: cmdDonor };
   const summary = await handlers[cmd](values, positionals);
   const code = summary.exitCode ?? EXIT.OK;
   delete summary.exitCode;
-  console.log(formatSummary(summary, values.json));
+  console.log(formatSummary(summary, values.json, ctx.lang));
   return code;
 }
 
@@ -1754,17 +1799,25 @@ function warnRepoEnv() {
 }
 
 async function main() {
+  const argv = process.argv.slice(2);
+  const ctx = {};
   let code;
   try {
-    code = await run(process.argv.slice(2));
+    code = await run(argv, ctx);
   } catch (e) {
     code = exitCodeFor(e);
-    if (e instanceof UsageError) {
-      log.error('main', e.message, { exitCode: code });
-      console.log(usage());
+    const lang = ctx.lang ?? peekLang(argv);
+    // В журнал идёт английский message (и ключ), перевод — только в stdout.
+    log.error('main', `${e.code || e.name}: ${e.message}`, { exitCode: code, key: e.key });
+    if (e instanceof UsageError || e.name === 'UsageError') {
+      console.log(`${render(lang, msg('cli.main.usageError'))}: ${renderError(lang, e)}`);
+      console.log('');
+      console.log(usage(lang));
     } else {
-      log.error('main', `${e.code || e.name}: ${e.message}`, { exitCode: code });
-      console.log(formatSummary({ status: 'ошибка', code: e.code || e.name, message: e.message }, false));
+      const summary = { status: msg('cli.main.status.error'), code: e.code || e.name };
+      if (e.key) summary.key = e.key;
+      summary.message = renderError(lang, e);
+      console.log(formatSummary(summary, false, lang));
     }
   }
   process.exit(code);

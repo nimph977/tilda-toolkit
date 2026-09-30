@@ -8,7 +8,8 @@
  *
  * `.env` сайта читается без перезаписи окружения молча: `TILDA_*`, уже заданная с другим
  * значением, — отказ с именем переменной (значения не выводятся); прочие переменные окружения
- * главнее файла. Относительные пути данных в `.env` считаются от папки сайта.
+ * главнее файла. `TILDA_LANG`, как `LOG_LEVEL`, — настройка процесса: значение окружения главнее
+ * файла без отказа. Относительные пути данных в `.env` считаются от папки сайта.
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -16,6 +17,7 @@ import { parseEnv } from 'node:util';
 import { ConfigError } from './config.mjs';
 import { assertOutsideRepo, isInside, repoRoot } from './paths.mjs';
 import { createLogger } from './log.mjs';
+import { msg } from './i18n.mjs';
 
 const log = createLogger('site');
 
@@ -32,7 +34,7 @@ export const SITE_PATH_VARS = [
 export const SITE_IDENTITY_VARS = ['TILDA_PROJECT_ID', 'TILDA_PROTECTED_PAGES', 'TILDA_DONOR_PROJECT_ID'];
 
 /** Переменные процесса, не зависящие от сайта: из окружения допустимы без предупреждения. */
-export const SITE_NEUTRAL_VARS = ['TILDA_SITE_DIR', 'TILDA_BROWSER_DAEMON', 'TILDA_BROWSER_VISIBLE'];
+export const SITE_NEUTRAL_VARS = ['TILDA_SITE_DIR', 'TILDA_BROWSER_DAEMON', 'TILDA_BROWSER_VISIBLE', 'TILDA_LANG'];
 
 /** Ключи `.env` сайта, которые применяются: настройки инструмента `TILDA_*` и порог логов. */
 export function isSiteVar(key) {
@@ -52,25 +54,25 @@ export function resolveSiteDir({
   const fromEnv = env.TILDA_SITE_DIR?.trim() ? resolve(cwd, env.TILDA_SITE_DIR.trim()) : null;
   if (!fromFlag && !fromEnv) return null;
   if (fromFlag && fromEnv && !(isInside(fromFlag, fromEnv) && isInside(fromEnv, fromFlag))) {
-    throw new ConfigError(`--site и TILDA_SITE_DIR указывают на разные папки: ${fromFlag} и ${fromEnv}`, 'TILDA_SITE_DIR');
+    throw new ConfigError(msg('site.dirsDiffer', { flag: fromFlag, env: fromEnv }), 'TILDA_SITE_DIR');
   }
   const dir = fromFlag ?? fromEnv;
-  if (!exists(dir) || !isDir(dir)) throw new ConfigError(`папка сайта не найдена: ${dir}`, 'TILDA_SITE_DIR');
+  if (!exists(dir) || !isDir(dir)) throw new ConfigError(msg('site.notFound', { dir }), 'TILDA_SITE_DIR');
   assertOutsideRepo(dir, 'TILDA_SITE_DIR', { root });
-  if (!exists(join(dir, '.env'))) throw new ConfigError(`в папке сайта нет .env: ${dir}`, 'TILDA_SITE_DIR');
+  if (!exists(join(dir, '.env'))) throw new ConfigError(msg('site.noEnv', { dir }), 'TILDA_SITE_DIR');
   return dir;
 }
 
 /**
  * Что `.env` сайта добавляет к окружению. Чистая функция: `set` — переменные к установке,
- * `ignored` — ключи `.env` вне `TILDA_*` и `LOG_LEVEL` (не применяются), `kept` — `LOG_LEVEL`, где остаётся
- * значение окружения, `inherited` — прочие `TILDA_*`,
+ * `ignored` — ключи `.env` вне `TILDA_*` и `LOG_LEVEL` (не применяются), `kept` — `LOG_LEVEL` и `TILDA_LANG`,
+ * где остаётся значение окружения, `inherited` — прочие `TILDA_*`,
  * заданные только в окружении (предупреждение). `TILDA_PROJECT_ID`, `TILDA_PROTECTED_PAGES` и
  * `TILDA_DONOR_PROJECT_ID` только в окружении — отказ: их значения принадлежат другому сайту.
  */
 export function siteEnvChanges({ siteDir, text, env = process.env }) {
   const parsed = parseEnv(text);
-  if ('TILDA_SITE_DIR' in parsed) throw new ConfigError('TILDA_SITE_DIR нельзя задавать в .env папки сайта', 'TILDA_SITE_DIR');
+  if ('TILDA_SITE_DIR' in parsed) throw new ConfigError(msg('site.dirVarInSiteEnv'), 'TILDA_SITE_DIR');
   const set = {};
   const kept = [];
   const ignored = [];
@@ -84,24 +86,18 @@ export function siteEnvChanges({ siteDir, text, env = process.env }) {
     const value = SITE_PATH_VARS.includes(key) && raw.trim() && !isAbsolute(raw.trim()) ? resolve(siteDir, raw.trim()) : raw;
     if (env[key] === undefined) set[key] = value;
     else if (env[key] === value) continue;
-    else if (key.startsWith('TILDA_')) conflicts.push(key);
+    else if (key.startsWith('TILDA_') && key !== 'TILDA_LANG') conflicts.push(key);
     else kept.push(key);
   }
   if (conflicts.length) {
-    throw new ConfigError(
-      `переменные заданы и в окружении, и в .env папки сайта с разными значениями: ${conflicts.join(', ')} — уберите их из окружения`,
-      conflicts[0],
-    );
+    throw new ConfigError(msg('site.envConflict', { names: conflicts.join(', ') }), conflicts[0]);
   }
   // TILDA_*, которых нет в .env сайта, но есть в окружении оболочки, могли остаться от другого сайта.
   const orphans = Object.keys(env).filter((k) => k.startsWith('TILDA_') && !(k in parsed) && !SITE_NEUTRAL_VARS.includes(k));
   const identityOrphans = orphans.filter((k) => SITE_IDENTITY_VARS.includes(k));
   if (identityOrphans.length) {
     log.error('siteEnvChanges', '[FIX] переменные сайта заданы только в окружении', { names: identityOrphans });
-    throw new ConfigError(
-      `переменные заданы только в окружении, а в .env папки сайта их нет: ${identityOrphans.join(', ')} — впишите их в .env сайта или уберите из окружения`,
-      identityOrphans[0],
-    );
+    throw new ConfigError(msg('site.identityOnlyInEnv', { names: identityOrphans.join(', ') }), identityOrphans[0]);
   }
   return { set, kept, inherited: orphans, ignored };
 }

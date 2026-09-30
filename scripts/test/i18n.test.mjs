@@ -1,9 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   LangError, attachMessage, isMessage, messageText, msg, peekLang, pluralForm, render, renderError,
   resolveLang, systemLang, t,
 } from '../lib/i18n.mjs';
+import { ROOT } from './product-files.mjs';
 
 describe('resolveLang', () => {
   it('флаг побеждает окружение', () => {
@@ -163,5 +166,22 @@ describe('renderError', () => {
     const e = Object.assign(new Error('something broke'), { code: 'SOME_CODE' });
     assert.equal(renderError('ru', e), 'SOME_CODE: something broke');
     assert.equal(renderError('en', new TypeError('bad')), 'TypeError: bad');
+  });
+});
+
+describe('i18n.mjs остаётся совместимым с doctor', () => {
+  const text = readFileSync(join(ROOT, 'scripts', 'lib', 'i18n.mjs'), 'utf8');
+
+  it('статически импортирует только node:*', () => {
+    const specifiers = [...text.matchAll(/^import .* from '(.+)'/gm)].map((match) => match[1]);
+    assert.ok(specifiers.length > 0);
+    assert.deepEqual(specifiers.filter((name) => !name.startsWith('node:')), []);
+  });
+
+  it('не использует API новее Node 16', () => {
+    const code = text.split('\n').filter((line) => !line.trim().startsWith('*') && !line.trim().startsWith('//')).join('\n');
+    for (const forbidden of ['Object.hasOwn', '.at(', 'findLast', 'structuredClone', 'import.meta.dirname', 'import.meta.filename', 'parseEnv']) {
+      assert.ok(!code.includes(forbidden), forbidden);
+    }
   });
 });

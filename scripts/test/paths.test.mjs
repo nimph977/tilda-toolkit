@@ -14,8 +14,10 @@ function withTmp(fn) {
   }
 }
 
-const isConfigError = (variable, text) => (e) =>
-  e.code === 'CONFIG_ERROR' && e.exitCode === 2 && e.variable === variable && (!text || text.test(e.message));
+/** `check` — ключ словаря (строка) или регулярное выражение по английскому `message`. */
+const isConfigError = (variable, check) => (e) =>
+  e.code === 'CONFIG_ERROR' && e.exitCode === 2 && e.variable === variable
+  && (!check || (typeof check === 'string' ? e.key === check : check.test(e.message)));
 
 test('явная переменная папки данных берётся как есть', () => {
   withTmp((tmp) => {
@@ -49,7 +51,7 @@ test('пустая переменная равна незаданной', () => 
 test('явная папка данных внутри репозитория — отказ', () => {
   assert.throws(
     () => baselineDir({ TILDA_BASELINE_DIR: join(repoRoot(), 'site-baseline') }),
-    isConfigError('TILDA_BASELINE_DIR', /внутри репозитория/),
+    isConfigError('TILDA_BASELINE_DIR', 'paths.insideRepo'),
   );
   assert.throws(() => testProfileDir({ TILDA_BROWSER_PROFILE: join(repoRoot(), '.browser-profile') }), isConfigError('TILDA_BROWSER_PROFILE'));
 });
@@ -93,7 +95,7 @@ test('assertOutsideRepo: ярлык (junction/symlink) внутрь репози
     mkdirSync(outside);
     const link = join(outside, 'link');
     symlinkSync(inner, link, 'junction');
-    assert.throws(() => assertOutsideRepo(link, 'V', { root: repo }), isConfigError('V', /внутри репозитория/));
+    assert.throws(() => assertOutsideRepo(link, 'V', { root: repo }), isConfigError('V', 'paths.insideRepo'));
     // ещё не созданная подпапка за ярлыком тоже считается внутри
     assert.throws(() => assertOutsideRepo(join(link, 'site-baseline'), 'V', { root: repo }), isConfigError('V'));
     // обычная папка вне репозитория проходит

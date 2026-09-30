@@ -1,9 +1,12 @@
 /** Validated runtime configuration for online Tilda operations. */
 import { resolve } from 'node:path';
+import { attachMessage, messageText, msg } from './i18n.mjs';
 
+/** Ошибка настройки. `message` — строка или `Message`: английский текст в `message`, ключ и параметры — в `key`/`params`. */
 export class ConfigError extends Error {
   constructor(message, variable) {
-    super(message);
+    super(messageText(message));
+    attachMessage(this, message);
     this.name = 'ConfigError';
     this.code = 'CONFIG_ERROR';
     this.exitCode = 2;
@@ -14,11 +17,11 @@ export class ConfigError extends Error {
 export function parseNumericId(value, name, { required = true } = {}) {
   if (value === undefined || value === null || String(value).trim() === '') {
     if (!required) return undefined;
-    throw new ConfigError(`${name} is required and must be a positive numeric ID`, name);
+    throw new ConfigError(msg('config.idRequired', { name }), name);
   }
   const id = String(value).trim();
   if (!/^[1-9]\d*$/.test(id)) {
-    throw new ConfigError(`${name} must be a positive numeric ID, got ${JSON.stringify(value)}`, name);
+    throw new ConfigError(msg('config.idNotNumeric', { name, value: JSON.stringify(value) }), name);
   }
   return id;
 }
@@ -33,7 +36,7 @@ export const PROJECT_ROLES = {
 };
 
 export function assertRole(role) {
-  if (!Object.hasOwn(PROJECT_ROLES, role)) throw new ConfigError(`unknown project role: ${role}`, 'role');
+  if (!Object.hasOwn(PROJECT_ROLES, role)) throw new ConfigError(msg('config.unknownRole', { role }), 'role');
   return role;
 }
 
@@ -52,7 +55,7 @@ export function resolveProjectIdFor(role, value, env = process.env) {
   if (value === undefined || value === null || String(value).trim() === '') return configured;
   const requested = parseNumericId(value, 'projectid');
   if (requested !== configured) {
-    throw new ConfigError(`projectid ${requested} does not match ${projectVar} ${configured}`, projectVar);
+    throw new ConfigError(msg('config.projectMismatch', { requested, variable: projectVar, configured }), projectVar);
   }
   return configured;
 }
@@ -66,7 +69,7 @@ export function getDonorProfile(env = process.env) {
   const raw = env.TILDA_DONOR_BROWSER_PROFILE;
   const value = raw === undefined || raw === null ? '' : String(raw).trim();
   if (!value) {
-    throw new ConfigError('TILDA_DONOR_BROWSER_PROFILE is required for donor commands', 'TILDA_DONOR_BROWSER_PROFILE');
+    throw new ConfigError(msg('config.donorProfileRequired'), 'TILDA_DONOR_BROWSER_PROFILE');
   }
   return value;
 }
@@ -83,12 +86,12 @@ export function requireDonorConfig({ env = process.env, withTest = false, testPr
   const donorProfile = withProfile ? getDonorProfile(env) : null;
   const testRaw = env.TILDA_PROJECT_ID;
   if (testRaw !== undefined && testRaw !== null && String(testRaw).trim() === donorProjectId) {
-    throw new ConfigError('TILDA_DONOR_PROJECT_ID must differ from TILDA_PROJECT_ID', 'TILDA_DONOR_PROJECT_ID');
+    throw new ConfigError(msg('config.donorSameProject'), 'TILDA_DONOR_PROJECT_ID');
   }
   if (!withTest) return { donorProjectId, donorProfile };
   const online = requireOnlineConfig({ env });
   if (donorProfile !== null && testProfile !== undefined && sameProfile(donorProfile, testProfile)) {
-    throw new ConfigError('TILDA_DONOR_BROWSER_PROFILE must differ from the test browser profile', 'TILDA_DONOR_BROWSER_PROFILE');
+    throw new ConfigError(msg('config.donorSameProfile'), 'TILDA_DONOR_BROWSER_PROFILE');
   }
   return { donorProjectId, donorProfile, ...online };
 }
@@ -104,7 +107,7 @@ export function getDefaultPage(env = process.env) {
 
 export function getProtectedPages(env = process.env) {
   if (!Object.prototype.hasOwnProperty.call(env, 'TILDA_PROTECTED_PAGES')) {
-    throw new ConfigError('TILDA_PROTECTED_PAGES must be set explicitly (use an empty string for no protected pages)', 'TILDA_PROTECTED_PAGES');
+    throw new ConfigError(msg('config.protectedNotSet'), 'TILDA_PROTECTED_PAGES');
   }
   const raw = String(env.TILDA_PROTECTED_PAGES ?? '');
   if (!raw.trim()) return [];
@@ -117,7 +120,7 @@ export function requireOnlineConfig({ env = process.env, requireDefaultPage = fa
   const protectedPages = getProtectedPages(env);
   const defaultPage = getDefaultPage(env);
   if (requireDefaultPage && defaultPage === undefined) {
-    throw new ConfigError('TILDA_DEFAULT_PAGE is required when --page is omitted', 'TILDA_DEFAULT_PAGE');
+    throw new ConfigError(msg('config.defaultPageRequired'), 'TILDA_DEFAULT_PAGE');
   }
   return { projectId, defaultPage, protectedPages };
 }

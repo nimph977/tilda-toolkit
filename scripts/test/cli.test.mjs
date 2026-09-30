@@ -1,17 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { parseCli, usage, UsageError } from '../tilda.mjs';
+import { parseCli, usage, UsageError, formatSummary, statusCode } from '../tilda.mjs';
+import { msg } from '../lib/i18n.mjs';
 
 const cli = fileURLToPath(new URL('../tilda.mjs', import.meta.url));
 const repoDir = fileURLToPath(new URL('../..', import.meta.url));
 
 // Тесты не зависят от сайта, выбранного на машине: дочерние процессы наследуют это окружение.
 for (const k of ['TILDA_SITE_DIR', 'TILDA_BASELINE_DIR', 'TILDA_CATALOG_DIR']) delete process.env[k];
+// Язык вывода задан явно: на машине владельца язык системы русский, в CI английский, а тесты сверяют текст.
+process.env.TILDA_LANG = 'en';
 
 function run(args, profile) {
   const env = { ...process.env, LOG_LEVEL: 'ERROR', TILDA_BROWSER_PROFILE: profile };
@@ -379,7 +382,7 @@ test('--site и TILDA_SITE_DIR на разные папки — отказ ко�
     }
     const result = runCli(['--site', join(root, 'a'), 'catalog', 'list'], bareEnv({ TILDA_SITE_DIR: join(root, 'b') }));
     assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
-    assert.match(result.stdout + result.stderr, /разные папки/);
+    assert.match(result.stdout + result.stderr, /TILDA_SITE_DIR/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -393,7 +396,7 @@ test('ID проекта только в окружении, а в .env сайт�
     assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
     const out = result.stdout + result.stderr;
     assert.match(out, /TILDA_PROJECT_ID/);
-    assert.match(out, /только в окружении/);
+    assert.match(out, /only in the environment/);
     assert.doesNotMatch(out, /100002/);
   } finally {
     rmSync(site, { recursive: true, force: true });
@@ -459,6 +462,8 @@ test('setup создаёт папку сайта и .env вне репозито
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     const summary = JSON.parse(result.stdout);
     assert.equal(summary.site.env, 'created');
+    assert.equal(summary.status, 'done');
+    assert.equal(summary.statusText, 'done');
     assert.equal(existsSync(join(site, '.env')), true);
     assert.deepEqual(guarded.map((path) => existsSync(path)), before, 'без --agent копии скилла не создаются');
 
@@ -470,9 +475,78 @@ test('setup создаёт папку сайта и .env вне репозито
   }
 });
 
+test('setup --lang пишет TILDA_LANG в .env сайта, выводит итог на этом языке и заменяет язык без отказа', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tilda-cli-setup-lang-'));
+  try {
+    const site = join(root, 'site');
+    const first = runCli(['setup', '--site', site, '--project', '1000000000001', '--lang', 'ru', '--json'], bareEnv());
+    assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`);
+    const summary = JSON.parse(first.stdout);
+    assert.equal(summary.status, 'done');
+    assert.equal(summary.statusText, 'готово');
+    assert.equal(summary.site.lang.action, 'filled');
+    assert.match(readFileSync(join(site, '.env'), 'utf8'), /^TILDA_LANG=ru$/m);
+
+    const second = runCli(['setup', '--site', site, '--lang', 'en'], bareEnv());
+    assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
+    assert.match(second.stdout, /^status: done$/m);
+    assert.match(readFileSync(join(site, '.env'), 'utf8'), /^TILDA_LANG=en$/m);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('setup с папкой сайта внутри репозитория — отказ кодом 2 и ничего не создаёт', () => {
   const target = join(repoDir, 'docs', 'setup-should-not-exist');
   const result = runCli(['setup', '--site', target], bareEnv());
   assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
   assert.equal(existsSync(target), false);
+});
+
+test('parseCli проверяет --lang и приводит его к нижнему регистру', () => {
+  assert.throws(() => parseCli(['--lang', 'de', 'doctor']), (e) => e instanceof UsageError && e.key === 'i18n.badFlag' && e.code === 'USAGE_ERROR');
+  assert.equal(parseCli(['--lang', 'RU', 'doctor']).values.lang, 'ru');
+  assert.equal(parseCli(['doctor']).values.lang, undefined);
+});
+
+test('formatSummary: в JSON status — код, statusText — перевод; в тексте всё переводится', () => {
+  const summary = { status: msg('cli.main.status.error'), n: 1 };
+  const json = JSON.parse(formatSummary(summary, true, 'ru'));
+  assert.deepEqual(json, { status: 'error', statusText: 'ошибка', n: 1 });
+  assert.equal(formatSummary(summary, false, 'ru'), 'status: ошибка\nn: 1');
+  assert.equal(formatSummary(summary, false, 'en'), 'status: error\nn: 1');
+  assert.equal(statusCode('cli.browser.status.holderRunning'), 'holderRunning');
+});
+
+test('formatSummary: строка status без Message остаётся как есть', () => {
+  assert.deepEqual(JSON.parse(formatSummary({ status: 'plain' }, true, 'ru')), { status: 'plain' });
+});
+
+test('неверный --lang: код 2, ошибка и справка в stdout', () => {
+  const result = runCli(['--lang', 'de', 'doctor'], bareEnv({ TILDA_LANG: 'en' }));
+  assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /^error: --lang expects en or ru, got de/);
+  assert.match(result.stdout, /Использование:/);
+});
+
+test('без сайта: итог ошибки на языке --lang', () => {
+  const env = bareEnv({ TILDA_LANG: 'en' });
+  const ru = runCli(['--lang', 'ru', 'browser', 'status'], env);
+  assert.equal(ru.status, 2, `${ru.stdout}\n${ru.stderr}`);
+  assert.match(ru.stdout, /^status: ошибка$/m);
+  const en = runCli(['--lang', 'en', 'browser', 'status'], env);
+  assert.equal(en.status, 2);
+  assert.match(en.stdout, /^status: error$/m);
+});
+
+test('неверный TILDA_LANG: код 2, в итоге названа переменная', () => {
+  const result = runCli(['browser', 'status'], bareEnv({ TILDA_LANG: 'xx' }));
+  assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /TILDA_LANG/);
+});
+
+test('справка печатается и при неверном TILDA_LANG', () => {
+  const result = runCli(['--help'], bareEnv({ TILDA_LANG: 'fr' }));
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /--lang en\|ru/);
 });
