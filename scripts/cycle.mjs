@@ -50,7 +50,7 @@ function writeJson(path, data) {
 
 function assertWritable(pageid, fn) {
   if (protectedPages().includes(String(pageid))) {
-    log.error(fn, 'страница защищена от записи (TILDA_PROTECTED_PAGES)', { pageid: String(pageid) });
+    log.error(fn, 'page is protected from writes (TILDA_PROTECTED_PAGES)', { pageid: String(pageid) });
     throw new ToolError('PROTECTED_PAGE', msg('cycle.protectedPage', { pageid }));
   }
 }
@@ -119,7 +119,7 @@ export async function inventory(driver, pageid, opts = {}) {
   const { baseDir } = paths(opts);
   const list = await driver.call('listRecords', []);
   const path = writeJson(join(baseDir, 'records', String(pageid), '_inventory.json'), list);
-  log.info('inventory', 'инвентарь снят', { pageid: String(pageid), records: list.length, zero: list.filter((r) => r.zeroIndex).length, hidden: list.filter((r) => r.hidden).length, path });
+  log.info('inventory', 'inventory captured', { pageid: String(pageid), records: list.length, zero: list.filter((r) => r.zeroIndex).length, hidden: list.filter((r) => r.hidden).length, path });
   return list;
 }
 
@@ -170,10 +170,10 @@ export async function snapshotBlocks(driver, targets, opts = {}) {
     const started = Date.now();
     const data = t.kind === 'zero' ? await driver.call('getZero', [t.page, t.recordid]) : await driver.call('readRecordSnapshot', [t.page, t.recordid]);
     const r = saveSnapshot({ kind: t.kind, pageid: t.page, recordid: t.recordid, data, source: opts.source || 'cycle' }, { baseDir });
-    log.debug('snapshotBlocks', 'снимок снят', { kind: t.kind, page: t.page, recordid: t.recordid, ms: Date.now() - started, backup: r.backup ? 'да' : 'нет' });
+    log.debug('snapshotBlocks', 'snapshot captured', { kind: t.kind, page: t.page, recordid: t.recordid, ms: Date.now() - started, backup: r.backup ? 'yes' : 'no' });
     saved.push({ ...t, path: r.path, backup: r.backup });
   }
-  log.info('snapshotBlocks', 'снимки сняты', { blocks: saved.length });
+  log.info('snapshotBlocks', 'snapshots captured', { blocks: saved.length });
   return saved;
 }
 
@@ -197,7 +197,7 @@ async function rereadBlocks(driver, pageid, items, opts) {
       }
       files.push(writeJson(join(dir, `${it.recordid}.record.json`), snap));
     }
-    log.debug('rereadBlocks', 'перечитан', { kind: it.kind, recordid: it.recordid, ms: Date.now() - started });
+    log.debug('rereadBlocks', 'reread', { kind: it.kind, recordid: it.recordid, ms: Date.now() - started });
   }
   return files;
 }
@@ -213,7 +213,7 @@ async function writePayload(driver, p, plan) {
   else if (p.kind === 'sort') result = await driver.call('saveRecordsSort', [p.pageid, p.order]);
   else if (p.kind === 'block') result = await driver.call('setBlockHidden', [p.pageid, p.recordid, p.hidden]);
   else throw new Error(`unknown payload: ${p.kind}`);
-  log.debug('writePayload', 'записано', { kind: p.kind, recordid: p.recordid, field: p.field, ms: Date.now() - started, result: typeof result === 'string' ? result : JSON.stringify(result).slice(0, 80) });
+  log.debug('writePayload', 'written', { kind: p.kind, recordid: p.recordid, field: p.field, ms: Date.now() - started, result: typeof result === 'string' ? result : JSON.stringify(result).slice(0, 80) });
   return result;
 }
 
@@ -225,7 +225,7 @@ async function buildCreated(driver, pageid, createPayloads, plan, opts) {
   const started = Date.now();
   const journal = await driver.call('buildBlocks', [pageid, blocks, { startAfter }]);
   const path = writeJson(join(reread, String(pageid), '_built.json'), journal);
-  log.info('buildCreated', 'сборка блоков завершена', { blocks: blocks.length, ok: journal.ok, failed: journal.failed, ms: Date.now() - started, path });
+  log.info('buildCreated', 'block build finished', { blocks: blocks.length, ok: journal.ok, failed: journal.failed, ms: Date.now() - started, path });
   return journal;
 }
 
@@ -248,7 +248,7 @@ export async function apply(driver, plan, opts = {}) {
   if (!Array.isArray(plan.ops) || plan.ops.length === 0) throw new ToolError('PLAN_INVALID', msg('cycle.noOps'));
   const { baseDir, out, reread } = paths(opts);
   const t0 = Date.now();
-  log.info('apply', 'старт цикла', { pageid, ops: plan.ops.length, dryRun: Boolean(opts.dryRun) });
+  log.info('apply', 'cycle start', { pageid, ops: plan.ops.length, dryRun: Boolean(opts.dryRun) });
 
   // 1. Свежий инвентарь — по нему zeroIndex превращается в recordid (старый список опасен).
   const before = { inventory: opts.skipInventory ? JSON.parse(readFileSync(join(baseDir, 'records', pageid, '_inventory.json'), 'utf8')) : await inventory(driver, pageid, { baseDir }), records: {} };
@@ -266,7 +266,7 @@ export async function apply(driver, plan, opts = {}) {
     const spec = op.set && op.set.image;
     if (!spec || typeof spec !== 'object' || !spec.file) continue;
     if (opts.dryRun) {
-      log.info('apply', 'dry-run: файл не загружается', { file: spec.file });
+      log.info('apply', 'dry-run: file is not uploaded', { file: spec.file });
       continue;
     }
     const r = await upload(driver, spec.file);
@@ -279,7 +279,7 @@ export async function apply(driver, plan, opts = {}) {
     for (const im of imgs) {
       if (!im.file || im.url) continue;
       if (opts.dryRun) {
-        log.info('apply', 'dry-run: файл не загружается', { file: im.file });
+        log.info('apply', 'dry-run: file is not uploaded', { file: im.file });
         continue;
       }
       const r = await upload(driver, im.file);
@@ -292,7 +292,7 @@ export async function apply(driver, plan, opts = {}) {
   // 3. prepare — локально, без сети.
   const payloads = prepare(plan, { baseDir, out, emitCalls: Boolean(opts.emitCalls) });
   const changes = payloads.filter((p) => p.kind === 'zero').reduce((n, p) => n + (p.changes?.length ?? 0), 0);
-  log.info('apply', 'payload подготовлен', { payloads: payloads.length, zeroChanges: changes, ms: Date.now() - t0 });
+  log.info('apply', 'payload prepared', { payloads: payloads.length, zeroChanges: changes, ms: Date.now() - t0 });
   const summary = { pageid, ops: plan.ops.length, payloads: payloads.length, written: 0, created: [], verify: [], dryRun: Boolean(opts.dryRun), layout: touchesLayout(plan), journal: null, uploads: summaryUploads, shots: [], ms: 0 };
   summary.diff = payloads.flatMap((p) =>
     p.kind === 'zero'
@@ -310,7 +310,7 @@ export async function apply(driver, plan, opts = {}) {
             : [{ create: p.id, source: `${p.source.page}/${p.source.recordid}`, tplid: p.tplid }],
   );
   if (opts.dryRun) {
-    log.info('apply', 'dry-run: записи не было', { payloads: payloads.length });
+    log.info('apply', 'dry-run: nothing was written', { payloads: payloads.length });
     summary.ms = Date.now() - t0;
     return summary;
   }
@@ -321,7 +321,7 @@ export async function apply(driver, plan, opts = {}) {
   let built = null;
   if (createPayloads.length) {
     built = await buildCreated(driver, pageid, createPayloads, plan, { reread });
-    if (built.failed) log.error('apply', 'часть блоков не собрана', { failed: built.failed, first: built.built.find((b) => b.status !== 'ok') });
+    if (built.failed) log.error('apply', 'some blocks were not built', { failed: built.failed, first: built.built.find((b) => b.status !== 'ok') });
   }
   for (const p of editPayloads) {
     await writePayload(driver, p, plan);
@@ -332,7 +332,7 @@ export async function apply(driver, plan, opts = {}) {
   // 5. Перечитать. blockHidden и сборка требуют перезагрузки редактора: DOM и слои заново.
   const needReload = editPayloads.some((p) => p.kind === 'block' || p.kind === 'sort') || Boolean(built);
   if (needReload) {
-    log.debug('apply', 'перезагрузка редактора перед перечитыванием', { reason: built ? 'сборка блоков' : 'blockHidden' });
+    log.debug('apply', 'editor reload before rereading', { reason: built ? 'block build' : 'blockHidden' });
     await driver.reload();
   }
   const rereadItems = editPayloads.filter((p) => p.kind !== 'block' && p.kind !== 'sort').map((p) => ({ kind: p.kind === 'zero' ? 'zero' : 'record', recordid: p.recordid }));
@@ -357,7 +357,7 @@ export async function apply(driver, plan, opts = {}) {
         const file = join(reread, pageid, t.kind === 'zero' ? `${t.recordid}.json` : `${t.recordid}.record.json`);
         saveSnapshot({ kind: t.kind, pageid, recordid: t.recordid, data: JSON.parse(readFileSync(file, 'utf8')), source: 'cycle.apply created' }, { baseDir });
       }
-      log.info('apply', 'созданные блоки', { created: summary.created.map((c) => `${c.id}→${c.recordid}${c.zeroIndex ? ` (zero#${c.zeroIndex})` : ''}`) });
+      log.info('apply', 'created blocks', { created: summary.created.map((c) => `${c.id}→${c.recordid}${c.zeroIndex ? ` (zero#${c.zeroIndex})` : ''}`) });
     }
   }
 
@@ -370,7 +370,7 @@ export async function apply(driver, plan, opts = {}) {
     summary.journal = writeRecord(record, { baseDir });
   }
   if (summary.verify.length) {
-    log.error('apply', 'сверка не прошла', { problems: summary.verify.length, first: summary.verify[0] });
+    log.error('apply', 'verification failed', { problems: summary.verify.length, first: summary.verify[0] });
     return summary;
   }
   // 7. Сверка чиста — перечитанное становится снимком: baseline хранит последнее известное живое
@@ -380,16 +380,16 @@ export async function apply(driver, plan, opts = {}) {
     const file = join(reread, pageid, it.kind === 'zero' ? `${it.recordid}.json` : `${it.recordid}.record.json`);
     saveSnapshot({ kind: it.kind, pageid, recordid: it.recordid, data: JSON.parse(readFileSync(file, 'utf8')), source: 'cycle.apply reread' }, { baseDir });
   }
-  log.info('apply', `итог: ${plan.ops.length} операций, записано ${summary.written}, verify: 0 расхождений`, { ms: summary.ms, created: summary.created.length, snapshotsUpdated: rereadItems.length });
+  log.info('apply', `summary: ${plan.ops.length} operations, written ${summary.written}, verify: 0 differences`, { ms: summary.ms, created: summary.created.length, snapshotsUpdated: rereadItems.length });
   // 8. План трогал геометрию, размер, типографику или выравнивание — единственный способ увидеть
   // поехавший адаптив это скриншот: в модели и в verify он выглядит корректно.
   if ((summary.layout || opts.shot) && driver.shot && !opts.noShot) {
     try {
       const r = await driver.shot({ widths: opts.widths });
       summary.shots = r.files;
-      log.info('apply', 'скриншоты сняты', { files: r.files.length, widths: r.widths.map((w) => `${w.width}:${w.height}px`) });
+      log.info('apply', 'screenshots captured', { files: r.files.length, widths: r.widths.map((w) => `${w.width}:${w.height}px`) });
     } catch (e) {
-      log.warn('apply', 'скриншоты не сняты', { error: e.message });
+      log.warn('apply', 'screenshots not captured', { error: e.message });
       summary.shotError = e.message;
     }
   }
@@ -408,11 +408,11 @@ export async function rollback(driver, recordPath, opts = {}) {
   const planPath = join(out, String(plan.page), '_rollback-plan.json');
   mkdirSync(join(planPath, '..'), { recursive: true });
   writeFileSync(planPath, JSON.stringify(plan, null, 2) + '\n', 'utf8');
-  log.info('rollback', `откат ${plan.ops.length} операций записи ${record.plan.name} (${record.at})`, { skipped: skipped.length, planPath });
+  log.info('rollback', `rollback of ${plan.ops.length} write operations of ${record.plan.name} (${record.at})`, { skipped: skipped.length, planPath });
   const r = await apply(driver, plan, { ...opts, baseDir, planPath });
   r.rollbackOf = record.at;
   r.skipped = skipped;
-  if (!r.dryRun) log.info('rollback', `откат ${plan.ops.length} операций, verify: ${r.verify.length}`, { journal: r.journal });
+  if (!r.dryRun) log.info('rollback', `rollback of ${plan.ops.length} operations, verify: ${r.verify.length}`, { journal: r.journal });
   return r;
 }
 
@@ -455,10 +455,10 @@ export async function preview(driver, plan, opts = {}) {
     } finally {
       await driver.call('restorePreview', [p.recordid]);
     }
-    log.debug('preview', 'предпросмотр блока', { recordid: p.recordid, kind: p.kind, htmlBytes: r.htmlBytes, rendered: r.rendered, shot });
+    log.debug('preview', 'block preview', { recordid: p.recordid, kind: p.kind, htmlBytes: r.htmlBytes, rendered: r.rendered, shot });
     previews.push({ recordid: p.recordid, kind: p.kind, htmlBytes: r.htmlBytes, rendered: r.rendered, shot });
   }
-  log.info('preview', `предпросмотр ${previews.length} блоков, записи не было`, { skipped: skipped.length, shots: previews.filter((x) => x.shot).length });
+  log.info('preview', `preview of ${previews.length} blocks, nothing was written`, { skipped: skipped.length, shots: previews.filter((x) => x.shot).length });
   return { pageid, previews, skipped };
 }
 
@@ -477,7 +477,7 @@ export async function shot(driver, pageid, opts = {}) {
 export async function mapBlocks(driver, pageid, opts = {}) {
   const inv = await inventory(driver, pageid, opts);
   const r = await driver.mapBlocks(inv, { widths: opts.widths, outDir: opts.outDir });
-  log.info('mapBlocks', `карта блоков: подписано ${r.drawn} из ${inv.length}, файлов ${r.files.length}`, { pageid: String(pageid), legend: r.legend });
+  log.info('mapBlocks', `block map: labelled ${r.drawn} of ${inv.length}, files ${r.files.length}`, { pageid: String(pageid), legend: r.legend });
   return { pageid: String(pageid), inventory: inv.length, ...r };
 }
 

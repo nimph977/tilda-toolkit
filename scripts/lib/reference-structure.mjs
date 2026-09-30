@@ -219,7 +219,7 @@ export function extractButtons(chunk, baseUrl, { slotAttr = BUTTON_SLOT_ATTR } =
     }
   };
   const buttons = found.map(({ bySlot, ...b }) => (bySlot === null ? { slot: freeSlot(), ...b, source: 'order' } : { slot: bySlot, ...b, source: 'attr' }));
-  log.debug('extractButtons', 'кнопки блока', { count: buttons.length, bySlotAttr: buttons.filter((b) => b.source === 'attr').length, cardButtons });
+  log.debug('extractButtons', 'block buttons', { count: buttons.length, bySlotAttr: buttons.filter((b) => b.source === 'attr').length, cardButtons });
   return buttons;
 }
 
@@ -248,7 +248,7 @@ export function extractCardButtons(chunk, baseUrl) {
     const raw = el.attrs.href ?? '';
     out.set(lid, { text, href: !raw ? '' : KEEP_HREF_RE.test(raw) ? raw : absolute(raw, baseUrl) });
   }
-  log.debug('extractCardButtons', 'кнопки карточек', { count: out.size, withHref: [...out.values()].filter((b) => b.href).length });
+  log.debug('extractCardButtons', 'card buttons', { count: out.size, withHref: [...out.values()].filter((b) => b.href).length });
   return out;
 }
 
@@ -272,7 +272,7 @@ export function extractT123Code(chunk) {
       return '';
     })
     .trim();
-  log.debug('extractT123Code', 'код HTML-блока', { bytes: code.length, scripts });
+  log.debug('extractT123Code', 'HTML block code', { bytes: code.length, scripts });
   return { code, scripts };
 }
 
@@ -291,7 +291,7 @@ export function extractMessengers(chunk, baseUrl) {
     if (!raw) continue;
     out.push({ service, href: KEEP_HREF_RE.test(raw) ? raw : absolute(raw, baseUrl) });
   }
-  log.debug('extractMessengers', 'мессенджеры', { services: out.map((m) => m.service) });
+  log.debug('extractMessengers', 'messengers', { services: out.map((m) => m.service) });
   return out;
 }
 
@@ -323,7 +323,7 @@ export function extractForm(chunk, baseUrl) {
   if (!inputs.length && !form) return null;
   const fa = form?.attrs ?? {};
   const successUrl = fa['data-success-url'] ? absolute(fa['data-success-url'], baseUrl) : null;
-  log.debug('extractForm', 'форма', { inputs: inputs.length, types: inputs.map((x) => x.type), successUrl: Boolean(successUrl), successMessage: Boolean(fa['data-success-message']) });
+  log.debug('extractForm', 'form', { inputs: inputs.length, types: inputs.map((x) => x.type), successUrl: Boolean(successUrl), successMessage: Boolean(fa['data-success-message']) });
   return { inputs, successUrl, successMessage: fa['data-success-message'] ?? null, successTitle: fa['data-success-title'] ?? null };
 }
 
@@ -338,7 +338,7 @@ export function extractVideo(chunk) {
   for (const kind of VIDEO_KINDS) {
     const m = chunk.match(new RegExp(`\\sdata-content-video-url-${kind}\\s*=\\s*["']([^"']+)["']`, 'i'));
     if (m && m[1].trim()) {
-      log.debug('extractVideo', 'видео блока', { kind });
+      log.debug('extractVideo', 'block video', { kind });
       return { kind, url: decodeEntities(m[1].trim()) };
     }
   }
@@ -365,7 +365,7 @@ export function extractShape(chunk) {
   if (!pos) return null;
   const d = (chunk.match(/<path\s[^>]*\bd="([^"]+)"/i) || [])[1]?.replace(/\s+/g, ' ').trim() ?? '';
   const style = SHAPE_STYLE_BY_PATH[d] ?? null;
-  log.debug('extractShape', '[FIX] разделитель', { position: pos[1], style });
+  log.debug('extractShape', '[FIX] divider', { position: pos[1], style });
   return { style, position: pos[1], path: style ? null : d.slice(0, 60) };
 }
 
@@ -430,7 +430,7 @@ export function extractBlock(rec, { baseUrl } = {}) {
     const inner = findElements(el.inner, (name, a) => name === 'a' && a.href && !SKIP_INLINE_HREF_RE.test(a.href));
     if (!href && inner.length === 1 && cleanText(inner[0].inner) === text) {
       href = inner[0].attrs.href;
-      log.debug('extractBlock', '[FIX] ссылка на всё поле', { recid: rec.recid, field: el.attrs.field });
+      log.debug('extractBlock', '[FIX] link on the whole field', { recid: rec.recid, field: el.attrs.field });
       return { name: el.attrs.field, text, html: liteHtml(el.inner, { format: true }), href: absolute(href, baseUrl) };
     }
     // Порядок `<a>` в liteHtml и в findElements один — порядок документа.
@@ -438,7 +438,7 @@ export function extractBlock(rec, { baseUrl } = {}) {
     let nth = 0;
     // [FIX] Оформление редактора (data-customstyle, жирность, размер) переносится по белому списку.
     const html = liteHtml(el.inner, { format: true, link: (attrString) => inlineLinkTag(attrs(attrString), baseUrl, colors[nth++] ?? null) });
-    if (inner.length) log.debug('extractBlock', '[FIX] ссылки внутри поля', { recid: rec.recid, field: el.attrs.field, links: inner.length });
+    if (inner.length) log.debug('extractBlock', '[FIX] links inside the field', { recid: rec.recid, field: el.attrs.field, links: inner.length });
     return { name: el.attrs.field, text, html, href: absolute(href, baseUrl) };
   });
 
@@ -476,7 +476,7 @@ export function extractBlock(rec, { baseUrl } = {}) {
   const fieldNames = new Set(fields.map((f) => f.name));
   const allButtons = extractButtons(chunk, baseUrl);
   const buttons = allButtons.filter((b) => !fieldNames.has('buttontitle' + b.slot));
-  if (buttons.length !== allButtons.length) log.debug('extractBlock', 'кнопки уже в полях', { recid: rec.recid, dropped: allButtons.length - buttons.length });
+  if (buttons.length !== allButtons.length) log.debug('extractBlock', 'buttons already in fields', { recid: rec.recid, dropped: allButtons.length - buttons.length });
   const block = {
     order: rec.order,
     recid: rec.recid,
@@ -495,7 +495,7 @@ export function extractBlock(rec, { baseUrl } = {}) {
     // Признаки разметки для разбора настроек по карте влияния.
     features: extractFeatures(own, { recid: rec.recid }),
   };
-  if (own.length !== chunk.length) log.debug('extractBlock', 'кусок обрезан по шапке/подвалу', { recid: rec.recid, dropped: chunk.length - own.length });
+  if (own.length !== chunk.length) log.debug('extractBlock', 'chunk trimmed by header/footer', { recid: rec.recid, dropped: chunk.length - own.length });
   if (block.hasForm) {
     const form = extractForm(own, baseUrl);
     if (form) block.form = form;
@@ -515,7 +515,7 @@ export function extractBlock(rec, { baseUrl } = {}) {
   const breaks = fields.filter((f) => f.html !== f.text).length;
   const st = block.styles;
   const styled = Boolean(st.paddingTop || st.paddingBottom || st.bgColor || Object.keys(st.typo).length);
-  log.debug('extractBlock', 'блок', { order: block.order, tplid: block.tplid, fields: fields.length, images: images.length, cards: cards.length, breaks, styled, soclinks: block.soclinks.length });
+  log.debug('extractBlock', 'block', { order: block.order, tplid: block.tplid, fields: fields.length, images: images.length, cards: cards.length, breaks, styled, soclinks: block.soclinks.length });
   return block;
 }
 
@@ -543,10 +543,10 @@ export function recordZones(html) {
         zones.set(r[1], tag);
         count[tag] += 1;
       }
-      if (!found) log.debug('recordZones', 'зона без блоков', { tag });
+      if (!found) log.debug('recordZones', 'zone without blocks', { tag });
     }
   }
-  log.debug('recordZones', 'зоны', count);
+  log.debug('recordZones', 'zones', count);
   return zones;
 }
 
@@ -571,7 +571,7 @@ export function extractStructure(html, { url = '', name = '' } = {}) {
     buttons: blocks.reduce((n, b) => n + b.buttons.length, 0),
     videos: blocks.filter((b) => b.video).length,
   };
-  log.info('extractStructure', 'структура извлечена', { name, blocks: counts.blocks, images, forms: counts.forms, header: counts.zones.header, footer: counts.zones.footer });
+  log.info('extractStructure', 'structure extracted', { name, blocks: counts.blocks, images, forms: counts.forms, header: counts.zones.header, footer: counts.zones.footer });
   return { name, url, title, extractedAt: new Date().toISOString(), counts, blocks };
 }
 
@@ -596,7 +596,7 @@ export function collectInternalLinks(html, baseUrl) {
     seen.add(u.href);
     result.push(u.href);
   }
-  log.debug('collectInternalLinks', 'ссылки собраны', { count: result.length });
+  log.debug('collectInternalLinks', 'links collected', { count: result.length });
   return result;
 }
 
@@ -608,7 +608,7 @@ export function collectInternalLinks(html, baseUrl) {
 export function parseSitemap(xml, origin) {
   const locs = [...String(xml ?? '').matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi)].map((m) => decodeEntities(m[1]));
   if (/<sitemapindex\b/i.test(xml ?? '')) {
-    log.debug('parseSitemap', 'индекс карт', { sitemaps: locs.length });
+    log.debug('parseSitemap', 'sitemap index', { sitemaps: locs.length });
     return { pages: [], sitemaps: locs, dropped: 0 };
   }
   const pages = [];
@@ -632,7 +632,7 @@ export function parseSitemap(xml, origin) {
     seen.add(u.href);
     pages.push(u.href);
   }
-  log.debug('parseSitemap', 'карта разобрана', { locs: locs.length, pages: pages.length, dropped });
+  log.debug('parseSitemap', 'sitemap parsed', { locs: locs.length, pages: pages.length, dropped });
   return { pages, sitemaps: [], dropped };
 }
 

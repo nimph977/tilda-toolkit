@@ -150,7 +150,7 @@ export function prepareSite({ siteArg, cwd = process.cwd(), root = repoRoot() })
   const exists = existsSync(dir);
   if (exists && !statSync(dir).isDirectory()) throw new SetupError(msg('setup.siteIsFile', { dir }));
   const envExists = exists && existsSync(join(dir, '.env'));
-  log.debug('prepareSite', 'папка осмотрена', { dir: slash(dir), exists, envExists });
+  log.debug('prepareSite', 'folder inspected', { dir: slash(dir), exists, envExists });
   return { dir, exists, envExists };
 }
 
@@ -166,7 +166,7 @@ export function writeSite({ dir, projectId, lang, root = repoRoot() }) {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
     folder = 'created';
-    log.info('writeSite', 'папка сайта создана', { dir: slash(dir) });
+    log.info('writeSite', 'site folder created', { dir: slash(dir) });
   }
   const envFile = join(dir, '.env');
   let env;
@@ -179,7 +179,7 @@ export function writeSite({ dir, projectId, lang, root = repoRoot() }) {
   } else {
     const existing = readFileSync(envFile, 'utf8');
     const plan = planEnvUpdate(existing, { projectId });
-    log.debug('writeSite', 'существующий .env', { action: plan.action });
+    log.debug('writeSite', 'existing .env', { action: plan.action });
     if (plan.action === 'conflict') {
       throw new SetupError(msg('setup.projectConflict', { file: slash(envFile) }));
     }
@@ -195,7 +195,7 @@ export function writeSite({ dir, projectId, lang, root = repoRoot() }) {
       else log.debug('writeSite', 'TILDA_LANG', { action: langPlan.action, value: lang });
     }
   }
-  log.info('writeSite', '.env сайта', { dir: slash(dir), env });
+  log.info('writeSite', 'site .env', { dir: slash(dir), env });
   const result = { dir, folder, env };
   if (langResult) result.lang = langResult;
   return result;
@@ -213,7 +213,7 @@ export function agentsFor(agent) {
  * @returns {Promise<{status: any, site?: object, skills?: object[], next: string, note?: any}>}
  */
 export async function runSetup({ site, project, agent, lang, env = process.env, cwd = process.cwd(), root = repoRoot() } = {}) {
-  log.debug('runSetup', 'вход', { site: site ? 'есть' : 'нет', agent, project: project === undefined ? 'нет' : 'есть', lang });
+  log.debug('runSetup', 'input', { site: site ? 'present' : 'absent', agent, project: project === undefined ? 'absent' : 'present', lang });
   if (!site && !agent) throw new ConfigError(msg('setup.needSiteOrAgent'), '--site');
   if (project !== undefined && !site) throw new ConfigError(msg('setup.projectNeedsSite'), '--project');
   if (agent !== undefined && !SETUP_AGENTS.includes(agent)) throw new ConfigError(msg('setup.badAgent'), '--agent');
@@ -223,7 +223,7 @@ export async function runSetup({ site, project, agent, lang, env = process.env, 
   const envSite = String(env.TILDA_SITE_DIR ?? '').trim();
   if (envSite) {
     if (!site) {
-      log.warn('runSetup', 'TILDA_SITE_DIR не используется: setup берёт папку только из --site');
+      log.warn('runSetup', 'TILDA_SITE_DIR is not used: setup takes the folder only from --site');
     } else {
       const a = resolve(cwd, site);
       const b = resolve(cwd, envSite);
@@ -235,7 +235,7 @@ export async function runSetup({ site, project, agent, lang, env = process.env, 
   const projectId = project === undefined ? undefined : String(parseNumericId(project, '--project'));
   const envProject = String(env.TILDA_PROJECT_ID ?? '').trim();
   if (site && envProject && envProject !== projectId) {
-    log.warn('runSetup', 'TILDA_PROJECT_ID из окружения не используется: setup берёт ID только из --project');
+    log.warn('runSetup', 'TILDA_PROJECT_ID from the environment is not used: setup takes the ID only from --project');
   }
 
   // Все проверки — до первой записи.
@@ -254,6 +254,6 @@ export async function runSetup({ site, project, agent, lang, env = process.env, 
   if (agents.length) summary.skills = agents.map((name) => installSkill({ root, agent: name }));
   summary.next = prepared ? cliHint('doctor', { TILDA_SITE_DIR: prepared.dir }) : 'node scripts/tilda.mjs doctor';
   if (summary.skills) summary.note = msg('setup.note.restartAgent');
-  log.info('runSetup', 'готово', { folder: summary.site?.folder, env: summary.site?.env, skills: summary.skills?.map((s) => s.action) });
+  log.info('runSetup', 'done', { folder: summary.site?.folder, env: summary.site?.env, skills: summary.skills?.map((s) => s.action) });
   return summary;
 }

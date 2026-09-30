@@ -74,7 +74,7 @@ export function mapCompleteness(site, donorPages) {
   const mapped = new Set((site?.pages ?? []).filter((p) => p.donorPageid).map((p) => String(p.donorPageid)));
   const missing = (donorPages ?? []).filter((p) => !mapped.has(String(p.pageid))).map((p) => ({ pageid: String(p.pageid), role: p.role ?? null }));
   const ok = missing.every((m) => m.role === '404');
-  log.debug('mapCompleteness', 'полнота карты', { donorPages: donorIds.size, mapped: mapped.size, missing: missing.length, ok });
+  log.debug('mapCompleteness', 'map completeness', { donorPages: donorIds.size, mapped: mapped.size, missing: missing.length, ok });
   return { donorPages: donorIds.size, mapped: [...mapped].filter((id) => donorIds.has(id)).length, missing, ok };
 }
 
@@ -108,7 +108,7 @@ export function selectLabels(site, { labels, transferred }) {
   const skip = (label, code, params) => {
     const entry = reasonEntry(code, params);
     skipped.push({ label, ...entry });
-    log.debug('selectLabels', 'пропуск', { label, reason: entry.reason });
+    log.debug('selectLabels', 'skipped', { label, reason: entry.reason });
   };
   for (const label of labels ?? pages.map((p) => p.label)) {
     const entry = byLabel.get(label);
@@ -144,8 +144,8 @@ export async function checkLabel(driver, { entry, referenceHost, hosts, knownAli
     ? find(pageid, hosts[0], { baseDir: baselineBase, recordids: records.map((r) => String(r.recordid)), quiet: true })
     : { skippedForm: [] };
   const forms = found.skippedForm.filter((x) => x.field === 'formmsgurl').map((x) => ({ recordid: x.recordid, field: x.field }));
-  log.info('checkLabel', `${entry.label}: ссылок ${audit.total}, нарушений ${audit.violations.length}, HTML-блоков ${htmlBlocks.length}, formmsgurl ${forms.length}`, {});
-  log.debug('checkLabel', 'нарушения', { label: entry.label, violations: audit.violations });
+  log.info('checkLabel', `${entry.label}: links ${audit.total}, violations ${audit.violations.length}, HTML blocks ${htmlBlocks.length}, formmsgurl ${forms.length}`, {});
+  log.debug('checkLabel', 'violations', { label: entry.label, violations: audit.violations });
   return { label: entry.label, pageid, total: audit.total, violations: audit.violations, htmlBlocks, forms };
 }
 
@@ -270,7 +270,7 @@ export async function runDonorCheck(openLabel, {
   const knownPageIds = (testPages ?? []).map((p) => String(p.pageid));
   const knownAliases = (testPages ?? []).map((p) => normalizeAlias(p.alias)).filter(Boolean).map((a) => `/${a}`);
   const donorPageIds = (site?.pages ?? []).filter((p) => p.donorPageid).map((p) => String(p.donorPageid));
-  log.info('runDonorCheck', `меток к проверке ${todo.length}, пропущено ${skipped.length}`, { slug });
+  log.info('runDonorCheck', `labels to check ${todo.length}, skipped ${skipped.length}`, { slug });
   const results = [];
   let failuresInRow = 0;
   let stopped = false;
@@ -283,7 +283,7 @@ export async function runDonorCheck(openLabel, {
     } catch (e) {
       const message = e.code ? `${e.code}: ${e.message}` : e.message;
       results.push({ label: entry.label, pageid: String(entry.pageid), error: reasonEntry('failed', { message }).reason, errorParams: { message } });
-      log.warn('runDonorCheck', 'метка не проверена', { label: entry.label, error: message });
+      log.warn('runDonorCheck', 'label not checked', { label: entry.label, error: message });
       failuresInRow += 1;
       if (failuresInRow >= MAX_FAILURES_IN_ROW) {
         stopped = true;
@@ -303,6 +303,6 @@ export async function runDonorCheck(openLabel, {
   const linkViolations = results.reduce((n, l) => n + (l.violations?.length ?? 0), 0);
   const failed = results.filter((l) => l.error).length;
   const exitCode = linkViolations || failed || stopped || !map.ok || !index.ok ? 1 : 0;
-  log.info('runDonorCheck', `проверено ${results.length - failed}, сбоев ${failed}, нарушений ссылок ${linkViolations}, карта ${map.ok ? 'полная' : 'неполная'}, главная ${index.ok ? 'верно' : 'не та'}`, { exitCode });
+  log.info('runDonorCheck', `checked ${results.length - failed}, failures ${failed}, link violations ${linkViolations}, map ${map.ok ? 'complete' : 'incomplete'}, home page ${index.ok ? 'correct' : 'wrong'}`, { exitCode });
   return { ...result, linkViolations, failed, checksPath, summaryPath, exitCode };
 }

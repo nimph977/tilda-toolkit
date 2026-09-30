@@ -74,7 +74,7 @@ export function refPaths(slug, opts = {}) {
 export function ensureDirs(slug, opts) {
   const paths = refPaths(slug, opts);
   for (const dir of [paths.pages, paths.images, paths.structure]) mkdirSync(dir, { recursive: true });
-  log.debug('ensureDirs', 'каталоги готовы', { root: paths.root });
+  log.debug('ensureDirs', 'directories ready', { root: paths.root });
   return paths;
 }
 
@@ -133,12 +133,12 @@ export function readManifest(slug, opts) {
   try {
     data = JSON.parse(readFileSync(manifest, 'utf8'));
   } catch (e) {
-    log.error('readManifest', 'манифест не разобрался', { path: manifest, error: e.message });
+    log.error('readManifest', 'manifest could not be parsed', { path: manifest, error: e.message });
     throw e;
   }
   const { converted, dropped } = normalizeManifest(data, slug);
-  if (converted || dropped) log.info('readManifest', 'манифест переведён на пути от папки слепка', { slug, converted, dropped });
-  if (dropped) log.warn('readManifest', 'часть путей манифеста не разобрана — записи сброшены', { slug, dropped });
+  if (converted || dropped) log.info('readManifest', 'manifest converted to paths relative to the snapshot folder', { slug, converted, dropped });
+  if (dropped) log.warn('readManifest', 'some manifest paths could not be resolved, entries dropped', { slug, dropped });
   return data;
 }
 
@@ -146,7 +146,7 @@ export function readManifest(slug, opts) {
 export function writeManifest(slug, manifest, opts) {
   const { manifest: path } = refPaths(slug, opts);
   writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
-  log.debug('writeManifest', 'манифест записан', { path, pages: manifest.pages?.length ?? 0 });
+  log.debug('writeManifest', 'manifest written', { path, pages: manifest.pages?.length ?? 0 });
   return path;
 }
 
@@ -199,7 +199,7 @@ export function readSite(slug, opts) {
   try {
     return JSON.parse(readFileSync(site, 'utf8'));
   } catch (e) {
-    log.error('readSite', 'карта сайта не разобралась', { path: site, error: e.message });
+    log.error('readSite', 'site map could not be parsed', { path: site, error: e.message });
     throw e;
   }
 }
@@ -210,7 +210,7 @@ export function writeSite(slug, site, opts) {
   mkdirSync(paths.root, { recursive: true });
   site.updatedAt = new Date().toISOString();
   writeFileSync(paths.site, JSON.stringify(site, null, 2) + '\n', 'utf8');
-  log.debug('writeSite', 'карта сайта записана', { path: paths.site, pages: site.pages.length });
+  log.debug('writeSite', 'site map written', { path: paths.site, pages: site.pages.length });
   return paths.site;
 }
 
@@ -255,7 +255,7 @@ export function assignLabels(site, manifest, { header = false, footer = false } 
   }
   const rank = (e) => (e.label === 'HDR' ? -2 : e.label === 'FTR' ? -1 : labelNumber(e.label));
   site.pages.sort((a, b) => rank(a) - rank(b));
-  log.debug('assignLabels', 'метки назначены', { total: site.pages.length, added: added.length, missing: missing.length });
+  log.debug('assignLabels', 'labels assigned', { total: site.pages.length, added: added.length, missing: missing.length });
   return { site, added, missing };
 }
 

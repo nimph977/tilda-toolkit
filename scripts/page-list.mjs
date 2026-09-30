@@ -47,7 +47,7 @@ export function parsePagesResponse(text, { emptyMarker = false } = {}) {
   try {
     json = JSON.parse(value);
   } catch (e) {
-    log.error('parsePagesResponse', 'ответ не JSON', { bytes: value.length, error: e.message });
+    log.error('parsePagesResponse', 'response is not JSON', { bytes: value.length, error: e.message });
     throw new PageListError('PAGES_BAD_JSON', msg('pageList.badJson', { bytes: value.length, head: redactedHead(value) }));
   }
   if (!json || typeof json !== 'object') {
@@ -68,10 +68,10 @@ export function parsePagesResponse(text, { emptyMarker = false } = {}) {
   else raw = [];
   const empty = raw.length === 0 && (Boolean(emptyMarker) || isZero(p.pages_count));
   if (raw.length === 0 && !empty) {
-    log.error('parsePagesResponse', 'страниц нет и признака пустого проекта нет', { pagesType: typeof json.pages, pagesCount: p.pages_count, emptyMarker });
+    log.error('parsePagesResponse', 'no pages and no empty-project marker', { pagesType: typeof json.pages, pagesCount: p.pages_count, emptyMarker });
     throw new PageListError('PAGES_PARSE_FAILED', msg('pageList.noPagesArray', { type: json.pages === null ? 'null' : typeof json.pages }));
   }
-  log.debug('parsePagesResponse', 'ответ разобран', { records: raw.length, pagesCount: project.pagesCount, emptyMarker: empty });
+  log.debug('parsePagesResponse', 'response parsed', { records: raw.length, pagesCount: project.pagesCount, emptyMarker: empty });
   return { raw, project, emptyMarker: empty };
 }
 
@@ -124,19 +124,19 @@ export function normalizePages(raw, { protectedIds = [], project } = {}) {
     pages.push(page);
   }
   const skipped = SKIP_REASONS.filter((reason) => counts[reason] > 0).map((reason) => ({ reason, count: counts[reason] }));
-  for (const s of skipped) log.warn('normalizePages', 'записи пропущены', s);
+  for (const s of skipped) log.warn('normalizePages', 'records skipped', s);
   return { pages, skipped };
 }
 
 /** Оркестратор: вызов слоя → разбор → нормализация. Драйвер приходит снаружи, как в page-ops.mjs. */
 export async function listPages(driver, { projectid, protectedIds = [] } = {}) {
   const id = String(projectid ?? '');
-  log.debug('listPages', 'вызов слоя', { projectid: id });
+  log.debug('listPages', 'layer call', { projectid: id });
   const r = await driver.call('listPages', [id]);
-  log.debug('listPages', 'ответ слоя', { source: r?.source, status: r?.status, bytes: String(r?.text ?? '').length });
+  log.debug('listPages', 'layer response', { source: r?.source, status: r?.status, bytes: String(r?.text ?? '').length });
   if (r?.source !== 'api') throw new PageListError('PAGES_PARSE_FAILED', msg('pageList.unknownLayerAnswer', { source: r?.source }));
   const parsed = parsePagesResponse(r.text, { emptyMarker: r.emptyMarker });
   const { pages, skipped } = normalizePages(parsed.raw, { protectedIds, project: parsed.project });
-  log.info('listPages', 'страниц получено', { count: pages.length, protected: pages.filter((p) => p.protected).length, skipped: skipped.length });
+  log.info('listPages', 'pages received', { count: pages.length, protected: pages.filter((p) => p.protected).length, skipped: skipped.length });
   return { source: r.source, pages, skipped, emptyMarker: parsed.emptyMarker, pagesCount: parsed.project.pagesCount };
 }

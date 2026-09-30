@@ -38,7 +38,7 @@ export function elements(model) {
     const e = model[key] || {};
     return { key, elem_id: String(e.elem_id ?? ''), elem_type: e.elem_type ?? '', hidden: e.hidden === 'y', text: typeof e.text === 'string' ? e.text : undefined };
   });
-  log.debug('elements', 'список элементов', { count: list.length, elemIds: list.map((e) => e.elem_id) });
+  log.debug('elements', 'element list', { count: list.length, elemIds: list.map((e) => e.elem_id) });
   return list;
 }
 
@@ -73,13 +73,13 @@ export function findElement(model, selector) {
   } else {
     throw new ToolError('NO_SELECTOR', msg('zero.needSelector'));
   }
-  log.debug('findElement', 'поиск', { selector: sel, hits: hits.map((k) => ({ key: k, elem_id: model[k].elem_id })) });
+  log.debug('findElement', 'search', { selector: sel, hits: hits.map((k) => ({ key: k, elem_id: model[k].elem_id })) });
   if (hits.length === 0) {
-    log.error('findElement', 'элемент не найден', { selector: sel });
+    log.error('findElement', 'element not found', { selector: sel });
     throw new ToolError('NOT_FOUND', msg('zero.notFound', { selector: JSON.stringify(sel) }));
   }
   if (hits.length > 1) {
-    log.error('findElement', 'найдено несколько элементов', { selector: sel, hits });
+    log.error('findElement', 'several elements found', { selector: sel, hits });
     throw new ToolError('AMBIGUOUS', msg('zero.ambiguous', { selector: JSON.stringify(sel), count: hits.length }));
   }
   return { key: hits[0], elem: model[hits[0]] };
@@ -89,7 +89,7 @@ const clone = (model) => JSON.parse(JSON.stringify(model));
 
 function assertKey(model, key, fn) {
   if (!isElemKey(String(key)) || !(key in model)) {
-    log.error(fn, 'нет элемента с таким ключом', { key });
+    log.error(fn, 'no element with this key', { key });
     throw new ToolError('NO_SUCH_KEY', msg('zero.noSuchKey', { key }));
   }
 }
@@ -98,13 +98,13 @@ function assertKey(model, key, fn) {
 export function setText(model, key, text) {
   assertKey(model, key, 'setText');
   if (/<script/i.test(String(text))) {
-    log.error('setText', 'отказ: текст содержит <script', { key });
+    log.error('setText', 'refused: text contains <script', { key });
     throw new ToolError('SCRIPT_REJECTED', msg('zero.scriptRejected'));
   }
   const next = clone(model);
   const from = next[key].text;
   next[key].text = String(text);
-  log.info('setText', 'текст заменён', { key, elem_id: next[key].elem_id, from: normalizeText(from).slice(0, 60), to: normalizeText(text).slice(0, 60) });
+  log.info('setText', 'text replaced', { key, elem_id: next[key].elem_id, from: normalizeText(from).slice(0, 60), to: normalizeText(text).slice(0, 60) });
   return next;
 }
 
@@ -121,7 +121,7 @@ export function setHidden(model, key, hidden) {
   next[key].hidden = value;
   const variants = resVariants(next[key], 'hidden');
   for (const res of variants) next[key][`hidden-res-${res}`] = value;
-  log.info('setHidden', 'видимость изменена', { key, elem_id: next[key].elem_id, from, to: value, variants });
+  log.info('setHidden', 'visibility changed', { key, elem_id: next[key].elem_id, from, to: value, variants });
   return next;
 }
 
@@ -172,16 +172,16 @@ function applyResVariants(next, key, field, oldBase, newBase, fields, strategy) 
   const el = next[key];
   const variants = resVariants(el, field);
   if (variants.length === 0) {
-    if (RES_TYPICAL.has(field)) log.warn('setFields', 'у поля нет -res-* вариантов, пишем только базовое', { key, elem_id: el.elem_id, field });
+    if (RES_TYPICAL.has(field)) log.warn('setFields', 'field has no -res-* variants, writing the base value only', { key, elem_id: el.elem_id, field });
     return;
   }
   const explicit = variants.filter((res) => `${field}-res-${res}` in fields);
   const missing = variants.filter((res) => !(`${field}-res-${res}` in fields));
-  log.debug('setFields', 'адаптивные варианты поля', { key, field, variants, strategy, explicit });
+  log.debug('setFields', 'responsive field variants', { key, field, variants, strategy, explicit });
   if (strategy === 'explicit') {
     if (missing.length) {
       const names = missing.map((res) => `${field}-res-${res}`);
-      log.error('setFields', 'RES_VARIANTS_MISSING: план не дал значения имеющихся у элемента вариантов', { key, elem_id: el.elem_id, field, missing: names });
+      log.error('setFields', 'RES_VARIANTS_MISSING: the plan gave no values for the variants the element has', { key, elem_id: el.elem_id, field, missing: names });
       throw new ToolError('RES_VARIANTS_MISSING', msg('zero.resVariantsMissing', { field, names: names.join(', ') }), { missing: names });
     }
     return; // явные значения запишутся как обычные поля
@@ -189,7 +189,7 @@ function applyResVariants(next, key, field, oldBase, newBase, fields, strategy) 
   for (const res of missing) {
     const name = `${field}-res-${res}`;
     const value = scaleVariant(el[name], oldBase, newBase);
-    log.debug('setFields', 'вариант пересчитан', { key, field, res, from: el[name], to: value });
+    log.debug('setFields', 'variant recalculated', { key, field, res, from: el[name], to: value });
     el[name] = value;
   }
 }
@@ -209,15 +209,15 @@ export function setLink(model, key, url) {
   assertKey(model, key, 'setLink');
   const value = String(url ?? '');
   if (value !== '' && !LINK_ALLOWED.test(value)) {
-    log.error('setLink', 'отказ: недопустимая схема ссылки', { key, value: value.slice(0, 60) });
+    log.error('setLink', 'refused: link scheme not allowed', { key, value: value.slice(0, 60) });
     throw new ToolError('LINK_REJECTED', msg('zero.linkRejected', { value: value.slice(0, 60) }));
   }
   const next = clone(model);
   const type = next[key].elem_type;
-  if (!LINKABLE_TYPES.has(type)) log.warn('setLink', 'у этого типа элемента ссылка не проверялась', { key, elem_type: type });
+  if (!LINKABLE_TYPES.has(type)) log.warn('setLink', 'link was not checked for this element type', { key, elem_type: type });
   const from = next[key].link ?? '';
   next[key].link = value;
-  log.info('setLink', 'ссылка изменена', { key, elem_id: next[key].elem_id, from, to: value });
+  log.info('setLink', 'link changed', { key, elem_id: next[key].elem_id, from, to: value });
   return next;
 }
 
@@ -234,7 +234,7 @@ export function setLinkTarget(model, key, target) {
   const from = next[key].linktarget ?? '';
   if (value === '') delete next[key].linktarget;
   else next[key].linktarget = value;
-  log.info('setLinkTarget', 'способ перехода изменён', { key, elem_id: next[key].elem_id, from: from || '(то же окно)', to: value || '(то же окно)' });
+  log.info('setLinkTarget', 'link target changed', { key, elem_id: next[key].elem_id, from: from || '(same window)', to: value || '(same window)' });
   return next;
 }
 
@@ -255,16 +255,16 @@ export function setImage(model, key, spec) {
   const s = typeof spec === 'string' ? { img: spec } : spec || {};
   const img = String(s.img ?? '');
   if (!IMAGE_URL.test(img)) {
-    log.error('setImage', 'отказ: img должен быть http(s)-адресом картинки', { key, img: img.slice(0, 60) });
+    log.error('setImage', 'refused: img must be an http(s) image address', { key, img: img.slice(0, 60) });
     throw new ToolError('IMAGE_URL_REJECTED', msg('zero.imageUrlRejected', { img: img.slice(0, 60) }));
   }
   if (!/^https?:\/\/[^/]*tildacdn\./i.test(img)) {
-    log.warn('setImage', 'адрес не на tildacdn — приём внешних адресов Тильдой не проверялся', { key, img: img.slice(0, 60) });
+    log.warn('setImage', 'address is not on tildacdn, Tilda acceptance of external addresses was not checked', { key, img: img.slice(0, 60) });
   }
   const next = clone(model);
   const el = next[key];
   if (el.elem_type !== 'image') {
-    log.error('setImage', 'операция image применима только к elem_type image; для фона shape есть bgimg', { key, elem_type: el.elem_type });
+    log.error('setImage', 'image operation applies to elem_type image only; use bgimg for a shape background', { key, elem_type: el.elem_type });
     throw new ToolError('WRONG_ELEM_TYPE', msg('zero.wrongElemType', { elemType: el.elem_type }));
   }
   const from = { img: el.img, filewidth: el.filewidth, fileheight: el.fileheight, height: el.height };
@@ -287,14 +287,14 @@ export function setImage(model, key, spec) {
           variants[res] = el[`height-res-${res}`];
         }
       }
-      log.debug('setImage', 'высота пересчитана по пропорции', { key, width: el.width, file: `${fw}x${fh}`, height: el.height, variants });
+      log.debug('setImage', 'height recalculated by proportion', { key, width: el.width, file: `${fw}x${fh}`, height: el.height, variants });
     } else {
-      log.warn('setImage', 'высота не пересчитана: нет ширины элемента или размеров файла', { key, width: el.width, filewidth: el.filewidth, fileheight: el.fileheight });
+      log.warn('setImage', 'height not recalculated: element width or file size missing', { key, width: el.width, filewidth: el.filewidth, fileheight: el.fileheight });
     }
   } else {
-    log.warn('setImage', 'filewidth/fileheight не заданы: пропорции останутся от прежней картинки', { key });
+    log.warn('setImage', 'filewidth/fileheight not set: proportions stay from the previous image', { key });
   }
-  log.info('setImage', 'картинка заменена', { key, elem_id: el.elem_id, from: from.img, to: img, height: `${from.height} → ${el.height}` });
+  log.info('setImage', 'image replaced', { key, elem_id: el.elem_id, from: from.img, to: img, height: `${from.height} → ${el.height}` });
   return next;
 }
 
@@ -303,15 +303,15 @@ export function setBgImage(model, key, url) {
   assertKey(model, key, 'setBgImage');
   const img = String(url ?? '');
   if (img !== '' && !IMAGE_URL.test(img)) {
-    log.error('setBgImage', 'отказ: bgimg должен быть http(s)-адресом или пустой строкой', { key, img: img.slice(0, 60) });
+    log.error('setBgImage', 'refused: bgimg must be an http(s) address or an empty string', { key, img: img.slice(0, 60) });
     throw new ToolError('IMAGE_URL_REJECTED', msg('zero.imageUrlRejected', { img: img.slice(0, 60) }));
   }
   const next = clone(model);
   const el = next[key];
-  if (el.elem_type !== 'shape') log.warn('setBgImage', 'поле bgimg проверено только у shape', { key, elem_type: el.elem_type });
+  if (el.elem_type !== 'shape') log.warn('setBgImage', 'bgimg field was checked for shape only', { key, elem_type: el.elem_type });
   const from = el.bgimg ?? '';
   el.bgimg = img;
-  log.info('setBgImage', 'фоновая картинка заменена', { key, elem_id: el.elem_id, from, to: img });
+  log.info('setBgImage', 'background image replaced', { key, elem_id: el.elem_id, from, to: img });
   return next;
 }
 
@@ -330,7 +330,7 @@ export function setPlainField(model, key, field, value) {
   const from = next[key][field];
   if (value === null || value === undefined) delete next[key][field];
   else next[key][field] = typeof value === 'number' ? value : String(value);
-  log.info('setPlainField', 'поле изменено', { key, elem_id: next[key].elem_id, field, from: String(from ?? '(none)').slice(0, 60), to: String(value ?? '(removed)').slice(0, 60) });
+  log.info('setPlainField', 'field changed', { key, elem_id: next[key].elem_id, field, from: String(from ?? '(none)').slice(0, 60), to: String(value ?? '(removed)').slice(0, 60) });
   return next;
 }
 
@@ -349,7 +349,7 @@ export function setFields(model, key, fields, opts = {}) {
     assertNotFormField(field, { key, elem_id: model[key] && model[key].elem_id, path: 'zero-model.setFields' });
     assertNoScript(value, { key, field });
     const el = model[key] || {};
-    log.debug('setFields', 'поле', { key, field, from: String((field === 'image' ? el.img : el[field]) ?? '').slice(0, 60), to: String(typeof value === 'object' ? JSON.stringify(value) : value).slice(0, 60) });
+    log.debug('setFields', 'field', { key, field, from: String((field === 'image' ? el.img : el[field]) ?? '').slice(0, 60), to: String(typeof value === 'object' ? JSON.stringify(value) : value).slice(0, 60) });
     const oldBase = next[key] ? next[key][field] : undefined;
     switch (field) {
       case 'text': next = setText(next, key, value); break;
@@ -397,8 +397,8 @@ export function diff(before, after) {
       out.push({ key, field: '', from: a, to: b });
     }
   }
-  for (const d of out) log.info('diff', 'изменение', { key: d.key, field: d.field, from: String(d.from ?? '').slice(0, 60), to: String(d.to ?? '').slice(0, 60) });
-  if (out.length === 0) log.info('diff', 'различий нет');
+  for (const d of out) log.info('diff', 'change', { key: d.key, field: d.field, from: String(d.from ?? '').slice(0, 60), to: String(d.to ?? '').slice(0, 60) });
+  if (out.length === 0) log.info('diff', 'no differences');
   return out;
 }
 
@@ -410,7 +410,7 @@ export function validate(before, after, opts = {}) {
   const sb = serviceKeys(before);
   const sa = serviceKeys(after);
   if (JSON.stringify(sb) !== JSON.stringify(sa)) {
-    log.error('validate', 'служебные ключи изменились', { before: sb, after: sa });
+    log.error('validate', 'service keys changed', { before: sb, after: sa });
     throw new Error('VALIDATE service keys differ');
   }
   const eb = elementKeys(before);
@@ -421,39 +421,39 @@ export function validate(before, after, opts = {}) {
     // Откат дублирования: элементов может стать меньше, новых elem_id не появляется.
     const added = ia.filter((id) => !ib.includes(id));
     if (added.length) {
-      log.error('validate', 'при удалении появились новые elem_id', { added });
+      log.error('validate', 'new elem_id appeared on removal', { added });
       throw new Error(`VALIDATE unexpected elem_id: ${added.join(', ')}`);
     }
-    log.debug('validate', 'структура цела (разрешено удаление элементов)', { before: eb.length, after: ea.length });
+    log.debug('validate', 'structure intact (element removal allowed)', { before: eb.length, after: ea.length });
     return true;
   }
   if (opts.allowNewElements) {
     // Режим дублирования: элементов может стать больше, но ни один прежний elem_id не пропадает.
     if (ea.length < eb.length) {
-      log.error('validate', 'число элементов уменьшилось', { before: eb.length, after: ea.length });
+      log.error('validate', 'element count decreased', { before: eb.length, after: ea.length });
       throw new Error(`VALIDATE element count ${eb.length} -> ${ea.length}`);
     }
     const lost = ib.filter((id) => !ia.includes(id));
     if (lost.length) {
-      log.error('validate', 'прежние elem_id потеряны', { lost });
+      log.error('validate', 'previous elem_id lost', { lost });
       throw new Error(`VALIDATE elem_id lost: ${lost.join(', ')}`);
     }
     if (new Set(ia).size !== ia.length) {
-      log.error('validate', 'elem_id повторяются', { ids: ia });
+      log.error('validate', 'elem_id repeated', { ids: ia });
       throw new Error('VALIDATE elem_id duplicated');
     }
-    log.debug('validate', 'структура цела (разрешены новые элементы)', { before: eb.length, after: ea.length, added: ea.length - eb.length });
+    log.debug('validate', 'structure intact (new elements allowed)', { before: eb.length, after: ea.length, added: ea.length - eb.length });
     return true;
   }
   if (eb.length !== ea.length) {
-    log.error('validate', 'число элементов изменилось', { before: eb.length, after: ea.length });
+    log.error('validate', 'element count changed', { before: eb.length, after: ea.length });
     throw new Error(`VALIDATE element count ${eb.length} -> ${ea.length}`);
   }
   if (JSON.stringify(ib) !== JSON.stringify(ia)) {
-    log.error('validate', 'набор elem_id изменился', { before: ib, after: ia });
+    log.error('validate', 'elem_id set changed', { before: ib, after: ia });
     throw new Error('VALIDATE elem_id set differs');
   }
-  log.debug('validate', 'структура цела', { elements: ea.length, serviceKeys: sa.length });
+  log.debug('validate', 'structure intact', { elements: ea.length, serviceKeys: sa.length });
   return true;
 }
 
@@ -470,7 +470,7 @@ if (import.meta.url === `file:///${process.argv[1].replace(/\\/g, '/')}` || proc
   } else if (cmd === 'diff') {
     console.log(JSON.stringify(diff(load(a), load(b)), null, 2));
   } else if (cmd) {
-    log.error('cli', 'неизвестная команда', { cmd, usage: 'elements <m.json> | find <m.json> <elem_id|текст> | diff <a.json> <b.json>' });
+    log.error('cli', 'unknown command', { cmd, usage: 'elements <m.json> | find <m.json> <elem_id|text> | diff <a.json> <b.json>' });
     process.exit(2);
   }
 }
@@ -557,7 +557,7 @@ export function duplicateElement(model, selector, opts = {}) {
       reason = reason || msg('zero.reason.fewNeighbours', { count: sib.length });
     }
     proposal.push(entry);
-    log.debug('duplicateElement', 'шаг на разрешении', { res: res || 'base', neighbours: chain.length, ...entry });
+    log.debug('duplicateElement', 'step at resolution', { res: res || 'base', neighbours: chain.length, ...entry });
   }
   if (!reason && axes.size > 1) reason = msg('zero.reason.axesDiffer', { axes: [...axes].join(',') });
   const needsConfirm = Boolean(reason);
@@ -567,7 +567,7 @@ export function duplicateElement(model, selector, opts = {}) {
   const elem_id = newElemId(model, opts.now);
   copy.elem_id = elem_id;
   if (copy.groupid) {
-    log.debug('duplicateElement', 'копия выходит из группы источника', { groupid: copy.groupid });
+    log.debug('duplicateElement', 'copy leaves the source group', { groupid: copy.groupid });
     delete copy.groupid;
   }
   const maxZ = Math.max(0, ...elementKeys(model).map((k) => numOr(model[k].zindex)));
@@ -588,14 +588,14 @@ export function duplicateElement(model, selector, opts = {}) {
     const abKey = posField('ab_height', res);
     const current = numOr(next[abKey] ?? next.ab_height);
     if (bottom > current) {
-      log.debug('duplicateElement', 'ab_height поднят', { res: p.res, from: current, to: bottom });
+      log.debug('duplicateElement', 'ab_height raised', { res: p.res, from: current, to: bottom });
       next[abKey] = String(bottom);
       abHeightRaised.push({ res: p.res, from: current, to: bottom });
     }
   }
   // Правки копии (например новый текст) — тем же путём, что и любое поле: guard'ы включены.
   const out = opts.set && Object.keys(opts.set).length ? setFields(next, newKey, opts.set, { resStrategy: opts.resStrategy }) : next;
-  log.info('duplicateElement', needsConfirm ? 'копия рассчитана, нужно подтверждение' : `копия элемента ${elem_id} создана`, { source: src.elem_id, elem_id, key: newKey, needsConfirm, reason: reason && messageText(reason), proposal: proposal.map((p) => `${p.res}: top ${p.top}, left ${p.left} (${p.axis})`), abHeightRaised: abHeightRaised.length });
+  log.info('duplicateElement', needsConfirm ? 'copy calculated, confirmation needed' : `copy of element ${elem_id} created`, { source: src.elem_id, elem_id, key: newKey, needsConfirm, reason: reason && messageText(reason), proposal: proposal.map((p) => `${p.res}: top ${p.top}, left ${p.left} (${p.axis})`), abHeightRaised: abHeightRaised.length });
   return { model: out, key: newKey, elem_id, needsConfirm, reason, proposal, abHeightRaised };
 }
 
@@ -604,7 +604,7 @@ export function removeElement(model, selector) {
   const { key, elem } = findElement(model, selector);
   const next = clone(model);
   delete next[key];
-  log.info('removeElement', 'элемент удалён из модели', { key, elem_id: elem.elem_id, elem_type: elem.elem_type });
+  log.info('removeElement', 'element removed from the model', { key, elem_id: elem.elem_id, elem_type: elem.elem_type });
   return { model: next, key, elem_id: String(elem.elem_id) };
 }
 
@@ -620,7 +620,7 @@ export function setBlockFields(model, fields) {
     assertNoScript(value, { key });
     const from = next[key];
     next[key] = typeof value === 'number' ? value : String(value);
-    log.info('setBlockFields', 'служебный ключ изменён', { key, from: String(from).slice(0, 40), to: String(value).slice(0, 40) });
+    log.info('setBlockFields', 'service key changed', { key, from: String(from).slice(0, 40), to: String(value).slice(0, 40) });
   }
   return next;
 }

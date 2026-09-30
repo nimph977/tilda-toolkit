@@ -60,7 +60,7 @@ export function parseMyFonts(raw) {
     try {
       list = JSON.parse(raw);
     } catch (e) {
-      log.warn('parseMyFonts', 'myfonts_json не разобран', { error: e.message, bytes: raw.length });
+      log.warn('parseMyFonts', 'myfonts_json not parsed', { error: e.message, bytes: raw.length });
       return [];
     }
   }
@@ -79,7 +79,7 @@ export function parseMyFonts(raw) {
     }
     fonts.push({ name, files });
   }
-  log.debug('parseMyFonts', 'шрифты разобраны', { fonts: fonts.map((f) => `${f.name}: ${Object.keys(f.files).length}`) });
+  log.debug('parseMyFonts', 'fonts parsed', { fonts: fonts.map((f) => `${f.name}: ${Object.keys(f.files).length}`) });
   return fonts;
 }
 
@@ -87,7 +87,7 @@ export function writeDonorStyle(slug, data, opts) {
   const path = donorStylePath(slug, opts);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-  log.debug('writeDonorStyle', 'записано', { path: path.replace(/\\/g, '/'), keys: Object.keys(data.values ?? {}).length, fonts: (data.fonts ?? []).length });
+  log.debug('writeDonorStyle', 'written', { path: path.replace(/\\/g, '/'), keys: Object.keys(data.values ?? {}).length, fonts: (data.fonts ?? []).length });
   return path.replace(/\\/g, '/');
 }
 
@@ -103,7 +103,7 @@ export async function captureDonorStyle(driver, { slug, baseDir, now = new Date(
   const values = style?.values ?? {};
   const fonts = parseMyFonts(values.myfonts_json);
   const path = writeDonorStyle(slug, { at: now, values, fonts }, baseDir ? { baseDir } : undefined);
-  log.info('captureDonorStyle', 'оформление донора снято', { fonts: fonts.length, keys: Object.keys(values).length });
+  log.info('captureDonorStyle', 'donor style captured', { fonts: fonts.length, keys: Object.keys(values).length });
   return { values, fonts, path };
 }
 
@@ -138,19 +138,19 @@ export function parseFontUploadResponse(text) {
 export async function applyDonorFonts(driver, { projectid, fonts, headlinefont, textfont }) {
   const before = parseMyFonts((await driver.readProjectStyle())?.values?.myfonts_json);
   const { upload, present } = fontsToUpload(fonts, before);
-  log.info('applyDonorFonts', 'план шрифтов', { upload: upload.map((f) => f.name), present: present.map((f) => f.name) });
+  log.info('applyDonorFonts', 'font plan', { upload: upload.map((f) => f.name), present: present.map((f) => f.name) });
   for (const f of upload) {
     const r = await driver.uploadProjectFont({ projectid, name: f.name, files: f.files, asHeadline: f.name === headlinefont, asText: f.name === textfont });
     const parsed = parseFontUploadResponse(r?.text);
     if (!parsed.ok) throw new DonorStyleError('FONT_UPLOAD_FAILED', msg('donorStyle.fontUploadFailed', { font: f.name, message: parsed.message }), { font: f.name });
-    log.info('applyDonorFonts', 'шрифт загружен', { name: f.name, weights: Object.keys(f.files).length });
+    log.info('applyDonorFonts', 'font uploaded', { name: f.name, weights: Object.keys(f.files).length });
   }
   if (!upload.length) return { uploaded: [], present: present.map((f) => f.name), after: before };
   await driver.reload();
   const after = parseMyFonts((await driver.readProjectStyle())?.values?.myfonts_json);
   const missing = fontsToUpload(upload, after).upload.map((f) => f.name);
   if (missing.length) throw new DonorStyleError('FONT_NOT_APPLIED', msg('donorStyle.fontNotApplied', { missing: missing.join(', ') }), { missing });
-  log.info('applyDonorFonts', 'загружено', { uploaded: upload.map((f) => f.name), present: present.map((f) => f.name) });
+  log.info('applyDonorFonts', 'uploaded', { uploaded: upload.map((f) => f.name), present: present.map((f) => f.name) });
   return { uploaded: upload.map((f) => f.name), present: present.map((f) => f.name), after };
 }
 
@@ -183,7 +183,7 @@ export function desiredFromDonor(values, { uploadedFonts = [] } = {}) {
  */
 export async function applyDonorStyle(driver, { slug, projectid, confirmed = false, confirm, baseDir, now = new Date().toISOString() }) {
   if (!confirmed || confirm !== STYLE_CONFIRM) {
-    log.warn('applyDonorStyle', 'запись оформления без подтверждения — отказ до записи');
+    log.warn('applyDonorStyle', 'style write without confirmation, refused before writing');
     throw new DonorStyleError('STYLE_NOT_CONFIRMED', msg('donorStyle.notConfirmed'));
   }
   const opts = baseDir ? { baseDir } : undefined;
@@ -198,6 +198,6 @@ export async function applyDonorStyle(driver, { slug, projectid, confirmed = fal
   const checkKeys = [...Object.keys(desired.values), ...assigned];
   const notMatched = checkKeys.filter((k) => !sameValue(k, after?.values?.[k], style.values[k]));
   writeDonorStyle(slug, { ...style, skipped: desired.skipped.map((x) => ({ key: x.key, code: x.code, reason: messageText(x.reason) })), appliedAt: now }, opts);
-  log.info('applyDonorStyle', 'итог', { uploaded: fonts.uploaded, present: fonts.present, changed: r.changed, otherChanged: r.otherChanged.length, skipped: desired.skipped.map((s) => s.key), notMatched });
+  log.info('applyDonorStyle', 'result', { uploaded: fonts.uploaded, present: fonts.present, changed: r.changed, otherChanged: r.otherChanged.length, skipped: desired.skipped.map((s) => s.key), notMatched });
   return { fonts, changed: r.changed, otherChanged: r.otherChanged, record: r.record, skipped: desired.skipped, notMatched };
 }

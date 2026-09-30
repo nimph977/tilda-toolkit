@@ -644,7 +644,7 @@ async function cmdPage(values, positionals) {
   if (action === 'role') return pageRole(values, ops);
   if (action === 'title') return pageTitle(values, ops);
   if (action === 'publish' && !values.confirm) {
-    log.warn('page', 'публикация без --confirm — отказ до запроса браузера', { pageid: values.page });
+    log.warn('page', 'publishing without --confirm - refused before requesting the browser', { pageid: values.page });
     return { status: msg('cli.page.status.publishNotConfirmed'), pageid: values.page, exitCode: EXIT.REFUSED };
   }
   const browser = await import('./lib/browser.mjs');
@@ -688,7 +688,7 @@ async function cmdPage(values, positionals) {
 async function pageRole(values) {
   const indexMode = values.index !== undefined;
   if (!values.confirm) {
-    log.warn('page', 'page role без --confirm — отказ до запроса браузера', { header: values.header, footer: values.footer, index: values.index });
+    log.warn('page', 'page role without --confirm - refused before requesting the browser', { header: values.header, footer: values.footer, index: values.index });
     const target = indexMode ? msg('cli.page.roleTargetIndex') : msg('cli.page.roleTargetHeaderFooter');
     return { status: msg('cli.page.status.roleNeedsConfirm', { target }), exitCode: EXIT.REFUSED };
   }
@@ -767,12 +767,12 @@ async function pageList(driver, values, { projectid: projectOpt, protectedIds, t
   const r = await listPages(driver, { projectid, protectedIds: protectedIds ?? protectedPages() });
   const out = resolve(values.out || `${baselineDir()}/pages/${projectid}.json`);
   const outSlash = out.replace(/\\/g, '/');
-  log.debug('page', 'список страниц', { projectid, out: outSlash, count: r.pages.length });
+  log.debug('page', 'page list', { projectid, out: outSlash, count: r.pages.length });
   try {
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, `${JSON.stringify({ projectid, source: r.source, captured: new Date().toISOString(), pages: r.pages, skipped: r.skipped }, null, 2)}\n`);
   } catch (e) {
-    log.error('page', 'перечень получен, но файл не записан', { out: outSlash, error: e.message });
+    log.error('page', 'list received but the file was not written', { out: outSlash, error: e.message });
     // message остаётся исходным (английский текст системной ошибки); для пользователя — ключ с путём.
     throw attachMessage(e, msg('cli.page.listNotWritten', { path: outSlash, detail: e.message }));
   }
@@ -809,7 +809,7 @@ async function cmdPromote(values, positionals) {
     if (values.delay !== undefined) pace.delayMs = Number(values.delay);
     if (values.pause !== undefined) pace.pauseMs = Number(values.pause) * 1000;
     const betweenSnapshotsMs = values.pause !== undefined ? Number(values.pause) * 1000 : promoteMod.BETWEEN_SNAPSHOTS_MS;
-    log.info('promote', 'режим снимков', { ...pace, betweenSnapshotsMs });
+    log.info('promote', 'snapshot mode', { ...pace, betweenSnapshotsMs });
     const r = await promoteMod.promote({ browser, session, cycle, ops }, { plans, from: values.from, to: values.to, unprotect: values.unprotect, dryRun: values['dry-run'], pace, betweenSnapshotsMs });
     return {
       status: msg('cli.promote.status.done', { to: r.to, plans: r.applied.length, backup: r.backup, backupName: r.backupName }),
@@ -941,7 +941,7 @@ async function cmdBrowser(values, positionals) {
   const role = values.donor ? 'donor' : 'test';
   const profile = browser.profileDir(role);
   const flag = values.donor ? ' --donor' : '';
-  log.debug('browser', 'действие', { action, role, profile });
+  log.debug('browser', 'action', { action, role, profile });
   if (action === 'status') {
     const st = browser.daemonStatus(profile);
     return st ? { status: msg('cli.browser.status.holderRunning'), role, pid: st.pid, port: st.port, startedAt: st.startedAt, profile } : { status: msg('cli.browser.status.holderNotRunning'), role, profile };
@@ -969,7 +969,7 @@ async function cmdDonorSession(values, browser, waitSec) {
       state = await browser.openProject(session, { layers: [] });
     } catch (e) {
       if (e.code !== 'SESSION_LOST') throw e;
-      log.info('session', 'сессии донора нет — войдите в открытом окне браузера', { waitSec });
+      log.info('session', 'no donor session - sign in in the open browser window', { waitSec });
       if (waitSec <= 0) throw e;
       await browser.waitForLogin(session, null, { timeoutMs: waitSec * 1000, target: 'project' });
       state = await browser.openProject(session, { layers: [] });
@@ -1000,7 +1000,7 @@ async function cmdSession(values) {
       state = await browser.openEditor(session, values.page);
     } catch (e) {
       if (e.code !== 'SESSION_LOST') throw e;
-      log.info('session', 'сессии нет — войдите в открытом окне браузера', { waitSec });
+      log.info('session', 'no session - sign in in the open browser window', { waitSec });
       if (waitSec <= 0) throw e;
       await browser.waitForLogin(session, values.page, { timeoutMs: waitSec * 1000 });
       state = await browser.openEditor(session, values.page);
@@ -1071,9 +1071,9 @@ async function donorCopy(values) {
       const da = await import('./donor-aliases.mjs');
       const found = da.donorAliasFor(entry, da.byPageid(readDonorPages(getProjectIdFor('donor'))));
       alias = found.alias ?? null;
-      if (found.reason) log.debug('donor', 'адрес приёмника не ставится', { label, reason: messageText(found.reason) });
+      if (found.reason) log.debug('donor', 'target alias is not set', { label, reason: messageText(found.reason) });
     } catch (e) {
-      log.warn('donor', 'адрес донора не определён — перенос без адреса', { label, error: String(e.message || e).slice(0, 160) });
+      log.warn('donor', 'donor alias is not determined - copying without an alias', { label, error: String(e.message || e).slice(0, 160) });
     }
     source ??= entry.donorPageid;
     target ??= entry.pageid;
@@ -1328,7 +1328,7 @@ async function donorStyleCapture(values) {
 /** `donor style --apply --confirm`: шрифты и оформление донора → тестовый проект с записью для отката. */
 async function donorStyleApply(values) {
   if (!values.confirm) {
-    log.warn('donor', 'donor style --apply без --confirm — отказ до браузера', {});
+    log.warn('donor', 'donor style --apply without --confirm - refused before the browser', {});
     return { status: msg('cli.donor.status.styleNeedsConfirm'), exitCode: EXIT.REFUSED };
   }
   const ds = await import('./donor-style.mjs');
@@ -1406,7 +1406,7 @@ async function donorVerify(values) {
     } catch (e) {
       if (e.code !== 'REFERENCE_UNAVAILABLE') throw e;
       referenceNote = msg('report.transfer.noteReferenceUnavailable', { error: e.message });
-      log.warn('donor', 'кадр референса не снят', { label, error: e.message });
+      log.warn('donor', 'reference frame not captured', { label, error: e.message });
     }
   } else {
     referenceNote = msg('report.transfer.noteHeaderFooter');
@@ -1439,7 +1439,7 @@ function withLoginHint(promise, hint) {
   return promise.catch((e) => {
     if (e?.code === 'SESSION_LOST' && e.key !== 'browser.lib.sessionLostRole' && !e.hint) {
       e.hint = hint;
-      log.debug('session', '[FIX] подсказка входа добавлена', { hint: messageText(hint) });
+      log.debug('session', '[FIX] sign-in hint added', { hint: messageText(hint) });
     }
     throw e;
   });
@@ -1451,7 +1451,7 @@ function withLoginHint(promise, hint) {
  */
 async function cmdDonor(values, positionals) {
   const action = positionals[0];
-  log.debug('donor', 'действие', { action, slug: values.slug });
+  log.debug('donor', 'action', { action, slug: values.slug });
   if (action === 'map') return donorMap(values);
   if (action === 'copy') return donorCopy(values);
   if (action === 'style') return values.apply ? donorStyleApply(values) : donorStyleCapture(values);
@@ -1472,7 +1472,7 @@ async function cmdDonor(values, positionals) {
       await browser.close(session);
     }
   }
-  log.error('donor', `действие ${action} ещё не реализовано`, { exitCode: EXIT.REFUSED });
+  log.error('donor', `action ${action} is not implemented yet`, { exitCode: EXIT.REFUSED });
   return { status: msg('cli.donor.status.notImplemented', { action }), exitCode: EXIT.REFUSED };
 }
 
@@ -1559,7 +1559,7 @@ async function cmdReference(values, positionals) {
  */
 async function cmdReferenceProject(values) {
   if (values.apply && !values.confirm) {
-    log.warn('reference', 'reference project --apply без --confirm — отказ до браузера', {});
+    log.warn('reference', 'reference project --apply without --confirm - refused before the browser', {});
     return { status: msg('cli.reference.status.projectNeedsConfirm'), exitCode: EXIT.REFUSED };
   }
   const ps = await import('./project-style.mjs');
@@ -1836,7 +1836,7 @@ export async function run(argv, ctx = {}) {
   ctx.lang = resolveLang({ flag: values.lang }).lang;
   log.debug('run', 'language after site', { lang: ctx.lang });
   warnRepoEnv();
-  log.debug('run', 'сайт', { site: site?.siteDir ?? null });
+  log.debug('run', 'site', { site: site?.siteDir ?? null });
   const stageOnline = cmd === 'stage' && positionals[0] === 'apply';
   const catalogOnline = cmd === 'catalog' && (positionals[0] === 'capture' || positionals[0] === 'calibrate');
   const referenceOnline = cmd === 'reference' && ((positionals[0] === 'pages' && values.create) || positionals[0] === 'audit' || positionals[0] === 'compare' || (positionals[0] === 'project' && values.apply) || (positionals[0] === 'plan' && values.update));
@@ -1853,7 +1853,7 @@ export async function run(argv, ctx = {}) {
     const browser = await import('./lib/browser.mjs');
     const writesTest = cmd === 'donor' && (positionals[0] === 'copy' || positionals[0] === 'aliases' || positionals[0] === 'links' || positionals[0] === 'check' || (positionals[0] === 'style' && values.apply));
     const withProfile = !(cmd === 'donor' && ['aliases', 'links', 'check'].includes(positionals[0]));
-    log.debug('main', '[FIX] конфигурация донора', { action: positionals[0], withTest: writesTest, withProfile });
+    log.debug('main', '[FIX] donor configuration', { action: positionals[0], withTest: writesTest, withProfile });
     requireDonorConfig({ testProfile: browser.profileDir('test'), withTest: writesTest, withProfile });
   }
   if ((ONLINE_COMMANDS.has(cmd) && !donorSession) || stageOnline || catalogOnline || referenceOnline || donorVerifyOnline) requireOnlineConfig();
@@ -1868,9 +1868,9 @@ export async function run(argv, ctx = {}) {
     if (!defaultPage) throw new UsageError(msg('cli.usage.needPage', { command: cmd }));
     values = { ...values, page: defaultPage };
   }
-  log.debug('run', 'команда', { cmd, page: values.page, plan: values.plan, dryRun: values['dry-run'], donor: values.donor });
+  log.debug('run', 'command', { cmd, page: values.page, plan: values.plan, dryRun: values['dry-run'], donor: values.donor });
   if (NOT_IMPLEMENTED.has(cmd)) {
-    log.error('run', `команда ${cmd} не реализована`, { exitCode: EXIT.REFUSED });
+    log.error('run', `command ${cmd} is not implemented`, { exitCode: EXIT.REFUSED });
     console.log(formatSummary({ status: msg('cli.main.status.notImplemented'), command: cmd }, values.json, ctx.lang));
     return EXIT.REFUSED;
   }
@@ -1887,7 +1887,7 @@ export async function run(argv, ctx = {}) {
 /** `.env` в корне репозитория больше не читается: данные и настройки сайта живут в папке сайта. */
 function warnRepoEnv() {
   const file = join(repoRoot(), '.env');
-  if (existsSync(file)) log.warn('main', '.env в корне репозитория не читается — перенесите его в папку сайта и запускайте с --site <папка>', { file: file.replace(/\\/g, '/') });
+  if (existsSync(file)) log.warn('main', '.env in the repository root is not read - move it to the site folder and run with --site <folder>', { file: file.replace(/\\/g, '/') });
 }
 
 async function main() {

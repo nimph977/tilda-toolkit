@@ -128,6 +128,6 @@ export function buildUpdateOps(planOps, live, { normalize = (s) => s } = {}) {
     stats.created += 1;
   }
   for (const blk of builtOnly) unmapped.push({ recordid: String(blk.recordid), tplid: blk.tplid, field: null, ...UPDATE_REASONS.extraBlock });
-  log.debug('buildUpdateOps', 'дописывание', { ...stats, extra: builtOnly.length, unmapped: unmapped.length });
+  log.debug('buildUpdateOps', 'update operations built', { ...stats, extra: builtOnly.length, unmapped: unmapped.length });
   return { ops, unmapped, startAfter, stats };
 }

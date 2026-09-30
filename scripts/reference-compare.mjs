@@ -83,6 +83,6 @@ export async function compareReferencePage(driver, { slug, label, published = fa
   writeFileSync(path, JSON.stringify(data, null, 2) + '\n', 'utf8');
   writeFileSync(report, renderCompareReport({ label, rows, builtOnly, at: now, lang }), 'utf8');
   log.debug('compareReferencePage', 'report language', { lang, file: report.replace(/\\/g, '/') });
-  log.info('compareReferencePage', 'сверка', { label, pairs: pairs.length, notBuilt: refOnly.length, extra: builtOnly.length, meanScore: Math.round(meanScore * 100) / 100 });
+  log.info('compareReferencePage', 'comparison', { label, pairs: pairs.length, notBuilt: refOnly.length, extra: builtOnly.length, meanScore: Math.round(meanScore * 100) / 100 });
   return { label, blocks: refBlocks.length, pairs: pairs.length, meanScore, refOnly: refOnly.length, builtOnly: builtOnly.length, path, report, rows };
 }

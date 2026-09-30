@@ -333,11 +333,11 @@ export async function collectTransferData(driver, { slug, label, pageid, widths,
       source.push({ recordid: r.recordid, tplid: r.tplid, hidden: r.hidden, code: rec.code });
     }
     htmlBlocks = listHtmlBlocks(source);
-    log.info('collectTransferData', 'HTML-блоки', { label, blocks: htmlBlocks.length, placeholder: htmlBlocks.filter((b) => b.placeholder).length, external: htmlBlocks.filter((b) => b.hosts.length).length });
-    log.debug('collectTransferData', 'внешние хосты HTML-блоков', { label, hosts: [...new Set(htmlBlocks.flatMap((b) => b.hosts))] });
+    log.info('collectTransferData', 'HTML blocks', { label, blocks: htmlBlocks.length, placeholder: htmlBlocks.filter((b) => b.placeholder).length, external: htmlBlocks.filter((b) => b.hosts.length).length });
+    log.debug('collectTransferData', 'external hosts of HTML blocks', { label, hosts: [...new Set(htmlBlocks.flatMap((b) => b.hosts))] });
   }
   const built = await driver.shot({ widths });
-  log.info('collectTransferData', 'состав и кадры сборки', { label, equal: composition.equal, meanScore: Math.round(cmp.meanScore * 100) / 100, files: built.files.length });
+  log.info('collectTransferData', 'composition and build frames', { label, equal: composition.equal, meanScore: Math.round(cmp.meanScore * 100) / 100, files: built.files.length });
   return {
     at: now, label, pageid: String(pageid), zone: resolved.zone,
     composition,
@@ -383,7 +383,7 @@ export function finishTransferReport(data, referenceShots, { slug, baseDir, refe
       if (!hasVerdictSection(prev)) log.warn('extractVerdict', 'verdict not found in previous report', { file: rel(report) });
       previousVerdict = { ...extractVerdict(prev), at: reportTakenAt(prev) };
     } catch (e) {
-      log.warn('finishTransferReport', 'прежний доклад не прочитан — вердикт пишется пустым', { label: data.label, error: e.message });
+      log.warn('finishTransferReport', 'previous report not read, verdict written empty', { label: data.label, error: e.message });
     }
   }
   full.verdictCarried = Boolean(previousVerdict?.filled);
@@ -391,7 +391,7 @@ export function finishTransferReport(data, referenceShots, { slug, baseDir, refe
   log.debug('finishTransferReport', 'report language', { lang, file: rel(report) });
   writeFileSync(report, renderTransferReport({ ...full, referenceNote: noteForReport, previousVerdict, lang }), 'utf8');
   const exitCode = data.composition.equal ? 0 : 1;
-  log.info('finishTransferReport', 'доклад записан', { label: data.label, report: rel(report), equal: data.composition.equal, verdictCarried: full.verdictCarried, exitCode });
+  log.info('finishTransferReport', 'report written', { label: data.label, report: rel(report), equal: data.composition.equal, verdictCarried: full.verdictCarried, exitCode });
   return { ...full, path: rel(path), report: rel(report), exitCode };
 }
 

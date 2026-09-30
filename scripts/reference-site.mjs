@@ -54,18 +54,18 @@ export async function createSitePages(driver, { slug, projectid, delayMs = SITE_
   if (!site) throw siteError(msg('referenceSite.noSite', { slug }), 'NO_SITE', 1);
   const pid = String(projectid);
   if (site.projectid && String(site.projectid) !== pid) {
-    log.error('createSitePages', 'карта сайта создана для другого проекта', { slug, siteProject: String(site.projectid), projectid: pid });
+    log.error('createSitePages', 'site map was created for another project', { slug, siteProject: String(site.projectid), projectid: pid });
     throw siteError(msg('referenceSite.projectMismatch', { slug, projectid: site.projectid, pid }), 'SITE_PROJECT_MISMATCH', 1);
   }
   const todo = site.pages.filter((p) => !p.pageid && !p.missing);
   const skipped = site.pages.filter((p) => p.pageid).map((p) => p.label);
   if (todo.length > SITE_CREATE_GUARD) {
-    log.error('createSitePages', 'страниц к созданию больше предохранителя', { todo: todo.length, guard: SITE_CREATE_GUARD });
+    log.error('createSitePages', 'pages to create exceed the guard', { todo: todo.length, guard: SITE_CREATE_GUARD });
     throw siteError(msg('referenceSite.createGuard', { count: todo.length, guard: SITE_CREATE_GUARD }), 'SITE_CREATE_GUARD', 1);
   }
   site.projectid = pid;
   let path = writeSite(slug, site, { baseDir });
-  log.info('createSitePages', 'создание страниц карты', { slug, todo: todo.length, skipped: skipped.length });
+  log.info('createSitePages', 'creating site map pages', { slug, todo: todo.length, skipped: skipped.length });
   const created = [];
   const titleFailed = [];
   const { createPage, pageTitleFor, setPageTitle } = await import('./page-ops.mjs');
@@ -77,18 +77,18 @@ export async function createSitePages(driver, { slug, projectid, delayMs = SITE_
       entry.createdAt = new Date().toISOString();
       path = writeSite(slug, site, { baseDir });
       created.push(entry.label);
-      log.info('createSitePages', 'страница создана', { label: entry.label, pageid: r.pageid });
+      log.info('createSitePages', 'page created', { label: entry.label, pageid: r.pageid });
       // Заголовок по метке: ошибка заголовка не откатывает создание страницы.
       try {
         await setPageTitle(driver, r.pageid, pageTitleFor(entry));
       } catch (e) {
         titleFailed.push(entry.label);
-        log.warn('createSitePages', 'заголовок не записан', { label: entry.label, pageid: r.pageid, error: String(e.message || e).slice(0, 160) });
+        log.warn('createSitePages', 'title not written', { label: entry.label, pageid: r.pageid, error: String(e.message || e).slice(0, 160) });
       }
     } catch (e) {
       const left = site.pages.filter((p) => !p.pageid && !p.missing).map((p) => p.label);
-      if (e.code === 'PAGE_LIMIT') log.warn('createSitePages', 'лимит Tilda на новые страницы', { created: created.length, left: left.length });
-      else log.error('createSitePages', 'страница не создана', { label: entry.label, error: String(e.message || e).slice(0, 200) });
+      if (e.code === 'PAGE_LIMIT') log.warn('createSitePages', 'Tilda limit on new pages', { created: created.length, left: left.length });
+      else log.error('createSitePages', 'page not created', { label: entry.label, error: String(e.message || e).slice(0, 200) });
       e.created = created;
       e.left = left;
       e.path = path;
@@ -192,7 +192,7 @@ export function auditLinks(html, { baseUrl, referenceHost, knownPageIds, knownAl
     external += 1;
   }
   const violations = [...groups.values()];
-  log.debug('auditLinks', 'ссылки проверены', { total, internal, external, violations: violations.length });
+  log.debug('auditLinks', 'links checked', { total, internal, external, violations: violations.length });
   return { total, internal, external, violations };
 }
 
@@ -219,12 +219,12 @@ export async function auditPage(driver, { slug, label, projectid, baseDir, pages
   const donorPageIds = (site.pages ?? []).filter((p) => p.donorPageid).map((p) => String(p.donorPageid));
   const { url, html } = await driver.pageHtml();
   const result = auditLinks(html, { baseUrl: url, referenceHost: new URL(manifest.url).hostname, knownPageIds, knownAliases, donorPageIds });
-  for (const v of result.violations) log.warn('auditPage', 'нарушение', { label, kind: v.kind, path: v.path, count: v.count });
+  for (const v of result.violations) log.warn('auditPage', 'violation', { label, kind: v.kind, path: v.path, count: v.count });
   const dir = join(refPaths(slug, { baseDir }).root, 'audit');
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${label}.json`);
   writeFileSync(path, JSON.stringify({ label, pageid: String(entry.pageid), at: new Date().toISOString(), ...result }, null, 2) + '\n', 'utf8');
-  log.info('auditPage', 'ссылки проверены', { label, total: result.total, internal: result.internal, violations: result.violations.length });
+  log.info('auditPage', 'links checked', { label, total: result.total, internal: result.internal, violations: result.violations.length });
   return { ...result, label, pageid: String(entry.pageid), path };
 }
 
@@ -237,8 +237,8 @@ export function syncSite({ slug, baseDir }) {
   const { header, footer } = zonesPresent(paths);
   const site = readSite(slug, { baseDir }) || newSite(slug);
   const { added, missing } = assignLabels(site, manifest, { header, footer });
-  for (const label of missing) log.warn('syncSite', 'страницы нет в слепке', { label });
+  for (const label of missing) log.warn('syncSite', 'page missing from the capture', { label });
   const path = writeSite(slug, site, { baseDir });
-  log.info('syncSite', 'карта сайта обновлена', { slug, total: site.pages.length, added: added.length, missing: missing.length, header, footer });
+  log.info('syncSite', 'site map updated', { slug, total: site.pages.length, added: added.length, missing: missing.length, header, footer });
   return { path, site, added, missing, header, footer };
 }

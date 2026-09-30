@@ -69,16 +69,16 @@ export function donorPageLinks(site, testPages, donorPages) {
     if (entry.role === 'header' || entry.role === 'footer' || !entry.donorPageid || !entry.pageid) continue;
     const donorPageid = String(entry.donorPageid);
     if (links.has(donorPageid)) {
-      log.debug('donorPageLinks', 'дубль страницы донора — путь первой метки', { label: entry.label });
+      log.debug('donorPageLinks', 'duplicate donor page, path of the first label', { label: entry.label });
       continue;
     }
     const pageid = String(entry.pageid);
     const alias = normalizeAlias(testById.get(pageid)?.alias);
     const path = donorById.get(donorPageid)?.role === 'index' ? '/' : alias ? `/${alias}` : `/page${pageid}.html`;
     links.set(donorPageid, path);
-    log.debug('donorPageLinks', 'пара', { label: entry.label, donorPageid, path });
+    log.debug('donorPageLinks', 'pair', { label: entry.label, donorPageid, path });
   }
-  log.info('donorPageLinks', `страниц донора с парой в копии: ${links.size}`, {});
+  log.info('donorPageLinks', `donor pages with a pair in the copy: ${links.size}`, {});
   return links;
 }
 
@@ -192,11 +192,11 @@ export function buildLinkRewritePlan(pageid, { hosts, knownPaths, donorLinks, ba
     const r = rewriteField(h.value, ctx);
     for (const u of r.reasons) {
       unchanged.push({ recordid: h.recordid, field: h.lid ? `${h.lid}.${h.field}` : h.field, code: u.code, reason: u.reason });
-      log.debug('buildLinkRewritePlan', 'оставлено', { recordid: h.recordid, field: h.field, href: u.href });
+      log.debug('buildLinkRewritePlan', 'kept', { recordid: h.recordid, field: h.field, href: u.href });
     }
     if (!r.changed) continue;
     changed += r.changed;
-    log.debug('buildLinkRewritePlan', 'переписано', { recordid: h.recordid, field: h.field, links: r.changed });
+    log.debug('buildLinkRewritePlan', 'rewritten', { recordid: h.recordid, field: h.field, links: r.changed });
     if (h.kind === 'zero') ops.push({ block: { recordid: h.recordid }, elem: { elem_id: h.elem_id }, set: { [h.field]: r.value } });
     else if (h.kind === 'record') ops.push({ block: { recordid: h.recordid }, field: { name: h.field, value: r.value } });
     else {
@@ -213,6 +213,6 @@ export function buildLinkRewritePlan(pageid, { hosts, knownPaths, donorLinks, ba
   ops.push(...listByRecord.values());
   const forms = skippedForm.map((x) => ({ recordid: x.recordid, field: x.field, code: 'form', reason: LINK_REWRITE_REASONS.form(x.field) }));
   const plan = { name: `donor-links-${String(pageid)}`, page: String(pageid), ops };
-  log.info('buildLinkRewritePlan', `переписано ${changed}, оставлено ${unchanged.length}, поля форм ${forms.length}`, { pageid: String(pageid), ops: ops.length, blocks, skippedStale });
+  log.info('buildLinkRewritePlan', `rewritten ${changed}, kept ${unchanged.length}, form fields ${forms.length}`, { pageid: String(pageid), ops: ops.length, blocks, skippedStale });
   return { plan, changed, unchanged, skippedForm: forms, blocks, skippedStale };
 }

@@ -381,7 +381,7 @@ export async function runDoctor({
   }
   const notLoaded = (id) => ({ id, status: 'fail', message: msg('doctor.notLoaded', { reason: loadError?.message }) });
 
-  log.debug('runDoctor', 'начало', { site: site ? 'есть' : 'нет', platform });
+  log.debug('runDoctor', 'start', { site: site ? 'present' : 'absent', platform });
   const checks = [
     node,
     checkDependencies({ root, readFile, exists }),
@@ -391,12 +391,12 @@ export async function runDoctor({
     deps ? checkSite({ flag: site, env, cwd, root, read: readFile, deps }) : notLoaded('site'),
     skillModule ? checkSkill({ root, inspect: inspect ?? skillModule.inspectSkill }) : notLoaded('skill'),
   ];
-  for (const check of checks) log.debug('runDoctor', 'пункт', { id: check.id, status: check.status });
+  for (const check of checks) log.debug('runDoctor', 'check', { id: check.id, status: check.status });
 
   const fails = checks.filter((check) => check.status === 'fail').length;
   const warns = checks.filter((check) => check.status === 'warn').length;
   const status = fails ? 'fail' : 'ok';
-  log.info('runDoctor', 'итог', { status, fails, warns });
+  log.info('runDoctor', 'summary', { status, fails, warns });
   return { status, checks };
 }
 

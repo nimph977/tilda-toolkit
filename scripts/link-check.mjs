@@ -52,7 +52,7 @@ export function collectUrls(html, baseUrl) {
   }
   ATTR.lastIndex = 0;
   const list = [...seen.values()];
-  log.debug('collectUrls', 'адреса собраны', { total: list.length, links: list.filter((x) => x.kind === 'link').length, images: list.filter((x) => x.kind === 'image').length });
+  log.debug('collectUrls', 'addresses collected', { total: list.length, links: list.filter((x) => x.kind === 'link').length, images: list.filter((x) => x.kind === 'image').length });
   return list;
 }
 
@@ -93,13 +93,13 @@ export async function checkUrls(items, opts = {}) {
       results[i] = { ...it, status: r.status, level, note: r.error || (r.status === 403 ? msg('linkCheck.note.botProtection') : r.location ? `→ ${r.location}` : '') };
       const line = `${it.kind} ${r.status} ${it.url}`;
       if (level === 'ok') log.debug('checkUrls', line, {});
-      else if (level === 'warn') log.warn('checkUrls', `редирект: ${line}`, { location: r.location });
-      else log.error('checkUrls', `битый адрес: ${line}`, { error: r.error && messageText(r.error) });
+      else if (level === 'warn') log.warn('checkUrls', `redirect: ${line}`, { location: r.location });
+      else log.error('checkUrls', `broken address: ${line}`, { error: r.error && messageText(r.error) });
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
   const broken = results.filter((x) => x.level === 'error');
-  log.info('checkUrls', `проверено ${results.filter((x) => x.level !== 'internal').length}: битых ссылок ${broken.filter((x) => x.kind === 'link').length}, битых картинок ${broken.filter((x) => x.kind === 'image').length}, прочих ${broken.filter((x) => x.kind === 'asset').length}, предупреждений ${results.filter((x) => x.level === 'warn').length}, внутренних ${results.filter((x) => x.level === 'internal').length}`, {});
+  log.info('checkUrls', `checked ${results.filter((x) => x.level !== 'internal').length}: broken links ${broken.filter((x) => x.kind === 'link').length}, broken images ${broken.filter((x) => x.kind === 'image').length}, other ${broken.filter((x) => x.kind === 'asset').length}, warnings ${results.filter((x) => x.level === 'warn').length}, internal ${results.filter((x) => x.level === 'internal').length}`, {});
   return results;
 }
 

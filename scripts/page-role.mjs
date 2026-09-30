@@ -104,21 +104,21 @@ function rollbackFor(before, indexMode) {
  */
 export async function assignPageRoles(driver, { header, footer, index, confirmed, projectid, protectedIds = [], recordDir, now = () => new Date() } = {}) {
   if (confirmed !== true) {
-    log.warn('assignPageRoles', 'назначение без подтверждения — отказ до обращения к браузеру');
+    log.warn('assignPageRoles', 'assignment without confirmation - refused before touching the browser');
     throw new PageRoleError('ROLE_NOT_CONFIRMED', msg('pageRole.notConfirmed'));
   }
   const indexMode = index !== undefined;
   if (indexMode && (header !== undefined || footer !== undefined)) {
-    log.error('assignPageRoles', 'главная вместе с шапкой или подвалом — отказ', { header, footer, index });
+    log.error('assignPageRoles', 'home page together with header or footer - refused', { header, footer, index });
     throw new PageRoleError('ROLE_INVALID', msg('pageRole.indexSeparate'));
   }
   const fields = indexMode ? INDEX_FIELDS : HEADER_FIELDS;
   const pick = (s) => pickFields(s, fields);
   const before = await driver.call('readProjectSettings');
-  log.info('assignPageRoles', 'роли до', pick(before));
+  log.info('assignPageRoles', 'roles before', pick(before));
   const errors = validateRoles({ header, footer, index }, before);
   if (errors.length) {
-    log.error('assignPageRoles', 'роли не прошли проверку', { errors });
+    log.error('assignPageRoles', 'roles failed validation', { errors });
     // Несколько причин склеиваются вложенными сообщениями: «первая; вторая».
     throw new PageRoleError('ROLE_INVALID', errors.reduce((first, second) => msg('pageRole.invalidJoin', { first, second })));
   }
@@ -130,14 +130,14 @@ export async function assignPageRoles(driver, { header, footer, index, confirmed
       };
   const rollback = rollbackFor(before, indexMode);
   if (fields.every((f) => requested[f] === before[f])) {
-    log.info('assignPageRoles', 'роли уже такие — запись не нужна', requested);
+    log.info('assignPageRoles', 'roles already set - no write needed', requested);
     return { changed: false, before: pick(before), after: pick(before), otherChanged: [], record: null, rollback };
   }
   if (indexMode) {
     const guard = new Set(protectedIds.map(String));
     const hit = [requested.indexpageid, before.indexpageid].find((id) => id && guard.has(String(id)));
     if (hit) {
-      log.error('assignPageRoles', 'главная затрагивает защищённую страницу — отказ до записи', { pageid: hit });
+      log.error('assignPageRoles', 'home page touches a protected page - refused before writing', { pageid: hit });
       throw new PageRoleError('PROTECTED_PAGE', msg('pageRole.protectedPage', { hit }));
     }
   }
@@ -148,22 +148,22 @@ export async function assignPageRoles(driver, { header, footer, index, confirmed
   const record = join(dir, `${at.replace(/[:.]/g, '-')}.json`);
   const entry = { projectid: String(projectid), at, before: pick(before), requested };
   writeFileSync(record, JSON.stringify(entry, null, 2) + '\n', 'utf8');
-  log.debug('assignPageRoles', 'запись для отката', { record });
+  log.debug('assignPageRoles', 'rollback record', { record });
 
   const args = indexMode
     ? { indexpageid: requested.indexpageid, confirm: ROLE_CONFIRM }
     : { headerpageid: header === undefined ? undefined : requested.headerpageid, footerpageid: footer === undefined ? undefined : requested.footerpageid, confirm: ROLE_CONFIRM };
   const r = await driver.callWithResponse('setPageRoles', [args], { urlPart: '/projects/submit/', bodyPart: 'comm=saveprojectsettings' });
   if (String(r.text ?? '').trim() !== 'OK') {
-    log.error('assignPageRoles', 'сервер ответил не OK', { status: r.status, bytes: String(r.text ?? '').length });
+    log.error('assignPageRoles', 'server response not OK', { status: r.status, bytes: String(r.text ?? '').length });
     throw new PageRoleError('SAVE_FAILED', msg('pageRole.saveFailed', { status: r.status, record }));
   }
-  log.info('assignPageRoles', 'роли записаны', requested);
+  log.info('assignPageRoles', 'roles written', requested);
 
   await driver.reload();
   const after = await driver.call('readProjectSettings');
   if (fields.some((f) => after[f] !== requested[f])) {
-    log.error('assignPageRoles', 'роли после записи не совпали', { requested, after: pick(after) });
+    log.error('assignPageRoles', 'roles after writing do not match', { requested, after: pick(after) });
     const got = indexMode
       ? msg('pageRole.gotIndex', { index: after.indexpageid || '—' })
       : msg('pageRole.gotHeaderFooter', { header: after.headerpageid || '—', footer: after.footerpageid || '—' });
@@ -173,7 +173,7 @@ export async function assignPageRoles(driver, { header, footer, index, confirmed
   const otherChanged = diffFingerprints(before.fingerprints, after.fingerprints, ignore);
   const counted = (s) => s.count - ignore.filter((n) => Object.hasOwn(s.fingerprints ?? {}, n)).length;
   if (counted(after) !== counted(before)) otherChanged.push(msg('pageRole.settingsCount', { before: before.count, after: after.count }));
-  if (otherChanged.length) log.warn('assignPageRoles', 'изменились другие настройки', { names: otherChanged.map(messageText) });
+  if (otherChanged.length) log.warn('assignPageRoles', 'other settings changed', { names: otherChanged.map(messageText) });
   // В файл записи для отката идёт английский текст, в итог команды — `Message`.
   writeFileSync(record, JSON.stringify({ ...entry, after: pick(after), otherChanged: otherChanged.map(messageText) }, null, 2) + '\n', 'utf8');
   return { changed: true, before: pick(before), after: pick(after), otherChanged, record, rollback };

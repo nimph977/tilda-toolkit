@@ -85,9 +85,9 @@ export async function downloadImage(page, src, dest, { gotoTimeoutMs = DEFAULTS.
       writeFileSync(dest, await r.body());
       return 'request';
     }
-    log.debug('downloadImage', 'request.get отверг', { dest, status: r.status() });
+    log.debug('downloadImage', 'request.get rejected', { dest, status: r.status() });
   } catch (e) {
-    log.debug('downloadImage', 'request.get упал', { dest, error: e.message });
+    log.debug('downloadImage', 'request.get failed', { dest, error: e.message });
   }
   let status = 0;
   try {
@@ -98,9 +98,9 @@ export async function downloadImage(page, src, dest, { gotoTimeoutMs = DEFAULTS.
     }
     status = resp ? resp.status() : 0;
   } catch (e) {
-    log.debug('downloadImage', 'goto упал', { dest, error: e.message });
+    log.debug('downloadImage', 'goto failed', { dest, error: e.message });
   }
-  log.warn('downloadImage', 'картинка не скачана', { dest, status });
+  log.warn('downloadImage', 'image not downloaded', { dest, status });
   return null;
 }
 
@@ -109,14 +109,14 @@ async function fetchImages(page, manifest, paths, { slug, baseDir, imageDelayMs,
     const known = manifest.images[src];
     return !(known && existsSync(snapshotFile(paths, known)));
   });
-  log.info('fetchImages', 'картинки к скачиванию', { pending: pending.length, known: Object.keys(manifest.images).length });
+  log.info('fetchImages', 'images to download', { pending: pending.length, known: Object.keys(manifest.images).length });
   let downloaded = 0;
   let failed = 0;
   let sinceWrite = 0;
   for (const src of pending) {
     const fileName = imageFileName(src);
     if (fileName.endsWith('.bin')) {
-      log.warn('fetchImages', 'картинка без известного расширения, пропуск', { src: '(скрыт)', fileName });
+      log.warn('fetchImages', 'image without a known extension, skipped', { src: '(hidden)', fileName });
       failed += 1;
       continue;
     }
@@ -126,7 +126,7 @@ async function fetchImages(page, manifest, paths, { slug, baseDir, imageDelayMs,
       manifest.images[src] = relative(paths.root, dest).replace(/\\/g, '/');
       downloaded += 1;
       sinceWrite += 1;
-      log.debug('fetchImages', 'картинка сохранена', { fileName, via });
+      log.debug('fetchImages', 'image saved', { fileName, via });
     } else {
       failed += 1;
     }
@@ -137,7 +137,7 @@ async function fetchImages(page, manifest, paths, { slug, baseDir, imageDelayMs,
     await sleep(imageDelayMs);
   }
   writeManifest(slug, manifest, { baseDir });
-  log.info('fetchImages', 'картинки обработаны', { downloaded, failed });
+  log.info('fetchImages', 'images processed', { downloaded, failed });
   return { downloaded, failed };
 }
 
@@ -149,7 +149,7 @@ async function readXml(page, url, gotoTimeoutMs) {
     // text() читает тело ответа сети, а не DOM просмотрщика XML.
     return { status, text: status === 200 ? await resp.text() : '' };
   } catch (e) {
-    log.debug('readXml', 'переход не удался', { error: e.message.slice(0, 120) });
+    log.debug('readXml', 'navigation failed', { error: e.message.slice(0, 120) });
     return { status: 0, text: '' };
   }
 }
@@ -162,7 +162,7 @@ async function readXml(page, url, gotoTimeoutMs) {
 async function readSitemap(page, origin, { gotoTimeoutMs, delayMs }) {
   const top = await readXml(page, origin + '/sitemap.xml', gotoTimeoutMs);
   if (top.status !== 200) {
-    log.warn('fetchReference', 'sitemap.xml недоступен, обход без него', { status: top.status });
+    log.warn('fetchReference', 'sitemap.xml unavailable, crawling without it', { status: top.status });
     await sleep(delayMs);
     return { status: top.status, pages: [], nested: 0, dropped: 0 };
   }
@@ -176,23 +176,23 @@ async function readSitemap(page, origin, { gotoTimeoutMs, delayMs }) {
       return false;
     }
   }).slice(0, MAX_NESTED_SITEMAPS);
-  if (first.sitemaps.length > nestedUrls.length) log.warn('readSitemap', 'часть вложенных карт пропущена (чужой адрес или сверх лимита)', { total: first.sitemaps.length, read: nestedUrls.length });
+  if (first.sitemaps.length > nestedUrls.length) log.warn('readSitemap', 'some nested sitemaps skipped (foreign address or over the limit)', { total: first.sitemaps.length, read: nestedUrls.length });
   let nested = 0;
   for (const [i, u] of nestedUrls.entries()) {
     await sleep(delayMs);
     const r = await readXml(page, u, gotoTimeoutMs);
     if (r.status !== 200) {
-      log.warn('readSitemap', 'вложенная карта недоступна', { n: i + 1, status: r.status });
+      log.warn('readSitemap', 'nested sitemap unavailable', { n: i + 1, status: r.status });
       continue;
     }
     const part = parseSitemap(r.text, origin);
     nested += 1;
     dropped += part.dropped;
     for (const p of part.pages) if (!pages.includes(p)) pages.push(p);
-    log.debug('readSitemap', 'вложенная карта', { n: i + 1, pages: part.pages.length });
+    log.debug('readSitemap', 'nested sitemap', { n: i + 1, pages: part.pages.length });
   }
   await sleep(delayMs);
-  log.info('fetchReference', 'sitemap.xml прочитан', { status: top.status, pages: pages.length, nested, dropped });
+  log.info('fetchReference', 'sitemap.xml read', { status: top.status, pages: pages.length, nested, dropped });
   return { status: top.status, pages, nested, dropped };
 }
 
@@ -210,7 +210,7 @@ function savePending(manifest, queue) {
     if (!known || known.status === 'pending') upsertPage(manifest, { name, url: u, status: 'pending', fetchedAt: null });
     pending.push(name);
   }
-  log.debug('savePending', 'остаток очереди', { queue: queue.length, pending: pending.length });
+  log.debug('savePending', 'queue remainder', { queue: queue.length, pending: pending.length });
   return pending;
 }
 
@@ -235,7 +235,7 @@ export async function fetchReference(
     seen.add(p.url);
     queue.push(p.url);
   }
-  log.info('fetchReference', 'обход начат', { slug, follow, sitemap, max, queued: queue.length, known: manifest.pages.length });
+  log.info('fetchReference', 'crawl started', { slug, follow, sitemap, max, queued: queue.length, known: manifest.pages.length });
 
   const stats = { fetched: 0, skipped: 0, failed: 0, pending: 0, images: 0, imagesFailed: 0 };
   // Очередь не ограничивается `max`: лимит держит только число снятых страниц за запуск,
@@ -249,7 +249,7 @@ export async function fetchReference(
       queue.push(link);
       added += 1;
     }
-    log.debug('fetchReference', 'ссылки поставлены в очередь', { from: pageNameFromUrl(from), added, queue: queue.length });
+    log.debug('fetchReference', 'links queued', { from: pageNameFromUrl(from), added, queue: queue.length });
   };
 
   const session = await browser.open({ protectedPages: [] });
@@ -266,7 +266,7 @@ export async function fetchReference(
         added += 1;
       }
       stats.sitemap = { status: r.status, found: r.pages.length, nested: r.nested };
-      log.debug('fetchReference', 'страницы карты сайта поставлены в очередь', { added, queue: queue.length });
+      log.debug('fetchReference', 'sitemap pages queued', { added, queue: queue.length });
     }
     let done = 0;
     while (queue.length && done < max) {
@@ -275,7 +275,7 @@ export async function fetchReference(
       const file = join(paths.pages, name + '.html');
       const known = manifest.pages.find((p) => p.name === name);
       if (known && known.status === 'ok' && existsSync(file)) {
-        log.info('fetchReference', 'страница уже снята, пропуск', { name });
+        log.info('fetchReference', 'page already captured, skipped', { name });
         stats.skipped += 1;
         if (follow) enqueueLinks(readFileSync(file, 'utf8'), u);
         continue;
@@ -291,9 +291,9 @@ export async function fetchReference(
       } catch (e) {
         error = e.message.slice(0, 120);
       }
-      log.debug('fetchReference', 'переход выполнен', { url: u, status, error });
+      log.debug('fetchReference', 'navigation done', { url: u, status, error });
       if (status !== 200) {
-        log.warn('fetchReference', 'страница не получена', { name, status, error });
+        log.warn('fetchReference', 'page not received', { name, status, error });
         upsertPage(manifest, { name, url: u, status, error: error ?? `HTTP ${status}`, fetchedAt });
         writeManifest(slug, manifest, { baseDir });
         stats.failed += 1;
@@ -306,7 +306,7 @@ export async function fetchReference(
       writeFileSync(file, html, 'utf8');
       const relFile = relative(paths.root, file).replace(/\\/g, '/');
       if (splitRecords(html).length === 0) {
-        log.warn('fetchReference', 'страница без блоков Tilda', { name });
+        log.warn('fetchReference', 'page without Tilda blocks', { name });
         upsertPage(manifest, { name, url: u, file: relFile, status: 'empty', error: 'no Tilda blocks in the HTML (a stub page?)', fetchedAt });
         writeManifest(slug, manifest, { baseDir });
         stats.failed += 1;
@@ -319,7 +319,7 @@ export async function fetchReference(
       upsertPage(manifest, { name, url: u, file: relFile, status: 'ok', title: structure.title, blocks: structure.counts.blocks, fetchedAt });
       manifest.fetchedAt = fetchedAt;
       writeManifest(slug, manifest, { baseDir });
-      log.info('fetchReference', 'страница снята', { name, status, blocks: structure.counts.blocks, images: structure.counts.images, ms: Date.now() - startedAt });
+      log.info('fetchReference', 'page captured', { name, status, blocks: structure.counts.blocks, images: structure.counts.images, ms: Date.now() - startedAt });
       stats.fetched += 1;
       done += 1;
       enqueueLinks(html, u);
@@ -329,7 +329,7 @@ export async function fetchReference(
     stats.pending = pending.length;
     if (pending.length) {
       writeManifest(slug, manifest, { baseDir });
-      log.warn('fetchReference', 'лимит страниц за запуск исчерпан — остаток записан как pending, повторите запуск', { max, left: pending.length });
+      log.warn('fetchReference', 'page limit per run reached, remainder saved as pending, run again', { max, left: pending.length });
     }
 
     if (images) {
@@ -343,7 +343,7 @@ export async function fetchReference(
   }
 
   const result = { slug, dir: paths.root, pages: manifest.pages.length, ...stats, images: Object.keys(manifest.images).length };
-  log.info('fetchReference', 'обход завершён', result);
+  log.info('fetchReference', 'crawl finished', result);
   return result;
 }
 
@@ -373,7 +373,7 @@ export async function shotReference({ slug, source, widths, baseDir, settleMs, s
   let page;
   try {
     page = await browser.openBackgroundPage(session.context);
-    log.debug('shotReference', 'снимок', { label: source, path: new URL(entry.url).pathname });
+    log.debug('shotReference', 'screenshot', { label: source, path: new URL(entry.url).pathname });
     let r;
     try {
       r = await captureWidths(page, { url: entry.url, widths, outDir: dir, settleMs, stamp, requireOk: true });
@@ -382,7 +382,7 @@ export async function shotReference({ slug, source, widths, baseDir, settleMs, s
       throw refError(msg('reference.pageUnavailable', { source, status: e.status }), 'REFERENCE_UNAVAILABLE', 1);
     }
     const out = { label: source, dir, files: r.files.length, widths: r.widths.map((w) => ({ width: w.width, height: w.height, records: w.records, files: w.files.length })) };
-    log.info('shotReference', 'снимок референса', { label: source, widths: out.widths.map((w) => w.width), files: out.files });
+    log.info('shotReference', 'reference screenshots taken', { label: source, widths: out.widths.map((w) => w.width), files: out.files });
     return out;
   } finally {
     if (page) await page.close().catch(() => {});
@@ -402,7 +402,7 @@ export async function structureReference({ slug, baseDir }) {
     if (p.status !== 'ok' || !p.file) continue;
     const file = snapshotFile(paths, p.file);
     if (!existsSync(file)) {
-      log.warn('structureReference', 'HTML страницы отсутствует, пропуск', { name: p.name });
+      log.warn('structureReference', 'page HTML missing, skipped', { name: p.name });
       continue;
     }
     const structure = structureFromFile(file, { url: p.url, name: p.name });
@@ -410,6 +410,6 @@ export async function structureReference({ slug, baseDir }) {
     for (const t of structure.counts.tplids) tplids.add(t);
     pages += 1;
   }
-  log.info('structureReference', 'структура пересобрана', { slug, pages, tplids: tplids.size });
+  log.info('structureReference', 'structure rebuilt', { slug, pages, tplids: tplids.size });
   return { slug, pages, tplids: [...tplids] };
 }

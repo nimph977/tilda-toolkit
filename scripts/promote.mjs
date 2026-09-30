@@ -97,7 +97,7 @@ export function backupName(at = new Date()) {
 export function findVerifiedRecord(records, planName) {
   const rolledBack = new Set(records.filter((r) => r.rollbackOf).map((r) => r.rollbackOf));
   const hit = records.find((r) => r.plan && r.plan.name === planName && !r.rollbackOf && (r.verify || []).length === 0 && (r.written || 0) > 0 && !rolledBack.has(r.at));
-  log.debug('findVerifiedRecord', hit ? 'запись найдена' : 'записи нет', { planName, at: hit ? hit.at : null, candidates: records.filter((r) => r.plan && r.plan.name === planName).length });
+  log.debug('findVerifiedRecord', hit ? 'record found' : 'no record', { planName, at: hit ? hit.at : null, candidates: records.filter((r) => r.plan && r.plan.name === planName).length });
   return hit || null;
 }
 
@@ -134,7 +134,7 @@ export function expectedChanges(records = []) {
       }
     }
   }
-  log.debug('expectedChanges', 'ожидаемые различия собраны', { records: ordered.length, created: exp.created.size, zeroBlocks: exp.zero.size, recordBlocks: exp.record.size, listBlocks: exp.list.size, hidden: exp.hidden.size, sort: Boolean(exp.sortFrom) });
+  log.debug('expectedChanges', 'expected differences collected', { records: ordered.length, created: exp.created.size, zeroBlocks: exp.zero.size, recordBlocks: exp.record.size, listBlocks: exp.list.size, hidden: exp.hidden.size, sort: Boolean(exp.sortFrom) });
   return exp;
 }
 
@@ -166,7 +166,7 @@ export function alignPages(backup, working, expected = expectedChanges()) {
   const live = backup.inventory || [];
   if (baseOrder.length !== live.length) {
     problems.push({ problem: msg('promote.problem.blockCountMismatch'), live: live.length, working: baseOrder.length, created: [...expected.created] });
-    log.error('alignPages', 'число блоков не совпало', { live: live.length, working: baseOrder.length });
+    log.error('alignPages', 'block count mismatch', { live: live.length, working: baseOrder.length });
     return { pairs: [], problems };
   }
   const byId = new Map((working.inventory || []).map((r) => [String(r.recordid), r]));
@@ -180,7 +180,7 @@ export function alignPages(backup, working, expected = expectedChanges()) {
     if (String(row.tplid) !== String(work.tplid)) problems.push({ pos: i + 1, problem: msg('promote.problem.blockTypeMismatch'), live: `${row.recordid}/tpl${row.tplid}`, working: `${work.recordid}/tpl${work.tplid}` });
     pairs.push({ pos: i + 1, live: row, work });
   });
-  log.debug('alignPages', 'блоки совмещены', { pairs: pairs.length, problems: problems.length });
+  log.debug('alignPages', 'blocks aligned', { pairs: pairs.length, problems: problems.length });
   return { pairs, problems };
 }
 
@@ -298,8 +298,8 @@ export function comparePages(backup, working, expected = expectedChanges()) {
       compareRecord(pos, a, b, expected.record.get(String(work.recordid)), expected.list.has(String(work.recordid)), out);
     }
   }
-  if (out.problems.length) log.error('comparePages', 'свежий дубль живой расходится с рабочей копией сверх плана', { problems: out.problems.length, explained: out.explained.length, first: out.problems[0] });
-  else log.info('comparePages', `сверка чиста: ${out.blocks} блоков, ожидаемых различий ${out.explained.length}`);
+  if (out.problems.length) log.error('comparePages', 'fresh live duplicate differs from the working copy beyond the plan', { problems: out.problems.length, explained: out.explained.length, first: out.problems[0] });
+  else log.info('comparePages', `comparison clean: ${out.blocks} blocks, expected differences ${out.explained.length}`);
   return out;
 }
 
@@ -324,7 +324,7 @@ export function remapPlan(plan, to, mapping) {
   });
   const out = { ...plan, page: String(to), ops };
   if (plan.startAfter) out.startAfter = map(plan.startAfter, 'startAfter');
-  log.debug('remapPlan', 'план перенесён', { to: String(to), ops: ops.length, startAfter: out.startAfter });
+  log.debug('remapPlan', 'plan remapped', { to: String(to), ops: ops.length, startAfter: out.startAfter });
   return out;
 }
 
@@ -343,16 +343,16 @@ async function snapshotWholePage(driver, pageid, { baseDir, source, pace = SNAPS
   const complete = snapshotComplete(snap);
   if (snap.timeline) {
     const okReads = snap.timeline.filter((x) => x.ok);
-    log.debug('snapshotWholePage', 'хронология чтений', { pageid: String(pageid), reads: snap.timeline.length, ok: okReads.length, avgMs: okReads.length ? Math.round(okReads.reduce((a, x) => a + x.ms, 0) / okReads.length) : null, first: snap.timeline[0]?.at, last: snap.timeline.at(-1)?.at, pace: snap.pace });
+    log.debug('snapshotWholePage', 'read timeline', { pageid: String(pageid), reads: snap.timeline.length, ok: okReads.length, avgMs: okReads.length ? Math.round(okReads.reduce((a, x) => a + x.ms, 0) / okReads.length) : null, first: snap.timeline[0]?.at, last: snap.timeline.at(-1)?.at, pace: snap.pace });
   }
   if (complete.errors.some((e) => /SESSION_LOST/.test(String(e.error)))) {
-    log.error('snapshotWholePage', 'сессия Тильды потеряна во время снимка', { pageid: String(pageid), read: complete.errors.length });
+    log.error('snapshotWholePage', 'Tilda session lost during snapshot', { pageid: String(pageid), read: complete.errors.length });
     throw new PromoteError('SESSION_LOST', msg('promote.sessionLost', { pageid }), { pageid: String(pageid) });
   }
   writeJson(join(baseDir, 'records', String(pageid), '_inventory.json'), snap.inventory);
   for (const [recordid, data] of Object.entries(snap.zero || {})) saveSnapshot({ kind: 'zero', pageid, recordid, data, source }, { baseDir });
   for (const [recordid, data] of Object.entries(snap.records || {})) saveSnapshot({ kind: 'record', pageid, recordid, data, source }, { baseDir });
-  log.info('snapshotWholePage', `снимок страницы ${pageid}: ${snap.inventory.length} блоков, zero ${Object.keys(snap.zero).length}, стандартных ${Object.keys(snap.records).length}`, { complete: complete.ok, missing: complete.missing.length, errors: complete.errors.length });
+  log.info('snapshotWholePage', `page snapshot ${pageid}: ${snap.inventory.length} blocks, zero ${Object.keys(snap.zero).length}, standard ${Object.keys(snap.records).length}`, { complete: complete.ok, missing: complete.missing.length, errors: complete.errors.length });
   return { snap, complete };
 }
 
@@ -383,7 +383,7 @@ export async function promote(ctx, opts) {
     if (!capture) return;
     const records = await capture.stop();
     report.analysis = analyzeCapture(records);
-    log.info('promote', 'перехват завершён', { calls: report.analysis.calls, spanSec: report.analysis.spanSec, maxPerMinute: report.analysis.maxPerMinute, firstLost: report.analysis.firstLost ? `#${report.analysis.firstLost.index} ${report.analysis.firstLost.marker || 'html'} после ${report.analysis.firstLost.sinceStartSec} с, за 60 с до него ${report.analysis.firstLost.inLast60s}` : null, file: capturePath });
+    log.info('promote', 'capture finished', { calls: report.analysis.calls, spanSec: report.analysis.spanSec, maxPerMinute: report.analysis.maxPerMinute, firstLost: report.analysis.firstLost ? `#${report.analysis.firstLost.index} ${report.analysis.firstLost.marker || 'html'} after ${report.analysis.firstLost.sinceStartSec} s, last 60 s before it: ${report.analysis.firstLost.inLast60s}` : null, file: capturePath });
   };
   // message — строка или Message; в отчёте (JSON-файл) хранится английский текст.
   const stop = async (code, message, data) => {
@@ -393,7 +393,7 @@ export async function promote(ctx, opts) {
     Object.assign(report, data || {});
     await finishCapture();
     report.reportPath = writeJson(reportPath, report);
-    log.error('promote', `останов: ${text}`, { code, report: reportPath });
+    log.error('promote', `stopped: ${text}`, { code, report: reportPath });
     throw new PromoteError(code, message, { report });
   };
   // Сообщение пойманной ошибки: с ключом — как Message, иначе её текст.
@@ -409,7 +409,7 @@ export async function promote(ctx, opts) {
     if (!rec) await stop('PLAN_NOT_VERIFIED', msg('promote.planNotVerified', { name, from }), { plan: name });
     verified.push(rec);
     report.plans.push({ name, path, verifiedAt: rec.at, journal: rec.file });
-    log.info('promote', `шаг 1: план ${name} проверен на ${from}`, { at: rec.at });
+    log.info('promote', `step 1: plan ${name} checked against ${from}`, { at: rec.at });
   }
 
   // Шаг 2. Свежий дубль-бэкап живой и его полный снимок.
@@ -417,7 +417,7 @@ export async function promote(ctx, opts) {
   const projectDriver = { call: (fn, args = []) => browser.call(session.page, fn, args, { attempts: 1 }) };
   const dup = await ops.duplicatePage(projectDriver, to);
   report.backup = dup.pageid;
-  log.info('promote', `шаг 2: бэкап ${dup.pageid} снят (${report.backupName})`, { source: to, editor: dup.editor });
+  log.info('promote', `step 2: backup ${dup.pageid} taken (${report.backupName})`, { source: to, editor: dup.editor });
   await browser.openEditor(session, dup.pageid, { layers });
   const backupDriver = cycle.browserDriver(session, dup.pageid, { layers, browser });
   let backup;
@@ -428,10 +428,10 @@ export async function promote(ctx, opts) {
     throw e;
   }
   if (!backup.complete.ok) await stop('BACKUP_INCOMPLETE', msg('promote.backupIncomplete', { pageid: dup.pageid, missing: backup.complete.missing.length, errors: backup.complete.errors.length }), { missing: backup.complete.missing, errors: backup.complete.errors });
-  log.info('promote', 'шаг 2: снимок бэкапа полный', { blocks: backup.snap.inventory.length });
+  log.info('promote', 'step 2: backup snapshot complete', { blocks: backup.snap.inventory.length });
 
   // Шаг 3. Сверка бэкапа с рабочей копией. Пауза перед вторым снимком — см. SNAPSHOT_PACE.
-  log.info('promote', 'пауза перед снимком рабочей копии', { ms: betweenMs });
+  log.info('promote', 'pause before the working copy snapshot', { ms: betweenMs });
   await new Promise((r) => setTimeout(r, betweenMs));
   await browser.openEditor(session, from, { layers });
   const workDriver = cycle.browserDriver(session, from, { layers, browser });
@@ -447,13 +447,13 @@ export async function promote(ctx, opts) {
   const cmp = comparePages(backup.snap, working.snap, expected);
   report.compare = { blocks: cmp.blocks, explained: cmp.explained.length, problems: cmp.problems };
   if (cmp.problems.length) await stop('DRIFT', msg('promote.drift', { count: cmp.problems.length }), { problems: cmp.problems });
-  log.info('promote', `шаг 3: сверка чиста — ${cmp.blocks} блоков, ожидаемых различий ${cmp.explained.length}`);
+  log.info('promote', `step 3: comparison clean - ${cmp.blocks} blocks, expected differences ${cmp.explained.length}`);
 
   // Шаг 4. Накат заменой page. Защита снимается на этот вызов явным флагом.
   if (protectedPages().includes(to)) {
     if (!opts.unprotect) await stop('PROTECTED_PAGE', msg('promote.protectedPage', { to }));
     const rest = unprotectForThisRun(to);
-    log.warn('promote', `защита страницы ${to} снята на этот вызов по флагу --unprotect`, { at: new Date().toISOString(), remainingProtected: rest });
+    log.warn('promote', `protection of page ${to} lifted for this call by --unprotect`, { at: new Date().toISOString(), remainingProtected: rest });
   }
   await browser.openEditor(session, to, { layers });
   await browser.setProtectedPages(session.page, protectedPages());
@@ -468,7 +468,7 @@ export async function promote(ctx, opts) {
     const remapped = remapPlan(plan, to, mapping);
     remapped.name = remapped.name || planSlug(path, plan); // журнал живой хранит то же имя плана, что и копия
     const remappedPath = writeJson(join(baseDir, 'payload', to, `_promote-${k + 1}-${planSlug(path, plan)}.json`), remapped);
-    log.info('promote', `шаг 4: накат плана ${k + 1}/${opts.plans.length} на ${to}`, { ops: remapped.ops.length, plan: remappedPath });
+    log.info('promote', `step 4: applying plan ${k + 1}/${opts.plans.length} to ${to}`, { ops: remapped.ops.length, plan: remappedPath });
     const r = await cycle.apply(liveDriver, remapped, { baseDir, planPath: remappedPath, dryRun: Boolean(opts.dryRun), noShot: opts.noShot });
     report.applied.push({ plan: planSlug(path, plan), written: r.written, verify: r.verify.length, created: r.created, journal: r.journal, dryRun: r.dryRun });
     if (r.verify.length) await stop('VERIFY_FAILED', msg('promote.verifyFailed', { name: planSlug(path, plan), to, count: r.verify.length }), { verify: r.verify.slice(0, 10) });
@@ -482,7 +482,7 @@ export async function promote(ctx, opts) {
   // Шаг 5. Бэкап остаётся в кабинете как точка возврата.
   await finishCapture();
   report.reportPath = writeJson(reportPath, report);
-  log.info('promote', `шаг 5: бэкап ${report.backup} остаётся точкой возврата; отчёт ${reportPath}`);
+  log.info('promote', `step 5: backup ${report.backup} stays as the rollback point; report ${reportPath}`);
   return report;
 }
 

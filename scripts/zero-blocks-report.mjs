@@ -13,7 +13,7 @@ const log = createLogger('zero-blocks-report');
 const path = resolveHtmlArg(process.argv);
 const blocks = splitRecords(readHtml(path));
 const zero = blocks.filter((b) => b.type === ZERO_TYPE);
-log.info('main', 'Zero Block найдены', { path, zero: zero.length, records: blocks.length });
+log.info('main', 'Zero Blocks found', { path, zero: zero.length, records: blocks.length });
 
 console.log(`Zero Blocks on the page: ${zero.length} of ${blocks.length} records\n`);
 

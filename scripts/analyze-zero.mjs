@@ -16,7 +16,7 @@ const blocks = splitRecords(readHtml(path));
 console.log(`Records on the page: ${blocks.length}`);
 const byType = countByType(blocks);
 console.log('By type:', byType.map(([t, n]) => `${t}:${n}`).join('  '));
-log.info('main', 'разбор завершён', { path, records: blocks.length, types: byType.length });
+log.info('main', 'analysis finished', { path, records: blocks.length, types: byType.length });
 
 console.log(`\n=== Zero Block (${ZERO_TYPE}) — composition ===`);
 for (const b of blocks.filter((x) => x.type === ZERO_TYPE)) {

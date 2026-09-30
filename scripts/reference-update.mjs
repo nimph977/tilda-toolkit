@@ -38,6 +38,6 @@ export async function updateReferencePlan(driver, { slug, label, pageid, out, st
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(updatePlan, null, 2) + '\n', 'utf8');
   const unmapped = [...upd.unmapped, ...(built.unmapped ?? [])];
-  log.info('updateReferencePlan', 'план дописывания', { label, ops: upd.ops.length, fields: upd.stats.fields, lists: upd.stats.lists, created: upd.stats.created, unmapped: unmapped.length });
+  log.info('updateReferencePlan', 'update plan', { label, ops: upd.ops.length, fields: upd.stats.fields, lists: upd.stats.lists, created: upd.stats.created, unmapped: unmapped.length });
   return { label, path, ops: upd.ops.length, fields: upd.stats.fields, lists: upd.stats.lists, created: upd.stats.created, unmapped };
 }

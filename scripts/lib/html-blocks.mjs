@@ -27,10 +27,10 @@ export function splitRecords(html) {
     const idm = chunk.match(/^<div\s+id=["']rec(\d+)/);
     if (!idm) continue;
     const typeMatch = chunk.match(/data-record-type=["'](\d+)/);
-    if (!typeMatch) log.warn('splitRecords', 'запись без data-record-type', { recid: idm[1] });
+    if (!typeMatch) log.warn('splitRecords', 'record without data-record-type', { recid: idm[1] });
     blocks.push({ order: blocks.length + 1, recid: idm[1], type: typeMatch ? typeMatch[1] : '?', chunk });
   }
-  log.debug('splitRecords', 'разрез выполнен', { htmlBytes: html.length, records: blocks.length });
+  log.debug('splitRecords', 'records split', { htmlBytes: html.length, records: blocks.length });
   return blocks;
 }
 
@@ -180,7 +180,7 @@ export function liteHtml(s, opts = {}) {
   // Тег без закрывающего в исходнике закрывается в конце текста — поле не получит незакрытый
   // `<a>`/`<strong>`, который растянулся бы на соседние блоки.
   const unclosed = open.filter((e) => e.kept).reverse().map((e) => `</${e.name}>`).join('');
-  log.debug('liteHtml', '[FIX] разметка текста сохранена', { tags: kept.length, links: withLinks, format, unclosed: unclosed.length > 0 });
+  log.debug('liteHtml', '[FIX] text markup kept', { tags: kept.length, links: withLinks, format, unclosed: unclosed.length > 0 });
   return html.replace(TOKEN_RE, (_, i) => kept[Number(i)]) + unclosed;
 }
 
@@ -197,7 +197,7 @@ export function zeroSummary(block) {
   const zMax = Math.max(0, ...[...chunk.matchAll(/z-index:\s*(\d+)/g)].map((m) => +m[1]));
   const hasForm = /data-elem-type=["']form["']/.test(chunk);
   const summary = { recid: block.recid, elemIds, typeCounts, height, zMax, hasForm, text: cleanText(chunk) };
-  log.debug('zeroSummary', 'сводка блока', { recid: block.recid, elems: elemIds.length, height, hasForm });
+  log.debug('zeroSummary', 'block summary', { recid: block.recid, elems: elemIds.length, height, hasForm });
   return summary;
 }
 
@@ -208,11 +208,11 @@ export function zeroSummary(block) {
 export function resolveHtmlArg(argv) {
   const arg = argv[2];
   if (!arg) {
-    log.error('resolveHtmlArg', 'нужен путь к HTML-файлу', { usage: 'node <скрипт> <путь.html>' });
+    log.error('resolveHtmlArg', 'HTML file path required', { usage: 'node <script> <path.html>' });
     process.exit(2);
   }
   const path = resolve(arg);
-  log.debug('resolveHtmlArg', 'файл выбран', { path });
+  log.debug('resolveHtmlArg', 'file selected', { path });
   return path;
 }
 
@@ -220,10 +220,10 @@ export function resolveHtmlArg(argv) {
 export function readHtml(path) {
   try {
     const html = readFileSync(path, 'utf8');
-    log.debug('readHtml', 'файл прочитан', { path, bytes: html.length });
+    log.debug('readHtml', 'file read', { path, bytes: html.length });
     return html;
   } catch (err) {
-    log.error('readHtml', 'файл не найден или не читается', { path, error: err.message });
+    log.error('readHtml', 'file not found or unreadable', { path, error: err.message });
     process.exit(2);
   }
 }

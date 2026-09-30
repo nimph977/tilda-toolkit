@@ -62,7 +62,7 @@ function short(v) {
 function loadInventory(pageid, opts) {
   const p = join(opts.baseDir, 'records', String(pageid), '_inventory.json');
   if (!existsSync(p)) {
-    log.error('loadInventory', 'нет инвентаря страницы; снять через listRecords()', { path: p });
+    log.error('loadInventory', 'page inventory missing; take it with listRecords()', { path: p });
     throw new ToolError('NO_INVENTORY', msg('apply.noInventory', { path: p }));
   }
   return readJson(p);
@@ -87,7 +87,7 @@ export function reorderBlocks(inventory, moves = [], setOrder = null) {
   if (setOrder) {
     const want = setOrder.map(String);
     if ([...want].sort().join() !== [...before].sort().join()) {
-      log.error('reorderBlocks', 'setOrder не совпадает по составу с инвентарём', { inventory: before.length, setOrder: want.length });
+      log.error('reorderBlocks', 'setOrder does not match the inventory', { inventory: before.length, setOrder: want.length });
       throw new ToolError('BAD_ORDER', msg('apply.badOrder', { count: before.length }));
     }
     order = want;
@@ -111,10 +111,10 @@ export function reorderBlocks(inventory, moves = [], setOrder = null) {
     } else throw new ToolError('PLAN_INVALID', msg('apply.moveNeedsTarget', { id }));
     order.splice(to, 0, id);
     applied.push({ recordid: id, from, to: order.indexOf(id) });
-    log.debug('reorderBlocks', 'перестановка', { recordid: id, from, to: order.indexOf(id) });
+    log.debug('reorderBlocks', 'block moved', { recordid: id, from, to: order.indexOf(id) });
   }
   const diffPositions = before.map((id, i) => ({ id, from: i, to: order.indexOf(id) })).filter((x) => x.from !== x.to);
-  log.debug('reorderBlocks', 'порядок', { before: before.join(','), after: order.join(','), moved: diffPositions.length });
+  log.debug('reorderBlocks', 'block order', { before: before.join(','), after: order.join(','), moved: diffPositions.length });
   return { before, after: order, moves: applied };
 }
 
@@ -125,7 +125,7 @@ export function resolveBlock(block, pageid, opts) {
     const inv = loadInventory(pageid, opts);
     const hit = inv.find((r) => r.zeroIndex === Number(block.zeroIndex));
     if (!hit) {
-      log.error('resolveBlock', 'Zero Block с таким порядковым номером не найден', { pageid, zeroIndex: block.zeroIndex });
+      log.error('resolveBlock', 'Zero Block with this index not found', { pageid, zeroIndex: block.zeroIndex });
       throw new ToolError('NO_ZERO_INDEX', msg('apply.noZeroIndex', { zeroIndex: block.zeroIndex }));
     }
     log.debug('resolveBlock', 'zeroIndex → recordid', { zeroIndex: block.zeroIndex, recordid: hit.recordid });
@@ -160,7 +160,7 @@ function prepareCreateOp(op, i, pageid, plan, o) {
       ? { keys: Object.keys(snapshot).length, elemIds: Object.keys(snapshot).filter((k) => /^\d+$/.test(k)).map((k) => snapshot[k].elem_id) }
       : { fields: Object.keys(recordFields(snapshot)) };
   const hidden = op.hidden === true || op.hidden === 'y' ? 'y' : 'n';
-  log.info('prepare', `op#${i}: создать блок ${id} (${blockKind}, tpl ${tplid})`, { source: `${source.page}/${source.recordid}`, hidden, expect: blockKind === 'zero' ? expect.keys + ' ключей' : expect.fields.length + ' полей' });
+  log.info('prepare', `op#${i}: create block ${id} (${blockKind}, tpl ${tplid})`, { source: `${source.page}/${source.recordid}`, hidden, expect: blockKind === 'zero' ? expect.keys + ' keys' : expect.fields.length + ' fields' });
   return { kind: 'create', mode: 'copy', pageid, id, blockKind, tplid, source, hidden, after: op.after || null, expect };
 }
 
@@ -266,7 +266,7 @@ function prepareNewOp(op, i, pageid, plan, o) {
     assertNoScript(code, { op: i, field: 'code' });
   }
   const pendingImages = Array.isArray(spec.images) ? spec.images.filter((im) => im.file && !im.url) : [];
-  if (pendingImages.length) log.warn('prepare', 'картинки newRecord не загружены (офлайн)', { id, count: pendingImages.length });
+  if (pendingImages.length) log.warn('prepare', 'newRecord images not uploaded (offline)', { id, count: pendingImages.length });
 
   const byName = Object.fromEntries(rawFields.map((f) => [f.name, String(f.value)]));
   const cards = Array.isArray(spec.cards) ? spec.cards.map((c) => ({ ...c })) : [];
@@ -287,12 +287,12 @@ function prepareNewOp(op, i, pageid, plan, o) {
     if (cards.length) throw new ToolError('PLAN_INVALID', msg('apply.cardsAndFormInputs', { i, id }));
     formItems = formInputsOf(formField.value, i, id, now);
     formField.value = JSON.stringify(formItems);
-    log.debug('prepare', 'поля формы', { id, items: formItems.length, types: formItems.map((x) => x.li_type) });
+    log.debug('prepare', 'form fields', { id, items: formItems.length, types: formItems.map((x) => x.li_type) });
   }
 
   const cat = loadCatalog(tplid, o);
   if (cat === null) {
-    log.warn('prepare', 'каталог для tplid не снят — имена полей не проверены', { id, tplid });
+    log.warn('prepare', 'catalog for tplid not captured, field names not checked', { id, tplid });
   } else if (cat.available === false) {
     throw new ToolError('TEMPLATE_UNAVAILABLE', msg('apply.templateUnavailable', { i, id, tplid }));
   } else {
@@ -303,7 +303,7 @@ function prepareNewOp(op, i, pageid, plan, o) {
     if (map) for (const name of Object.keys(map.schema ?? map.fields ?? {})) allowed.add(name);
     for (const f of fields) {
       if (allowed.has(f.name) || CARD_FORM_FIELDS.includes(f.name) || f.name === 'list' || IMAGE_UPLOAD_FIELD_RE.test(f.name)) continue;
-      log.warn('prepare', 'поля нет в каталоге шаблона', { id, tplid, field: f.name });
+      log.warn('prepare', 'field not in template catalog', { id, tplid, field: f.name });
     }
   }
 
@@ -316,8 +316,8 @@ function prepareNewOp(op, i, pageid, plan, o) {
     cards: expectedCards(cards.length ? cards : formItems),
   };
   const hidden = op.hidden === true || op.hidden === 'y' ? 'y' : 'n';
-  log.info('prepare', `op#${i}: новый блок ${id} (tpl ${tplid})`, { fields: fields.length, cards: cards.length, formItems: formItems.length, hidden, formContent: allowContent });
-  log.debug('prepare', 'поля нового блока', { id, names: fields.map((f) => f.name), cardKeys: [...new Set(cards.flatMap((c) => Object.keys(c)))] });
+  log.info('prepare', `op#${i}: new block ${id} (tpl ${tplid})`, { fields: fields.length, cards: cards.length, formItems: formItems.length, hidden, formContent: allowContent });
+  log.debug('prepare', 'new block fields', { id, names: fields.map((f) => f.name), cardKeys: [...new Set(cards.flatMap((c) => Object.keys(c)))] });
   if (code !== undefined) expect.code = code;
   const out = { kind: 'create', mode: 'new', pageid, id, blockKind: 'record', tplid, fields, hidden, after: op.after || null, expect };
   if (allowContent) out.formContent = 'reference';
@@ -373,7 +373,7 @@ export function applyImageUpload(op, image, up) {
     }
   }
   image.url = info.cdnUrl;
-  log.debug('applyImageUpload', 'картинка подставлена', { field: image.field, card: image.card, tu: Boolean(info.uuid) });
+  log.debug('applyImageUpload', 'image inserted', { field: image.field, card: image.card, tu: Boolean(info.uuid) });
   return op;
 }
 
@@ -398,7 +398,7 @@ function writeBuildCall(dir, pageid, createOps, plan) {
   const call = `async () => window.__tilda.buildBlocks(${JSON.stringify(pageid)}, ${JSON.stringify(blocks)}, ${JSON.stringify({ startAfter })})`;
   const path = join(dir, '_build.call.js');
   writeFileSync(path, call + '\n', 'utf8');
-  log.info('prepare', 'вызов сборки записан', { path, blocks: blocks.length, startAfter: startAfter || '(в конец страницы)' });
+  log.info('prepare', 'build call written', { path, blocks: blocks.length, startAfter: startAfter || '(end of page)' });
   return path;
 }
 
@@ -412,11 +412,11 @@ export function prepare(plan, opts = {}) {
   o.out = o.out || join(o.baseDir, 'payload');
   const pageid = String(plan.page);
   if (protectedPages().includes(pageid)) {
-    log.error('prepare', 'страница защищена от записи (TILDA_PROTECTED_PAGES)', { pageid });
+    log.error('prepare', 'page is protected from writes (TILDA_PROTECTED_PAGES)', { pageid });
     throw new ToolError('PROTECTED_PAGE', msg('apply.protectedPage', { pageid }));
   }
   if (!Array.isArray(plan.ops) || plan.ops.length === 0) throw new ToolError('PLAN_INVALID', msg('apply.noOps'));
-  log.info('prepare', 'начало', { pageid, ops: plan.ops.length });
+  log.info('prepare', 'start', { pageid, ops: plan.ops.length });
 
   const zeroWork = new Map(); // recordid → {before, model}
   const recordOps = [];
@@ -437,7 +437,7 @@ export function prepare(plan, opts = {}) {
     }
     if (op.setOrder) {
       sortSetOrder = op.setOrder.map(String);
-      log.info('prepare', `op#${i}: полный порядок блоков`, { blocks: sortSetOrder.length });
+      log.info('prepare', `op#${i}: full block order`, { blocks: sortSetOrder.length });
       return;
     }
     const recordid = resolveBlock(op.block || {}, pageid, o);
@@ -447,7 +447,7 @@ export function prepare(plan, opts = {}) {
       if (m.after !== undefined) spec.after = String(m.after.zeroIndex !== undefined ? resolveBlock(m.after, pageid, o) : m.after.recordid ?? m.after);
       if (m.before !== undefined) spec.before = String(m.before.zeroIndex !== undefined ? resolveBlock(m.before, pageid, o) : m.before.recordid ?? m.before);
       if (m.index !== undefined) spec.index = Number(m.index);
-      log.info('prepare', `op#${i}: блок ${recordid} → переставить`, spec);
+      log.info('prepare', `op#${i}: block ${recordid} → move`, spec);
       sortMoves.push(spec);
       return;
     }
@@ -459,14 +459,14 @@ export function prepare(plan, opts = {}) {
       const rec = snapshot.record || snapshot;
       const present = FORM_FIELDS.filter((f) => f in rec && rec[f] !== '');
       if (present.length) {
-        log.warn('prepare', 'отказ: блок с полями формы через listSet не пишется — полный saverecord переслал бы их', { recordid, fields: present });
+        log.warn('prepare', 'refused: a block with form fields is not written via listSet, a full saverecord would resend them', { recordid, fields: present });
         throw new ToolError('FORM_FIELD_REJECTED', msg('apply.formFieldRejectedBlock', { recordid, fields: present.join(', ') }));
       }
       const before = decodeList(rec.list);
       const spec = Array.isArray(op.listSet.cards) ? null : op.listSet;
       const { cards, changes } = spec ? applyListOps(before, spec) : { cards: op.listSet.cards.map((c, i) => ({ ...c, ls: String((i + 1) * 10) })), changes: [{ op: 'replaceAll', to: op.listSet.cards.length }] };
       const fields = buildListFields({ pageid, recordid, record: rec, cards });
-      log.info('prepare', `op#${i}: блок ${recordid} → список карточек`, { before: before.length, after: cards.length, changes: changes.length, fields: fields.length });
+      log.info('prepare', `op#${i}: block ${recordid} → card list`, { before: before.length, after: cards.length, changes: changes.length, fields: fields.length });
       listOps.push({ i, recordid, before, cards, changes, fields });
       return;
     }
@@ -475,13 +475,13 @@ export function prepare(plan, opts = {}) {
       const allowContent = formContentOf(op, i, recordid);
       assertNotFormField(op.field.name, { recordid, path: 'prepare.field' }, { allowContent });
       recordOps.push({ i, recordid, field: op.field.name, value: op.field.value, ...(allowContent ? { formContent: 'reference' } : {}) });
-      log.info('prepare', `op#${i}: блок ${recordid} → поле ${op.field.name}`, { value: String(op.field.value).slice(0, 60) });
+      log.info('prepare', `op#${i}: block ${recordid} → field ${op.field.name}`, { value: String(op.field.value).slice(0, 60) });
       return;
     }
     if (op.blockHidden !== undefined) {
       const hidden = op.blockHidden === true || op.blockHidden === 'y' ? 'y' : 'n';
       blockOps.push({ i, recordid, hidden });
-      log.info('prepare', `op#${i}: блок ${recordid} → видимость блока`, { hidden });
+      log.info('prepare', `op#${i}: block ${recordid} → block visibility`, { hidden });
       return;
     }
     if (!op.blockSet && (!op.elem || !(op.set || op.duplicateElement || op.removeElement || op.gallerySet))) throw new ToolError('PLAN_INVALID', msg('apply.opNeedsElem', { i }));
@@ -492,13 +492,13 @@ export function prepare(plan, opts = {}) {
       zeroWork.set(recordid, entry);
     }
     if (op.blockSet) {
-      log.info('prepare', `op#${i}: блок ${recordid} → служебные ключи`, { keys: Object.keys(op.blockSet) });
+      log.info('prepare', `op#${i}: block ${recordid} → service keys`, { keys: Object.keys(op.blockSet) });
       entry.model = setBlockFields(entry.model, op.blockSet);
       return;
     }
     if (op.removeElement) {
       const rm = removeElement(entry.model, op.elem);
-      log.info('prepare', `op#${i}: блок ${recordid} → удалить элемент ${rm.elem_id}`, {});
+      log.info('prepare', `op#${i}: block ${recordid} → remove element ${rm.elem_id}`, {});
       entry.model = rm.model;
       entry.removed.push(rm.elem_id);
       return;
@@ -507,9 +507,9 @@ export function prepare(plan, opts = {}) {
       // Дублирование элемента: раскладка разная или соседей мало → нужно явное confirm.
       const spec = op.duplicateElement === true ? {} : op.duplicateElement;
       const dup = duplicateElement(entry.model, op.elem, { gap: spec.gap, set: spec.set, resStrategy: spec.resStrategy || op.resStrategy || plan.resStrategy });
-      log.info('prepare', `op#${i}: блок ${recordid} → копия элемента ${dup.elem_id}`, { needsConfirm: dup.needsConfirm, reason: dup.reason && messageText(dup.reason), proposal: dup.proposal.map((p) => `${p.res}: top ${p.top}, left ${p.left}`) });
+      log.info('prepare', `op#${i}: block ${recordid} → copy of element ${dup.elem_id}`, { needsConfirm: dup.needsConfirm, reason: dup.reason && messageText(dup.reason), proposal: dup.proposal.map((p) => `${p.res}: top ${p.top}, left ${p.left}`) });
       if (dup.needsConfirm && spec.confirm !== true) {
-        log.error('prepare', 'DUPLICATE_NEEDS_CONFIRM: копия рассчитана, но раскладка требует подтверждения человека', { recordid, reason: messageText(dup.reason), proposal: dup.proposal });
+        log.error('prepare', 'DUPLICATE_NEEDS_CONFIRM: copy calculated, but the layout needs human confirmation', { recordid, reason: messageText(dup.reason), proposal: dup.proposal });
         const proposal = dup.proposal.map((p) => `${p.res}: top ${p.top}, left ${p.left}`).join('; ');
         throw new ToolError('DUPLICATE_NEEDS_CONFIRM', msg('apply.duplicateNeedsConfirm', { recordid, reason: dup.reason, proposal }), { proposal: dup.proposal, reason: dup.reason });
       }
@@ -521,7 +521,7 @@ export function prepare(plan, opts = {}) {
       const { key: gk, elem: gel } = findElement(entry.model, op.elem);
       const slides = decodeSlides(gel.imgs);
       const g = applyGalleryOps(slides, op.gallerySet);
-      log.info('prepare', `op#${i}: блок ${recordid} → элемент ${gel.elem_id} (${gel.elem_type}) → галерея`, { before: slides.length, after: g.slides.length, changes: g.changes.length });
+      log.info('prepare', `op#${i}: block ${recordid} → element ${gel.elem_id} (${gel.elem_type}) → gallery`, { before: slides.length, after: g.slides.length, changes: g.changes.length });
       entry.model = setFields(entry.model, gk, { imgs: g.imgs });
       return;
     }
@@ -529,7 +529,7 @@ export function prepare(plan, opts = {}) {
     for (const [field, value] of Object.entries(op.set)) {
       // У операции `image` имя поля плана не совпадает с полем модели: пишутся img/filewidth/fileheight.
       const current = field === 'image' ? entry.model[key].img : entry.model[key][field];
-      log.info('prepare', `op#${i}: блок ${recordid} → элемент ${elem.elem_id} (${elem.elem_type}) → ${field}`, { from: short(current), to: short(value) });
+      log.info('prepare', `op#${i}: block ${recordid} → element ${elem.elem_id} (${elem.elem_type}) → ${field}`, { from: short(current), to: short(value) });
     }
     // Все поля операции — одним вызовом: стратегия -res-* смотрит на явно заданные варианты.
     entry.model = setFields(entry.model, key, op.set, { resStrategy: op.resStrategy || plan.resStrategy });
@@ -540,12 +540,12 @@ export function prepare(plan, opts = {}) {
     // Вторая линия запрета полей формы: даже если поле формы изменилось обходным путём, модель не уйдёт в запись.
     const formChanged = formFieldChanges(before, model);
     if (formChanged.length) {
-      log.warn('prepare', 'отказ: модель меняет поля формы', { recordid, changed: formChanged });
+      log.warn('prepare', 'refused: the model changes form fields', { recordid, changed: formChanged });
       throw new ToolError('FORM_FIELD_REJECTED', msg('apply.formFieldRejectedModel', { recordid, fields: formChanged.map((c) => `${c.key}.${c.field}`).join(', ') }));
     }
     validate(before, model, { allowNewElements: duplicates.length > 0, allowRemovedElements: removed.length > 0 && duplicates.length === 0 });
     const changes = diff(before, model);
-    if (changes.length === 0) log.warn('prepare', 'модель не изменилась', { recordid });
+    if (changes.length === 0) log.warn('prepare', 'model unchanged', { recordid });
     payloads.push({ kind: 'zero', pageid, recordid, model, changes, duplicates, removed });
   }
   for (const r of recordOps) payloads.push({ kind: 'record', pageid, recordid: r.recordid, field: r.field, value: r.value, ...(r.formContent ? { formContent: r.formContent } : {}) });
@@ -554,14 +554,14 @@ export function prepare(plan, opts = {}) {
     const age = inventoryAgeMs(pageid, o);
     const maxAge = o.maxInventoryAgeMs ?? 120_000;
     if (age > maxAge) {
-      log.error('prepare', 'STALE_INVENTORY: инвентарь старше допустимого для перестановки', { ageSec: Math.round(age / 1000), maxSec: Math.round(maxAge / 1000) });
+      log.error('prepare', 'STALE_INVENTORY: inventory is older than allowed for a move', { ageSec: Math.round(age / 1000), maxSec: Math.round(maxAge / 1000) });
       throw new ToolError('STALE_INVENTORY', msg('apply.staleInventory', { age: Math.round(age / 1000), max: Math.round(maxAge / 1000) }));
     }
-    if (age > 30_000) log.warn('prepare', 'инвентарь старше 30 с', { ageSec: Math.round(age / 1000) });
+    if (age > 30_000) log.warn('prepare', 'inventory older than 30 s', { ageSec: Math.round(age / 1000) });
     const inv = loadInventory(pageid, o);
     const r = reorderBlocks(inv, sortMoves, sortSetOrder);
     const moved = r.before.filter((id, i) => r.after[i] !== id).length;
-    if (moved === 0) log.warn('prepare', 'порядок блоков не изменился', {});
+    if (moved === 0) log.warn('prepare', 'block order unchanged', {});
     payloads.push({ kind: 'sort', pageid, recordid: '_sort', before: r.before, order: r.after, moves: r.moves, moved });
   }
   for (const l of listOps) payloads.push({ kind: 'list', pageid, recordid: l.recordid, before: l.before, cards: l.cards, changes: l.changes, fields: l.fields });
@@ -574,7 +574,7 @@ export function prepare(plan, opts = {}) {
   for (const f of readdirSync(dir)) {
     if (/\.(payload\.json|call\.js)$/.test(f)) {
       rmSync(join(dir, f));
-      log.debug('prepare', 'удалён старый payload', { file: f });
+      log.debug('prepare', 'old payload removed', { file: f });
     }
   }
   if (createOps.length && o.emitCalls) writeBuildCall(dir, pageid, createOps, plan);
@@ -583,7 +583,7 @@ export function prepare(plan, opts = {}) {
       const cpath = join(dir, `${p.id}.create.payload.json`);
       writeFileSync(cpath, JSON.stringify(p, null, 2) + '\n', 'utf8');
       p.path = cpath;
-      log.info('prepare', 'payload записан', { path: cpath, kind: p.kind, id: p.id });
+      log.info('prepare', 'payload written', { path: cpath, kind: p.kind, id: p.id });
       continue;
     }
     const suffix = p.kind === 'record' ? `.${p.field}` : p.kind === 'block' ? '.block' : p.kind === 'list' ? '.list' : p.kind === 'sort' ? '' : '';
@@ -591,7 +591,7 @@ export function prepare(plan, opts = {}) {
     writeFileSync(path, JSON.stringify(p, null, 2) + '\n', 'utf8');
     p.path = path;
     if (!o.emitCalls) {
-      log.info('prepare', 'payload записан', { path, kind: p.kind });
+      log.info('prepare', 'payload written', { path, kind: p.kind });
       continue;
     }
     // Готовый текст функции для browser_evaluate — отладочный канал (`tilda.mjs apply --emit-calls`);
@@ -608,7 +608,7 @@ export function prepare(plan, opts = {}) {
             : `async () => window.__tilda.saveField(${JSON.stringify(pageid)}, ${JSON.stringify(p.recordid)}, ${JSON.stringify(p.field)}, ${JSON.stringify(String(p.value))}${p.formContent === 'reference' ? ', {"allowFormContent":true}' : ''})`;
     p.callPath = path.replace(/\.payload\.json$/, '.call.js');
     writeFileSync(p.callPath, call + '\n', 'utf8');
-    log.info('prepare', 'payload записан', { path, call: p.callPath, kind: p.kind });
+    log.info('prepare', 'payload written', { path, call: p.callPath, kind: p.kind });
   }
   return payloads;
 }
@@ -626,7 +626,7 @@ export function buildCopyPlan({ from, to, startAfter = '' }, opts = {}) {
   const src = String(from);
   const dst = String(to);
   if (protectedPages().includes(dst)) {
-    log.error('buildCopyPlan', 'страница-приёмник защищена от записи', { pageid: dst });
+    log.error('buildCopyPlan', 'target page is protected from writes', { pageid: dst });
     throw new ToolError('PROTECTED_PAGE', msg('apply.protectedPage', { pageid: dst }));
   }
   const inv = loadInventory(src, o);
@@ -641,8 +641,8 @@ export function buildCopyPlan({ from, to, startAfter = '' }, opts = {}) {
     return op;
   });
   const plan = { page: dst, source: { page: src }, startAfter, ops };
-  if (missing.length) log.warn('buildCopyPlan', 'снимков источника не хватает — снять их до prepare', { missing: missing.length, first: missing.slice(0, 5).map((m) => `${m.recordid}(${m.kind})`) });
-  log.info('buildCopyPlan', 'план сборки готов', { from: src, to: dst, ops: ops.length, zero: ops.filter((op) => op.addZero).length, hidden: ops.filter((op) => op.hidden === 'y').length, missingSnapshots: missing.length });
+  if (missing.length) log.warn('buildCopyPlan', 'source snapshots missing, take them before prepare', { missing: missing.length, first: missing.slice(0, 5).map((m) => `${m.recordid}(${m.kind})`) });
+  log.info('buildCopyPlan', 'build plan ready', { from: src, to: dst, ops: ops.length, zero: ops.filter((op) => op.addZero).length, hidden: ops.filter((op) => op.hidden === 'y').length, missingSnapshots: missing.length });
   return { plan, missing };
 }
 
@@ -661,7 +661,7 @@ function verifyCreated(createIds, pageid, o) {
   const problems = [];
   const journalPath = join(o.reread, pageid, '_built.json');
   if (!existsSync(journalPath)) {
-    log.error('verify', 'нет журнала сборки', { path: journalPath });
+    log.error('verify', 'build journal missing', { path: journalPath });
     return [{ id: '(build)', problem: msg('apply.problem.noBuildJournal'), path: journalPath }];
   }
   const raw = readJson(journalPath);
@@ -823,7 +823,7 @@ export function verify(plan, opts = {}) {
     if (payload.kind === 'zero') {
       const d = diff(stripVolatile(payload.model), stripVolatile(actual));
       for (const x of d) problems.push({ id, problem: msg('apply.problem.mismatch'), key: x.key, field: x.field, expected: x.from, actual: x.to });
-      if (VOLATILE_KEYS.has('timestamp') && payload.model.timestamp !== actual.timestamp) log.debug('verify', 'timestamp изменился (допустимо)', { id, from: payload.model.timestamp, to: actual.timestamp });
+      if (VOLATILE_KEYS.has('timestamp') && payload.model.timestamp !== actual.timestamp) log.debug('verify', 'timestamp changed (allowed)', { id, from: payload.model.timestamp, to: actual.timestamp });
     } else {
       const rec = actual.record || actual;
       // Пустое значение Tilda не хранит: поле пропадает из записи — это и есть «пусто».
@@ -832,11 +832,11 @@ export function verify(plan, opts = {}) {
       // сравнение через тот же канон, что у newRecord; буквально равные значения проходят сразу.
       const same = String(got) === String(payload.value) || (got !== undefined && normalizeFieldValue(got) === normalizeFieldValue(payload.value));
       if (!same) problems.push({ id, problem: msg('apply.problem.fieldNotSaved'), field: payload.field, expected: payload.value, actual: got });
-      else if (String(got) !== String(payload.value)) log.debug('verify', '[FIX] поле совпало после нормализации формы хранения', { id, field: payload.field });
+      else if (String(got) !== String(payload.value)) log.debug('verify', '[FIX] field matched after storage form normalization', { id, field: payload.field });
     }
   }
-  if (problems.length) log.error('verify', 'сверка не прошла', { problems: problems.length, first: problems[0] });
-  else log.info('verify', 'сверка прошла', { blocks: ids.size, created: createIds.length });
+  if (problems.length) log.error('verify', 'verification failed', { problems: problems.length, first: problems[0] });
+  else log.info('verify', 'verification passed', { blocks: ids.size, created: createIds.length });
   return problems;
 }
 
@@ -848,16 +848,16 @@ if (process.argv[1]?.endsWith('apply-plan.mjs')) {
   });
   const [cmd, planFile, third] = positionals;
   if (!cmd || !planFile) {
-    log.error('cli', 'использование', {
-      usage: 'apply-plan.mjs prepare|verify <план.json> [--out d] [--reread d] [--baseline d]',
-      copy: 'apply-plan.mjs plan-copy <pageid-источника> <pageid-приёмника> [--out файл.json] [--baseline d]',
+    log.error('cli', 'usage', {
+      usage: 'apply-plan.mjs prepare|verify <plan.json> [--out d] [--reread d] [--baseline d]',
+      copy: 'apply-plan.mjs plan-copy <source-pageid> <target-pageid> [--out file.json] [--baseline d]',
     });
     process.exit(2);
   }
 
   if (cmd === 'plan-copy') {
     if (!third) {
-      log.error('cli', 'нужны два pageid', { usage: 'apply-plan.mjs plan-copy <из> <в> [--out файл.json]' });
+      log.error('cli', 'two pageids required', { usage: 'apply-plan.mjs plan-copy <from> <to> [--out file.json]' });
       process.exit(2);
     }
     try {
@@ -866,7 +866,7 @@ if (process.argv[1]?.endsWith('apply-plan.mjs')) {
       const text = JSON.stringify(plan, null, 2) + '\n';
       if (values.out) {
         writeFileSync(resolve(values.out), text, 'utf8');
-        log.info('cli', 'план записан', { path: resolve(values.out), ops: plan.ops.length, missingSnapshots: missing.length });
+        log.info('cli', 'plan written', { path: resolve(values.out), ops: plan.ops.length, missingSnapshots: missing.length });
         console.log(JSON.stringify({ path: resolve(values.out), ops: plan.ops.length, missingSnapshots: missing.map((m) => m.recordid) }, null, 2));
       } else {
         console.log(text);
@@ -899,7 +899,7 @@ if (process.argv[1]?.endsWith('apply-plan.mjs')) {
       console.log(JSON.stringify(verifyData(problems), null, 2));
       process.exit(problems.length ? 1 : 0);
     } else {
-      log.error('cli', 'неизвестная команда', { cmd });
+      log.error('cli', 'unknown command', { cmd });
       process.exit(2);
     }
   } catch (e) {

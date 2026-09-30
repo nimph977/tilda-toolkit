@@ -30,7 +30,7 @@ export function stripHostZoom(prefs, hosts = ZOOM_HOSTS) {
   const levels = copy?.partition?.per_host_zoom_levels;
   const removed = [];
   if (!levels || typeof levels !== 'object') {
-    log.debug('stripHostZoom', 'уровней масштаба в Preferences нет', {});
+    log.debug('stripHostZoom', 'no zoom levels in Preferences', {});
     return { prefs: copy, removed };
   }
   for (const [key, value] of Object.entries(levels)) {
@@ -46,7 +46,7 @@ export function stripHostZoom(prefs, hosts = ZOOM_HOSTS) {
       removed.push(key);
     }
   }
-  log.debug('stripHostZoom', 'уровни масштаба обработаны', { removed });
+  log.debug('stripHostZoom', 'zoom levels processed', { removed });
   return { prefs: copy, removed };
 }
 
@@ -57,19 +57,19 @@ export function stripHostZoom(prefs, hosts = ZOOM_HOSTS) {
 export function resetTildaZoom(profileDir, { hosts = ZOOM_HOSTS, now = new Date() } = {}) {
   const file = resolve(profileDir, 'Default', 'Preferences');
   if (!existsSync(file)) {
-    log.debug('resetTildaZoom', 'файла Preferences нет — сбрасывать нечего', { file });
+    log.debug('resetTildaZoom', 'no Preferences file, nothing to reset', { file });
     return { removed: [], skipped: 'no-preferences' };
   }
   let prefs;
   try {
     prefs = JSON.parse(readFileSync(file, 'utf8'));
   } catch (e) {
-    log.warn('resetTildaZoom', 'Preferences не разобран как JSON — оставлен как есть', { file, error: e.message });
+    log.warn('resetTildaZoom', 'Preferences is not valid JSON, left as is', { file, error: e.message });
     return { removed: [], skipped: 'bad-json' };
   }
   const { prefs: next, removed } = stripHostZoom(prefs, hosts);
   if (removed.length === 0) {
-    log.debug('resetTildaZoom', 'масштаба Tilda в профиле нет', { file });
+    log.debug('resetTildaZoom', 'no Tilda zoom in the profile', { file });
     return { removed };
   }
   const backup = `${file}.bak-${now.toISOString().replace(/[:.]/g, '-')}`;
@@ -77,9 +77,9 @@ export function resetTildaZoom(profileDir, { hosts = ZOOM_HOSTS, now = new Date(
     copyFileSync(file, backup);
     writeFileSync(file, JSON.stringify(next));
   } catch (e) {
-    log.warn('resetTildaZoom', 'Preferences не обновлён', { file, error: e.message });
+    log.warn('resetTildaZoom', 'Preferences not updated', { file, error: e.message });
     return { removed: [], skipped: 'io' };
   }
-  log.info('resetTildaZoom', 'масштаб Tilda убран из профиля', { removed, backup });
+  log.info('resetTildaZoom', 'Tilda zoom removed from the profile', { removed, backup });
   return { removed, backup };
 }

@@ -73,7 +73,7 @@ export function liveRecordIds(baseDir, pageid) {
     if (!Array.isArray(list)) return null;
     return new Set(list.map((r) => String(r.recordid)));
   } catch (e) {
-    log.warn('liveRecordIds', 'инвентарь не разобрался', { pageid: String(pageid), error: e.message });
+    log.warn('liveRecordIds', 'inventory did not parse', { pageid: String(pageid), error: e.message });
     return null;
   }
 }
@@ -119,7 +119,7 @@ export function find(pageid, needle, opts = {}) {
           continue;
         }
         hits.push({ kind: 'zero', recordid, key, elem_id: String(el.elem_id), elem_type: el.elem_type, field, value });
-        log.debug('find', 'найдено', { recordid, path: `${key}.${field}`, value: normalize(value).slice(0, 80) });
+        log.debug('find', 'found', { recordid, path: `${key}.${field}`, value: normalize(value).slice(0, 80) });
       }
     }
   }
@@ -138,27 +138,27 @@ export function find(pageid, needle, opts = {}) {
         continue;
       }
       hits.push({ kind: 'record', recordid, tplid: String(rec.tplid || ''), field, value: decodeEntities(value) });
-      log.debug('find', 'найдено', { recordid, path: field, value: normalize(value).slice(0, 80) });
+      log.debug('find', 'found', { recordid, path: field, value: normalize(value).slice(0, 80) });
     }
     if (typeof rec.list === 'string' && rec.list) {
       let cards = [];
       try {
         cards = decodeList(rec.list);
       } catch (e) {
-        log.warn('find', 'list не разобрался', { recordid, error: e.message });
+        log.warn('find', 'list did not parse', { recordid, error: e.message });
       }
       for (const c of cards) {
         for (const [field, value] of Object.entries(c)) {
           if (['lid', 'ls', 'loff'].includes(field) || typeof value !== 'string' || !containsNormalized(value, needle)) continue;
           hits.push({ kind: 'list', recordid, tplid: String(rec.tplid || ''), lid: String(c.lid), field, value });
-          log.debug('find', 'найдено в карточке', { recordid, lid: c.lid, field });
+          log.debug('find', 'found in card', { recordid, lid: c.lid, field });
         }
       }
     }
   }
   if (stale.length) {
     note('find', `skipped ${stale.length} snapshots of deleted blocks (not in the inventory)`, { pageid: String(pageid) });
-    log.debug('find', 'снимки удалённых блоков', { recordids: stale });
+    log.debug('find', 'snapshots of deleted blocks', { recordids: stale });
   }
   const byBlock = new Set(hits.map((h) => h.recordid)).size;
   (opts.quiet ? log.debug : log.info)('find', `found ${hits.length} hits in ${byBlock} blocks`, { pageid: String(pageid), blocks, skippedForm: skippedForm.length, skippedStale: stale.length });
@@ -192,6 +192,6 @@ export function buildReplacePlan(pageid, needle, replacement, opts = {}) {
   }
   ops.push(...listByRecord.values());
   const plan = { name: `replace-${String(pageid)}`, page: String(pageid), ops };
-  log.info('buildReplacePlan', 'план замены собран', { ops: ops.length, replacements, skippedForm: skippedForm.length, skippedStale });
+  log.info('buildReplacePlan', 'replace plan built', { ops: ops.length, replacements, skippedForm: skippedForm.length, skippedStale });
   return { plan, hits, replacements, skippedForm, blocks, skippedStale };
 }

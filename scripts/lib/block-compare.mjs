@@ -57,7 +57,7 @@ export function alignBlocks(refBlocks, builtBlocks, substitutes = {}) {
   }
   while (i < n) refOnly.push(refBlocks[i++]);
   while (j < m) builtOnly.push(builtBlocks[j++]);
-  log.debug('alignBlocks', 'выравнивание', { ref: n, built: m, pairs: pairs.length, refOnly: refOnly.length, builtOnly: builtOnly.length });
+  log.debug('alignBlocks', 'blocks aligned', { ref: n, built: m, pairs: pairs.length, refOnly: refOnly.length, builtOnly: builtOnly.length });
   return { pairs, refOnly, builtOnly };
 }
 

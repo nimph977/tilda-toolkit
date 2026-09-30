@@ -27,13 +27,13 @@ for (let i = 0; i < 50 && !port; i += 1) {
   if (!port) await new Promise((r) => setTimeout(r, 100));
 }
 if (!port) {
-  log.error('main', 'Chrome не открыл порт CDP (нет DevToolsActivePort)', { dir });
+  log.error('main', 'Chrome did not open the CDP port (no DevToolsActivePort)', { dir });
   await session.context.close();
   process.exit(1);
 }
 
 writeFileSync(daemonFile, JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString(), minimized: session.minimized }));
-log.info('main', 'держатель готов', { pid: process.pid, port, profileDir: dir });
+log.info('main', 'holder ready', { pid: process.pid, port, profileDir: dir });
 
 const cleanup = () => {
   try {
@@ -44,14 +44,14 @@ const cleanup = () => {
 };
 
 session.context.on('close', () => {
-  log.info('main', 'браузер закрыт — держатель завершается', { pid: process.pid });
+  log.info('main', 'browser closed, holder exiting', { pid: process.pid });
   cleanup();
   process.exit(0);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(sig, async () => {
-    log.info('main', `сигнал ${sig}, закрываю браузер`, {});
+    log.info('main', `signal ${sig}, closing browser`, {});
     cleanup();
     await session.context.close().catch(() => {});
     process.exit(0);

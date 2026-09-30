@@ -88,7 +88,7 @@ function pendingLazyImages() {
 export async function loadLazyImages(page, { width, viewportHeight = 900, stepPauseMs = 400, timeoutMs = 6000 } = {}) {
   const before = await page.evaluate(pendingLazyImages);
   if (!before) {
-    log.debug('loadLazyImages', '[FIX] ленивых картинок в ожидании нет', { width });
+    log.debug('loadLazyImages', '[FIX] no lazy images pending', { width });
     return { before, after: 0 };
   }
   // Обработчик прокрутки у ленивой загрузки срабатывает с задержкой: при коротких паузах и сразу
@@ -108,8 +108,8 @@ export async function loadLazyImages(page, { width, viewportHeight = 900, stepPa
   }
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(stepPauseMs);
-  if (after) log.warn('loadLazyImages', '[FIX] часть ленивых картинок не загрузилась к снимку', { width, before, after });
-  else log.debug('loadLazyImages', '[FIX] ленивые картинки загружены прокруткой', { width, before });
+  if (after) log.warn('loadLazyImages', '[FIX] some lazy images did not load before the shot', { width, before, after });
+  else log.debug('loadLazyImages', '[FIX] lazy images loaded by scrolling', { width, before });
   return { before, after };
 }
 
@@ -147,7 +147,7 @@ export async function captureWidths(page, opts = {}) {
     const resp = await page.goto(url, { waitUntil: 'load', ...(referer ? { referer } : {}) });
     const status = resp ? resp.status() : 0;
     if (opts.requireOk && status !== 200) {
-      log.warn('captureWidths', 'страница не получена — снимка нет', { width, status });
+      log.warn('captureWidths', 'page not loaded, no shot', { width, status });
       throw new ToolError('NAV_FAILED', msg('shot.navFailed', { status }), { status });
     }
     await page.waitForTimeout(opts.settleMs ?? 2500);
@@ -164,24 +164,24 @@ export async function captureWidths(page, opts = {}) {
       await page.addStyleTag({ content: css });
       const revealed = await page.evaluate(() => document.querySelectorAll('.t-animate, [data-animate-style], .r_hidden').length);
       await page.waitForTimeout(opts.animSettleMs ?? 500);
-      log.debug('captureWidths', 'анимируемые элементы показаны стилем', { width, revealed });
+      log.debug('captureWidths', 'animated elements revealed by style', { width, revealed });
     }
     const info = await page.evaluate(() => ({ records: document.querySelectorAll('.t-rec').length, height: document.documentElement.scrollHeight, width: window.innerWidth, dpr: window.devicePixelRatio }));
     const mismatch = scaleMismatch({ width, innerWidth: info.width, dpr: info.dpr });
     if (mismatch) {
-      log.error('captureWidths', 'кадр в чужом масштабе — снимка нет', { width, innerWidth: info.width, dpr: info.dpr });
+      log.error('captureWidths', 'frame at a wrong scale, no shot', { width, innerWidth: info.width, dpr: info.dpr });
       throw new ToolError('SHOT_SCALED', msg('shot.scaled', { mismatch }));
     }
     // Адрес печатается только у предпросмотра (есть referer): адрес референса в логи не пишется.
-    if (info.records === 0) log.warn('captureWidths', 'на виде страницы нет блоков — сессия или адрес предпросмотра?', { width, ...(referer ? { url: page.url() } : {}) });
+    if (info.records === 0) log.warn('captureWidths', 'no blocks on the page view: session or preview address?', { width, ...(referer ? { url: page.url() } : {}) });
     const files = [];
     const parts = chunks(info.height, chunk);
     for (const [i, part] of parts.entries()) {
       const file = join(outDir, `${stamp}-${width}${parts.length > 1 ? `-${i + 1}` : ''}.jpg`);
       await page.screenshot({ path: file, type: 'jpeg', quality: 80, fullPage: true, clip: { x: 0, y: part.y, width, height: part.height } });
       files.push(file);
-      log.debug('captureWidths', 'порция снята', { width, part: i + 1, of: parts.length, y: part.y, height: part.height, file });    }
-    log.info('captureWidths', `ширина ${width}: ${files.length} файл(ов), высота ${info.height}, блоков ${info.records}`, { ms: Date.now() - t0 });
+      log.debug('captureWidths', 'part captured', { width, part: i + 1, of: parts.length, y: part.y, height: part.height, file });    }
+    log.info('captureWidths', `width ${width}: ${files.length} file(s), height ${info.height}, blocks ${info.records}`, { ms: Date.now() - t0 });
     result.widths.push({ width, height: info.height, records: info.records, dpr: info.dpr, files });
     result.files.push(...files);
   }

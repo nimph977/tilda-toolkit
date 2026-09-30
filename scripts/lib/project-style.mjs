@@ -139,7 +139,7 @@ export function projectStyleFromCss(css) {
     lineColor: lineMatch ? normalizeHex(lineMatch[2]) : null,
     lineHeight: lineMatch ? lineMatch[1] : null,
   };
-  log.debug('projectStyleFromCss', 'разбор', { fonts: fonts.length, rules: rules.length, undecided: undecided.length });
+  log.debug('projectStyleFromCss', 'css parsed', { fonts: fonts.length, rules: rules.length, undecided: undecided.length });
   return { fonts, headline, text, link, undecided };
 }
 
@@ -204,6 +204,6 @@ export function desiredProjectSettings(style, controls = {}) {
   set('linklinecolor', style.link?.lineColor);
   set('linklineheight', style.link?.lineHeight);
   if ((style.fonts ?? []).length) undecided.push(undecidedEntry('myfonts_json', 'fontsNotTransferred'));
-  log.debug('desiredProjectSettings', 'желаемые настройки', { keys: Object.keys(values), aliases: Object.keys(fontAliases).length, undecided: undecided.length });
+  log.debug('desiredProjectSettings', 'desired settings', { keys: Object.keys(values), aliases: Object.keys(fontAliases).length, undecided: undecided.length });
   return { values, fonts: style.fonts ?? [], fontAliases, undecided };
 }

@@ -113,7 +113,7 @@ export function buildRecord({ plan, planPath, payloads, summary, before = {}, at
     verify: verifyData(summary.verify),
   };
   const incomplete = ops.filter((o) => o.from === null || o.from === undefined);
-  if (incomplete.length) log.warn('buildRecord', 'запись журнала неполна: у части операций нет from', { ops: incomplete.map((o) => `${o.kind}:${o.recordid || o.id}`) });
+  if (incomplete.length) log.warn('buildRecord', 'journal record is incomplete: some operations have no from', { ops: incomplete.map((o) => `${o.kind}:${o.recordid || o.id}`) });
   return record;
 }
 
@@ -124,8 +124,8 @@ export function writeRecord(record, opts = {}) {
   const path = join(dir, recordName(record.at, record.plan.name));
   const text = JSON.stringify(record, null, 2) + '\n';
   writeFileSync(path, text, 'utf8');
-  log.debug('writeRecord', 'запись журнала', { path, bytes: text.length, ops: record.ops.length });
-  log.info('writeRecord', 'журнал пополнен', { path: path.replace(repoRoot(), '').replace(/\\/g, '/'), blocks: record.blocks.length });
+  log.debug('writeRecord', 'journal record', { path, bytes: text.length, ops: record.ops.length });
+  log.info('writeRecord', 'journal appended', { path: path.replace(repoRoot(), '').replace(/\\/g, '/'), blocks: record.blocks.length });
   return path;
 }
 
@@ -215,15 +215,15 @@ export function reversePlan(record) {
       skipped.push({ kind: 'create', id: op.id, recordid: op.recordid, reason: msg('journal.skip.createdBlock') });
     }
   }
-  if (skipped.length) log.warn('reversePlan', 'часть операций не откатывается', { skipped: skipped.map((s) => `${s.kind}:${s.recordid || s.id}${s.field ? '.' + s.field : ''} (${messageText(s.reason)})`) });
+  if (skipped.length) log.warn('reversePlan', 'some operations cannot be rolled back', { skipped: skipped.map((s) => `${s.kind}:${s.recordid || s.id}${s.field ? '.' + s.field : ''} (${messageText(s.reason)})`) });
   if (ops.length === 0) {
-    log.error('reversePlan', 'откат невозможен: ни одной операции с from', { record: record.at, plan: record.plan.name });
+    log.error('reversePlan', 'rollback impossible: no operation has from', { record: record.at, plan: record.plan.name });
     throw new ToolError('ROLLBACK_IMPOSSIBLE', msg('journal.rollbackImpossible', { name: record.plan.name, at: record.at }));
   }
   // Обратный план пишет поля ровно как в журнале: изменённые -res-* варианты там перечислены явно,
   // а неизменённые пересчитывать нельзя (2026-09-11: откат картинки масштабировал height-res-*).
   const plan = { name: `rollback-${record.plan.name}`, page: record.page, rollbackOf: record.at, resStrategy: 'none', ops };
-  log.debug('reversePlan', 'обратный план', { ops: plan.ops.length, plan: JSON.stringify(plan).slice(0, 2000) });
-  log.info('reversePlan', 'обратный план построен', { ops: ops.length, skipped: skipped.length });
+  log.debug('reversePlan', 'reverse plan', { ops: plan.ops.length, plan: JSON.stringify(plan).slice(0, 2000) });
+  log.info('reversePlan', 'reverse plan built', { ops: ops.length, skipped: skipped.length });
   return { plan, skipped };
 }

@@ -110,7 +110,7 @@ export async function copyDonorPage({ test, donor }, params) {
   const source = String(sourcePageid);
   const target = String(targetPageid);
   if (protectedPages.map(String).includes(target)) throw new DonorCopyError('PROTECTED_TARGET', msg(COPY_REASONS.protectedTarget, { id: target }), { target });
-  log.info('copyDonorPage', 'начало', { label, source, target, replace, dryRun });
+  log.info('copyDonorPage', 'start', { label, source, target, replace, dryRun });
 
   await test.openEditor(target);
   const before = composition(await test.call('listRecords'));
@@ -120,12 +120,12 @@ export async function copyDonorPage({ test, donor }, params) {
   await donor.openEditor(source);
   const src = composition(await donor.call('listRecords'));
   if (!src.length) throw new DonorCopyError('SOURCE_EMPTY', msg(COPY_REASONS.sourceEmpty), { source });
-  log.debug('copyDonorPage', 'состав донора', { source, tplids: src.map((r) => r.tplid) });
-  if (src.length > PASTE_CHECKED_LIMIT) log.warn('copyDonorPage', 'страница больше проверенного размера одной вставки', { blocks: src.length, checked: PASTE_CHECKED_LIMIT });
+  log.debug('copyDonorPage', 'donor composition', { source, tplids: src.map((r) => r.tplid) });
+  if (src.length > PASTE_CHECKED_LIMIT) log.warn('copyDonorPage', 'page is larger than the checked single paste size', { blocks: src.length, checked: PASTE_CHECKED_LIMIT });
 
   const plan = copyPlan({ source: src, target: before, replace });
   if (dryRun) {
-    log.info('copyDonorPage', 'dry-run: без записи', { blocks: src.length, steps: plan.steps.length });
+    log.info('copyDonorPage', 'dry-run: nothing written', { blocks: src.length, steps: plan.steps.length });
     return { source, target, blocks: src.length, pasted: 0, replaced: 0, verify: null, record: null, dryRun: true, plan, before: before.length };
   }
 
@@ -138,21 +138,21 @@ export async function copyDonorPage({ test, donor }, params) {
     await test.openEditor(target);
     const left = composition(await test.call('listRecords'));
     if (left.length) throw new DonorCopyError('REPLACE_INCOMPLETE', msg(COPY_REASONS.replaceIncomplete, { n: left.length }), { target, left: left.map((r) => r.recordid) });
-    log.info('copyDonorPage', 'приёмник очищен после снимков', { target, removed: before.length });
+    log.info('copyDonorPage', 'target cleared after snapshots', { target, removed: before.length });
   }
 
   await donor.call('copySelectedToBuffer', [source, src.map((r) => r.recordid)], { attempts: 1 });
-  log.info('copyDonorPage', 'copy: скопировано в буфер', { count: src.length });
+  log.info('copyDonorPage', 'copy: copied to the buffer', { count: src.length });
 
   const assertDonorUnchanged = async (stage) => {
     await donor.openEditor(source);
     const now_ = composition(await donor.call('listRecords'));
     const cmp = sameComposition(src, now_);
     if (!cmp.equal) {
-      log.error('copyDonorPage', 'состав страницы донора изменился', { stage, added: cmp.added, removed: cmp.removed, reordered: cmp.reordered });
+      log.error('copyDonorPage', 'donor page composition changed', { stage, added: cmp.added, removed: cmp.removed, reordered: cmp.reordered });
       throw new DonorCopyError('DONOR_CHANGED', msg(COPY_REASONS.donorChanged), { stage, ...cmp });
     }
-    log.debug('copyDonorPage', 'состав донора не изменился', { stage, blocks: now_.length });
+    log.debug('copyDonorPage', 'donor composition unchanged', { stage, blocks: now_.length });
   };
   await assertDonorUnchanged('after-copy');
 
@@ -164,14 +164,14 @@ export async function copyDonorPage({ test, donor }, params) {
     await donor.setWritable([]);
   }
   const pastedRecords = composition(pasted?.records);
-  log.info('copyDonorPage', 'paste: вставлено', { pasted: pastedRecords.length });
+  log.info('copyDonorPage', 'paste: pasted', { pasted: pastedRecords.length });
   await assertDonorUnchanged('after-paste');
 
   await test.openEditor(target);
   const result = composition(await test.call('listRecords'));
   const order = orderMatches(src, result);
   const ok = pastedRecords.length === src.length && order.equal;
-  if (ok) log.info('copyDonorPage', 'verify: порядок совпал', { blocks: result.length });
+  if (ok) log.info('copyDonorPage', 'verify: order matches', { blocks: result.length });
   else log.error('copyDonorPage', messageText(msg(COPY_REASONS.orderMismatch)), { expected: order.expected, actual: order.actual, hiddenMismatch: order.hiddenMismatch, pasted: pastedRecords.length });
 
   // Заголовок по метке: только если приёмник ещё «Blank page» — владелец мог назвать страницу сам.
@@ -184,14 +184,14 @@ export async function copyDonorPage({ test, donor }, params) {
         const wanted = pageTitleFor({ label, role: params.role, donorTitle: params.donorTitle });
         await test.setTitle(target, wanted);
         title = msg(COPY_REASONS.written);
-        log.info('copyDonorPage', 'заголовок приёмника записан', { target, length: wanted.length });
+        log.info('copyDonorPage', 'target title written', { target, length: wanted.length });
       } else {
         title = msg(COPY_REASONS.kept);
-        log.debug('copyDonorPage', 'заголовок приёмника не Blank page — оставлен', { target });
+        log.debug('copyDonorPage', 'target title is not Blank page, kept', { target });
       }
     } catch (e) {
       title = msg(COPY_REASONS.notWritten, { reason: String(e.message || e).slice(0, 120) });
-      log.warn('copyDonorPage', 'заголовок приёмника не записан', { target, error: String(e.message || e).slice(0, 160) });
+      log.warn('copyDonorPage', 'target title not written', { target, error: String(e.message || e).slice(0, 160) });
     }
   }
 
@@ -204,14 +204,14 @@ export async function copyDonorPage({ test, donor }, params) {
       if (!current) {
         await test.setAlias(target, params.alias);
         alias = msg(COPY_REASONS.written);
-        log.info('copyDonorPage', 'адрес приёмника записан', { target });
+        log.info('copyDonorPage', 'target address written', { target });
       } else {
         alias = msg(COPY_REASONS.kept);
-        log.debug('copyDonorPage', 'у приёмника уже есть адрес — оставлен', { target });
+        log.debug('copyDonorPage', 'target already has an address, kept', { target });
       }
     } catch (e) {
       alias = msg(COPY_REASONS.notWritten, { reason: String(e.message || e).slice(0, 120) });
-      log.warn('copyDonorPage', 'адрес приёмника не записан', { target, code: e.code, error: String(e.message || e).slice(0, 160) });
+      log.warn('copyDonorPage', 'target address not written', { target, code: e.code, error: String(e.message || e).slice(0, 160) });
     }
   }
 
@@ -225,7 +225,7 @@ export async function copyDonorPage({ test, donor }, params) {
     replaced: replace ? before.length : 0,
     verify: { donorUnchanged: true, orderMatches: order.equal, hiddenMismatch: order.hiddenMismatch, pastedCount: pastedRecords.length },
   }, null, 2)}\n`);
-  log.info('copyDonorPage', 'запись переноса', { record: record.replace(/\\/g, '/') });
+  log.info('copyDonorPage', 'transfer record', { record: record.replace(/\\/g, '/') });
   return {
     source, target, blocks: src.length, pasted: pastedRecords.length, replaced: replace ? before.length : 0,
     verify: { donorUnchanged: true, orderMatches: order.equal, hiddenMismatch: order.hiddenMismatch, expected: order.expected, actual: order.actual },

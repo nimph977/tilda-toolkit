@@ -38,10 +38,10 @@ export function isFormField(name) {
 export function assertNotFormField(name, ctx = {}, { allowContent = false } = {}) {
   if (!isFormField(name)) return;
   if (allowContent && CONTENT_SET.has(String(name))) {
-    log.warn('assertNotFormField', 'поле формы пропущено по флагу formContent', { field: String(name), ...ctx });
+    log.warn('assertNotFormField', 'form field allowed by the formContent flag', { field: String(name), ...ctx });
     return;
   }
-  log.warn('assertNotFormField', 'отказ: поле формы не пишется', { field: String(name), ...ctx });
+  log.warn('assertNotFormField', 'refused: form field is not written', { field: String(name), ...ctx });
   throw new ToolError('FORM_FIELD_REJECTED', msg('formFields.rejected', { name, fields: FORM_FIELDS.join(', ') }));
 }
 
@@ -56,7 +56,7 @@ export function containsScript(value) {
 /** Отказ SCRIPT_REJECTED, если значение (или что-то внутри него) содержит `<script`. */
 export function assertNoScript(value, ctx = {}) {
   if (!containsScript(value)) return;
-  log.error('assertNoScript', 'отказ: значение содержит <script', ctx);
+  log.error('assertNoScript', 'refused: value contains <script', ctx);
   if (ctx.field) throw new ToolError('SCRIPT_REJECTED', msg('formFields.scriptRejectedField', { field: ctx.field }));
   throw new ToolError('SCRIPT_REJECTED', msg('formFields.scriptRejected'));
 }
@@ -73,7 +73,7 @@ export function formFieldChanges(before, after) {
     // блока (2026-09-21: копия блока без формы). Исчезновение полей вместе с элементом
     // не считается изменением; появление формы в новом элементе — по-прежнему считается.
     if (before && before[key] && !(after && after[key])) {
-      if (FORM_FIELDS.some((f) => before[key][f] !== undefined)) log.info('formFieldChanges', 'элемент формы удалён целиком — допускается', { key, elem_id: before[key].elem_id });
+      if (FORM_FIELDS.some((f) => before[key][f] !== undefined)) log.info('formFieldChanges', 'form element removed entirely, allowed', { key, elem_id: before[key].elem_id });
       continue;
     }
     const a = (before && before[key]) || {};

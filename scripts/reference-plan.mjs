@@ -149,7 +149,7 @@ export function menuItems(block) {
     const title = String(l.text ?? '').trim();
     if (!title) continue;
     if (buttonKeys.has(`${title}\n${l.href ?? ''}`)) {
-      log.debug('menuItems', '[FIX] ссылка кнопки не идёт в пункты меню', { order: block.order });
+      log.debug('menuItems', '[FIX] button link does not go to menu items', { order: block.order });
       continue;
     }
     if (seen.has(title)) {
@@ -274,7 +274,7 @@ export function messengerField(block, cat, miss) {
     el[rule.valueFrom] = decodeURIComponent(hit[1]);
     out.push(el);
   }
-  log.debug('messengerField', 'мессенджеры', { services, mapped: out.length, missed: items.length - out.length });
+  log.debug('messengerField', 'messengers', { services, mapped: out.length, missed: items.length - out.length });
   return out.length ? { name: 'soclinks', value: JSON.stringify(out) } : null;
 }
 
@@ -330,7 +330,7 @@ function shapeFields(b, allowed, miss) {
     miss({ field: 'shapedividerstyle', ...SHAPE_REASONS.noField, text: b.shape.style });
     return [];
   }
-  log.debug('shapeFields', '[FIX] форма разделителя', { order: b.order, style: b.shape.style });
+  log.debug('shapeFields', '[FIX] divider shape', { order: b.order, style: b.shape.style });
   return [{ name: 'shapedividerstyle', value: b.shape.style }];
 }
 
@@ -419,7 +419,7 @@ export function formCards(form, miss) {
     }
     out.push(el);
   });
-  log.debug('formCards', 'поля формы', { inputs: (form?.inputs ?? []).length, mapped: out.length });
+  log.debug('formCards', 'form fields', { inputs: (form?.inputs ?? []).length, mapped: out.length });
   return out;
 }
 
@@ -474,7 +474,7 @@ export function applyFontAliases(fields, aliases = {}) {
     }
     const to = typeof o.fontfamily === 'string' ? map[o.fontfamily.replace(/^['"]|['"]$/g, '').toLowerCase()] : undefined;
     if (!to) return f;
-    log.debug('applyFontAliases', 'семейство заменено пресетом', { field: f.name, to });
+    log.debug('applyFontAliases', 'font family replaced by preset', { field: f.name, to });
     return { ...f, value: JSON.stringify({ ...o, fontfamily: to }) };
   });
 }
@@ -508,7 +508,7 @@ export function settingsFields(b, { cat, map, sourceTplid, tplid, isSubstituted,
   }
   for (const u of decoded.undecided) miss({ field: u.field, ...SETTINGS_REASONS.undecided(u.reason), ...(u.key ? { text: u.key } : {}) });
   if (decoded.unexplained.length) miss({ field: null, ...SETTINGS_REASONS.unexplained, text: String(decoded.unexplained.length) });
-  log.debug('settingsFields', 'настройки по карте', { order: b.order, tplid, decoded: fields.length, undecided: decoded.undecided.length, unexplained: decoded.unexplained.length });
+  log.debug('settingsFields', 'settings by map', { order: b.order, tplid, decoded: fields.length, undecided: decoded.undecided.length, unexplained: decoded.unexplained.length });
   return { fields, byMap: true, decoded: fields.length, undecided: decoded.undecided.length, unexplained: decoded.unexplained.length };
 }
 
@@ -710,7 +710,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
         linkTotals.rewritten += counted.rewritten;
         linkTotals.kept += counted.kept;
         unmapped.push(...counted.lost.map((e) => ({ order: b.order, tplid, ...e })));
-        log.debug('buildReferencePlan', '[FIX] ссылки блока в операции', { order: b.order, rewritten: counted.rewritten, kept: counted.kept, lost: counted.lost.length, decided: linkDecisions.decided.size });
+        log.debug('buildReferencePlan', '[FIX] block links in operations', { order: b.order, rewritten: counted.rewritten, kept: counted.kept, lost: counted.lost.length, decided: linkDecisions.decided.size });
       }
       if (!links) linkTotals.referenceLinks += countReferenceLinks(b, referenceOrigin);
       buttonsTotal += blockButtons;
@@ -736,7 +736,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
     // Замена засчитывается только после того, как шаблон-замена прошёл проверки: иначе итог
     // команды сообщал бы «замен: N» про блоки, которые на деле ушли в пропуски.
     if (isSubstituted) {
-      log.info('buildReferencePlan', 'замена шаблона', { order: b.order, from: sourceTplid, to: tplid });
+      log.info('buildReferencePlan', 'template substituted', { order: b.order, from: sourceTplid, to: tplid });
       substituted.push({ order: b.order, from: sourceTplid, to: tplid });
     }
     let block = b;
@@ -755,7 +755,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
       const t123 = { tplid: '131', fields: [], code: b.code.code };
       ops.push({ id: `b${b.order}`, newRecord: t123, hidden: 'n' });
       commitLinks(t123);
-      log.debug('buildReferencePlan', 'HTML-блок', { order: b.order, bytes: b.code.code.length, scripts: b.code.scripts });
+      log.debug('buildReferencePlan', 'HTML block', { order: b.order, bytes: b.code.code.length, scripts: b.code.scripts });
       continue;
     }
 
@@ -763,7 +763,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
     // полей шаблона — вкладки каталога плюс полный список `tplFields` (сверка P00, 2026-09-23).
     // Очистка стоковых значений по-прежнему идёт только по вкладке «Контент».
     const allowed = new Set([...(cat.tabs?.content ?? []), ...(cat.tabs?.settings ?? []), ...(cat.tplFields ?? [])]);
-    if (cat.tplFields?.length) log.debug('buildReferencePlan', '[FIX] поля шаблона с tplFields', { order: b.order, tplid, tabs: (cat.tabs?.content ?? []).length + (cat.tabs?.settings ?? []).length, tplFields: cat.tplFields.length });
+    if (cat.tplFields?.length) log.debug('buildReferencePlan', '[FIX] template fields with tplFields', { order: b.order, tplid, tabs: (cat.tabs?.content ?? []).length + (cat.tabs?.settings ?? []).length, tplFields: cat.tplFields.length });
     const linkAllowed = linkAllowedFor(cat, allowed);
     const tplFields = new Set(cat.tplFields ?? []);
     const fields = [];
@@ -804,7 +804,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
       if (lf) push(lf, btn.href);
       else miss({ field: title, ...BUTTON_REASONS.noLinkField(btn.slot), text: String(btn.href).slice(0, 40) });
     }
-    if ((block.buttons ?? []).length) log.debug('buildReferencePlan', 'кнопки блока', { order: b.order, written: buttonsWritten, total: block.buttons.length });
+    if ((block.buttons ?? []).length) log.debug('buildReferencePlan', 'block buttons', { order: b.order, written: buttonsWritten, total: block.buttons.length });
     blockButtons = buttonsWritten;
 
     // Фон-видео: адрес видео — в поле шаблона по виду; адрес не логируется.
@@ -816,7 +816,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
       } else {
         miss({ field: vf ?? 'video', ...VIDEO_REASONS.noField, text: block.video.kind });
       }
-      log.debug('buildReferencePlan', 'видео блока', { order: b.order, kind: block.video.kind, field: vf ?? null });
+      log.debug('buildReferencePlan', 'block video', { order: b.order, kind: block.video.kind, field: vf ?? null });
     }
 
     for (const im of block.images ?? []) {
@@ -854,7 +854,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
         miss({ field: 'list', ...FIELD_REASONS.cardsNoList });
       } else {
         const textKeys = cardTextKeys(cat);
-        log.debug('buildReferencePlan', 'текстовые ключи карточек', { order: b.order, tplid, textKeys });
+        log.debug('buildReferencePlan', 'card text keys', { order: b.order, tplid, textKeys });
         block.cards.forEach((c, i) => {
           const card = { li_title: '', li_descr: '', li_img: '', 'li-tubutton': '', li_imgalt: '' };
           for (const k of textKeys) card[k] = c.html?.[k] ?? c.fields?.[k] ?? '';
@@ -954,7 +954,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
         else push(name, '');
         blanked.push(name);
       }
-      if (blanked.length) log.debug('buildReferencePlan', '[FIX] стоковые поля очищены', { order: b.order, tplid, fields: blanked });
+      if (blanked.length) log.debug('buildReferencePlan', '[FIX] stock fields cleared', { order: b.order, tplid, fields: blanked });
     }
 
     if (fields.length === 0 && cards.length === 0 && images.length === 0) {
@@ -967,7 +967,7 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
         ops.push({ id: `b${b.order}`, newRecord: divider, hidden: 'n' });
         commitLinks(divider);
         commitSettings();
-        log.debug('buildReferencePlan', '[FIX] разделитель без полей создаётся пустым', { order: b.order, tplid });
+        log.debug('buildReferencePlan', '[FIX] divider without fields is created empty', { order: b.order, tplid });
         continue;
       }
       skip(contentFields.length ? SKIP_REASONS.contentOutsideFields : SKIP_REASONS.noTransferableFields);
@@ -984,14 +984,14 @@ export function buildReferencePlan(structure, { page, slug, catalogs, settingsMa
     commitSettings();
     const breaks = fields.filter((f) => String(f.value).includes('<br>')).length;
     styledTotal += styled.length;
-    log.debug('buildReferencePlan', 'блок', { order: b.order, tplid, fields: fields.length, images: images.length, cards: cards.length, blanked: blanked.length, breaks, styled: styled.length, soclinks: (b.soclinks ?? []).length });
+    log.debug('buildReferencePlan', 'block', { order: b.order, tplid, fields: fields.length, images: images.length, cards: cards.length, blanked: blanked.length, breaks, styled: styled.length, soclinks: (b.soclinks ?? []).length });
   }
 
   // По метке имя страницы слепка в план и логи не попадает.
   const source = label ?? structure.name;
   const plan = { page: String(page), name: `reference:${slug}/${source}`, startAfter: String(startAfter || ''), ops };
   const linkSummary = links ? { rewritten: linkTotals.rewritten, kept: linkTotals.kept } : { rewritten: 0, kept: 0, referenceLinks: linkTotals.referenceLinks };
-  log.info('buildReferencePlan', 'план построен', { page: String(page), source, ops: ops.length, skipped: skipped.length, unmapped: unmapped.length, styles, styled: styledTotal, substituted: substituted.length, zone, zoneFiltered, buttons: buttonsTotal, videos: videosTotal, settings: settingsTotals, ...linkSummary });
+  log.info('buildReferencePlan', 'plan built', { page: String(page), source, ops: ops.length, skipped: skipped.length, unmapped: unmapped.length, styles, styled: styledTotal, substituted: substituted.length, zone, zoneFiltered, buttons: buttonsTotal, videos: videosTotal, settings: settingsTotals, ...linkSummary });
   return { plan, skipped, unmapped, substituted, zoneFiltered, links: linkSummary, buttons: buttonsTotal, videos: videosTotal, settings: settingsTotals };
 }
 
@@ -1047,7 +1047,7 @@ export function generateReferencePlan(params) {
   const { skipped, unmapped, substituted, zoneFiltered, links, settings } = built;
   const subs = resolved.substitutes;
   for (const from of Object.keys(subs)) {
-    if (!substituted.some((x) => x.from === from)) log.warn('generateReferencePlan', 'замена указана, но блоков такого шаблона в зоне нет', { from, to: subs[from] });
+    if (!substituted.some((x) => x.from === from)) log.warn('generateReferencePlan', 'substitution given, but the zone has no blocks of that template', { from, to: subs[from] });
   }
   let hint;
   const zones = structure.counts?.zones;
@@ -1059,7 +1059,7 @@ export function generateReferencePlan(params) {
   const path = out || join(plansDir(), planFileName(slug, source, resolved.page));
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(plan, null, 2) + '\n', 'utf8');
-  log.info('generateReferencePlan', 'план записан', { path, ops: plan.ops.length, blocks: structure.blocks.length, zone: resolved.zone, zoneFiltered });
+  log.info('generateReferencePlan', 'plan written', { path, ops: plan.ops.length, blocks: structure.blocks.length, zone: resolved.zone, zoneFiltered });
   const result = { path, ops: plan.ops.length, blocks: structure.blocks.length, skipped, unmapped, substituted, zone: resolved.zone, zoneFiltered, links, settings };
   if (byLabel) result.label = source;
   if (hint) result.hint = hint;

@@ -275,7 +275,7 @@ test('newRecord prepare knows settings fields from the settings map of the templ
     const write = process.stderr.write;
     setLogLevel('WARN');
     process.stderr.write = (chunk, ...rest) => {
-      if (String(chunk).includes('поля нет в каталоге шаблона')) warned.push(String(chunk));
+      if (String(chunk).includes('field not in template catalog')) warned.push(String(chunk));
       return true;
     };
     try {

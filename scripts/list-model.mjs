@@ -39,7 +39,7 @@ export function decodeList(raw) {
   try {
     parsed = JSON.parse(text);
   } catch (e) {
-    log.error('decodeList', 'list не разобрался как JSON', { head: text.slice(0, 120) });
+    log.error('decodeList', 'list did not parse as JSON', { head: text.slice(0, 120) });
     throw new ToolError('BAD_LIST_JSON', msg('list.badListJson', { message: e.message }));
   }
   if (Array.isArray(parsed)) return parsed;
@@ -112,8 +112,8 @@ export function applyListOps(cards, spec = {}, opts = {}) {
     changes.push({ op: 'add', lid: card.lid, to: card, at });
   }
   out = out.map((c, i) => ({ ...c, ls: String((i + 1) * 10) }));
-  log.info('applyListOps', 'карточки изменены', { before: cards.length, after: out.length, changes: changes.length });
-  log.debug('applyListOps', 'состав', { lids: out.map((c) => c.lid) });
+  log.info('applyListOps', 'cards changed', { before: cards.length, after: out.length, changes: changes.length });
+  log.debug('applyListOps', 'composition', { lids: out.map((c) => c.lid) });
   return { cards: out, changes };
 }
 
@@ -132,8 +132,8 @@ export function buildListFields({ pageid, recordid, record = {}, cards }) {
   fields.push({ name: 'pageid', value: String(pageid) });
   fields.push({ name: 'comm', value: 'saverecord' });
   const bytes = Buffer.byteLength(new URLSearchParams(fields.map((f) => [f.name, f.value])).toString());
-  if (bytes > 100 * 1024) log.warn('buildListFields', 'тело больше 100 КБ', { bytes, cards: cards.length });
-  log.debug('buildListFields', 'тело собрано', { fields: fields.length, cards: cards.length, bytes, head: fields.map((f) => `${f.name}=${String(f.value).slice(0, 20)}`).join('&').slice(0, 200) });
+  if (bytes > 100 * 1024) log.warn('buildListFields', 'body larger than 100 KB', { bytes, cards: cards.length });
+  log.debug('buildListFields', 'body built', { fields: fields.length, cards: cards.length, bytes, head: fields.map((f) => `${f.name}=${String(f.value).slice(0, 20)}`).join('&').slice(0, 200) });
   return fields;
 }
 
@@ -229,6 +229,6 @@ export function applyGalleryOps(slides, spec = {}, opts = {}) {
     out.splice(at, 0, slide);
     changes.push({ op: 'add', lid: slide.lid, to: slide, at });
   }
-  log.info('applyGalleryOps', 'слайды изменены', { before: slides.length, after: out.length, changes: changes.length });
+  log.info('applyGalleryOps', 'slides changed', { before: slides.length, after: out.length, changes: changes.length });
   return { slides: out, changes, imgs: jsonEscapeNonAscii(out) };
 }

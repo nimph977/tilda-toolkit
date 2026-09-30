@@ -96,7 +96,7 @@ export function siteEnvChanges({ siteDir, text, env = process.env }) {
   const orphans = Object.keys(env).filter((k) => k.startsWith('TILDA_') && !(k in parsed) && !SITE_NEUTRAL_VARS.includes(k));
   const identityOrphans = orphans.filter((k) => SITE_IDENTITY_VARS.includes(k));
   if (identityOrphans.length) {
-    log.error('siteEnvChanges', '[FIX] переменные сайта заданы только в окружении', { names: identityOrphans });
+    log.error('siteEnvChanges', '[FIX] site variables are set only in the environment', { names: identityOrphans });
     throw new ConfigError(msg('site.identityOnlyInEnv', { names: identityOrphans.join(', ') }), identityOrphans[0]);
   }
   return { set, kept, inherited: orphans, ignored };
@@ -109,16 +109,16 @@ export function siteEnvChanges({ siteDir, text, env = process.env }) {
 export function applySite({ flag, env = process.env, cwd, root, read = (p) => readFileSync(p, 'utf8') } = {}) {
   const dir = resolveSiteDir({ flag, env, cwd, root });
   if (!dir) {
-    log.debug('applySite', 'папка сайта не выбрана — пути только из явных переменных');
+    log.debug('applySite', 'site folder not selected, paths only from explicit variables');
     return null;
   }
   const { set, kept, inherited, ignored } = siteEnvChanges({ siteDir: dir, text: read(join(dir, '.env')), env });
   Object.assign(env, set);
   env.TILDA_SITE_DIR = dir;
-  log.info('applySite', 'папка сайта выбрана', { site: dir.replace(/\\/g, '/'), set: Object.keys(set).length });
-  log.debug('applySite', 'переменные из .env сайта', { set: Object.keys(set), kept });
-  if (inherited.length) log.warn('applySite', 'TILDA_* взяты из окружения — в .env сайта их нет', { names: inherited });
-  if (ignored.length) log.warn('applySite', '[FIX] ключи .env сайта вне TILDA_* и LOG_LEVEL не применяются', { names: ignored });
+  log.info('applySite', 'site folder selected', { site: dir.replace(/\\/g, '/'), set: Object.keys(set).length });
+  log.debug('applySite', 'variables from the site .env', { set: Object.keys(set), kept });
+  if (inherited.length) log.warn('applySite', 'TILDA_* taken from the environment, not in the site .env', { names: inherited });
+  if (ignored.length) log.warn('applySite', '[FIX] site .env keys outside TILDA_* and LOG_LEVEL are not applied', { names: ignored });
   return { siteDir: dir, set: Object.keys(set), kept, inherited, ignored };
 }
 

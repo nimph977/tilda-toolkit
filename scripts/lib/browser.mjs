@@ -243,13 +243,13 @@ function acquireLock(dir, name = LOCK_FILE, what = msg('browser.lib.whatBrowser'
   if (existsSync(file)) {
     const info = readJsonSafe(file);
     if (isPidAlive(info.pid) && info.pid !== process.pid) {
-      log.error('open', `${messageText(what)} уже занят другим процессом`, { lock: file, pid: info.pid, startedAt: info.startedAt });
+      log.error('open', `${messageText(what)} is already used by another process`, { lock: file, pid: info.pid, startedAt: info.startedAt });
       throw new BrowserError('BROWSER_LOCKED', msg('browser.lib.locked', { what, pid: info.pid, startedAt: info.startedAt, file }));
     }
-    log.warn('open', 'найден протухший lock, перезаписываю', { lock: file, pid: info.pid });
+    log.warn('open', 'stale lock found, overwriting', { lock: file, pid: info.pid });
   }
   writeFileSync(file, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
-  log.debug('open', 'lock взят', { lock: file, pid: process.pid });
+  log.debug('open', 'lock taken', { lock: file, pid: process.pid });
   return file;
 }
 
@@ -257,9 +257,9 @@ function releaseLock(file) {
   try {
     if (!existsSync(file)) return;
     unlinkSync(file);
-    log.debug('close', 'lock снят', { lock: file });
+    log.debug('close', 'lock released', { lock: file });
   } catch (e) {
-    log.warn('close', 'lock не удалился', { lock: file, error: e.message });
+    log.warn('close', 'lock was not removed', { lock: file, error: e.message });
   }
 }
 
@@ -273,7 +273,7 @@ export function daemonStatus(dir = profileDir()) {
   if (!existsSync(file)) return null;
   const info = readJsonSafe(file);
   if (!isPidAlive(info.pid) || !info.port) {
-    log.debug('daemonStatus', 'daemon.json протух', { file, pid: info.pid });
+    log.debug('daemonStatus', 'daemon.json is stale', { file, pid: info.pid });
     return null;
   }
   return { ...info, file };
@@ -303,7 +303,7 @@ export async function launchOwned(opts = {}) {
   // на время входа (waitForLogin). TILDA_BROWSER_VISIBLE=1 — держать окно на экране.
   const minimized = opts.minimized ?? process.env.TILDA_BROWSER_VISIBLE !== '1';
   const lockFile = acquireLock(dir);
-  log.debug('launchOwned', 'старт браузера', { profileDir: dir, channel, headless, minimized, cdpPort: Boolean(opts.cdpPort) });
+  log.debug('launchOwned', 'starting browser', { profileDir: dir, channel, headless, minimized, cdpPort: Boolean(opts.cdpPort) });
   let context;
   try {
     // `chromiumSandbox: true` — Playwright не добавляет `--no-sandbox`, плашки «неподдерживаемый флаг»
@@ -324,7 +324,7 @@ export async function launchOwned(opts = {}) {
     });
   } catch (e) {
     releaseLock(lockFile);
-    log.error('launchOwned', 'браузер не запустился', { channel, error: e.message });
+    log.error('launchOwned', 'browser failed to start', { channel, error: e.message });
     throw e;
   }
   const page = context.pages()[0] ?? (await context.newPage());
@@ -332,7 +332,7 @@ export async function launchOwned(opts = {}) {
   const session = { mode: 'owned', context, page, profileDir: dir, lockFile, protectedPages: guard, layers: new Set(), minimized, role, projectid, writablePages };
   context.on('close', () => releaseLock(lockFile));
   if (minimized) await setWindowState(session, 'minimized');
-  log.info('launchOwned', 'браузер поднят', { role, projectid, profileDir: dir, channel, sandbox: true, protectedPages: guard, writablePages, window: minimized ? 'свёрнуто' : 'на экране' });
+  log.info('launchOwned', 'browser started', { role, projectid, profileDir: dir, channel, sandbox: true, protectedPages: guard, writablePages, window: minimized ? 'minimized' : 'shown' });
   return session;
 }
 
@@ -349,14 +349,14 @@ export async function attach(daemon, opts = {}) {
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${daemon.port}`, { timeout: opts.connectTimeoutMs ?? 15_000 });
   } catch (e) {
     releaseLock(lockFile);
-    log.error('attach', 'не удалось подключиться к держателю', { port: daemon.port, pid: daemon.pid, error: e.message });
+    log.error('attach', 'could not connect to the holder', { port: daemon.port, pid: daemon.pid, error: e.message });
     throw new BrowserError('CALL_FAILED', msg('browser.lib.daemonNoAnswer', { pid: daemon.pid, port: daemon.port, reason: e.message }));
   }
   const context = browser.contexts()[0] ?? (await browser.newContext());
   const page = context.pages()[0] ?? (await context.newPage());
   page.setDefaultNavigationTimeout(opts.navigationTimeoutMs ?? 60_000);
   const session = { mode: 'attached', browser, context, page, profileDir: dir, lockFile, protectedPages: guard, layers: new Set(), minimized: daemon.minimized !== false, daemon, role, projectid, writablePages };
-  log.info('attach', 'подключено к держателю браузера', { role, projectid, profileDir: dir, pid: daemon.pid, port: daemon.port, startedAt: daemon.startedAt, protectedPages: guard, writablePages });
+  log.info('attach', 'connected to the browser holder', { role, projectid, profileDir: dir, pid: daemon.pid, port: daemon.port, startedAt: daemon.startedAt, protectedPages: guard, writablePages });
   return session;
 }
 
@@ -370,13 +370,13 @@ export async function startDaemon({ profileDir: dirOpt, role = 'test', timeoutMs
   const dir = dirOpt ? resolve(dirOpt) : profileDir(role);
   const alive = daemonStatus(dir);
   if (alive) {
-    log.info('startDaemon', 'держатель уже запущен', { role, pid: alive.pid, port: alive.port });
+    log.info('startDaemon', 'holder already running', { role, pid: alive.pid, port: alive.port });
     return alive;
   }
   mkdirSync(dir, { recursive: true });
   // Держатель не запущен — файл Preferences можно править: масштаб tilda.ru искажает все кадры.
   const zoom = resetTildaZoom(dir);
-  if (zoom.removed.length) log.info('startDaemon', 'масштаб Tilda в профиле сброшен', { role, removed: zoom.removed, backup: zoom.backup });
+  if (zoom.removed.length) log.info('startDaemon', 'Tilda zoom in the profile reset', { role, removed: zoom.removed, backup: zoom.backup });
   const script = resolve(dirname(fileURLToPath(import.meta.url)), 'browser-daemon.mjs');
   const logFile = resolve(dir, 'daemon.log');
   const out = openSync(logFile, 'a');
@@ -388,18 +388,18 @@ export async function startDaemon({ profileDir: dirOpt, role = 'test', timeoutMs
   });
   child.unref();
   closeSync(out);
-  log.info('startDaemon', 'держатель запускается', { role, profileDir: dir, pid: child.pid, script, log: logFile });
+  log.info('startDaemon', 'holder starting', { role, profileDir: dir, pid: child.pid, script, log: logFile });
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 300));
     const st = daemonStatus(dir);
     if (st) {
-      log.info('startDaemon', 'держатель готов', { pid: st.pid, port: st.port });
+      log.info('startDaemon', 'holder ready', { pid: st.pid, port: st.port });
       return st;
     }
     if (!isPidAlive(child.pid)) break;
   }
-  log.error('startDaemon', 'держатель не поднялся', { log: logFile });
+  log.error('startDaemon', 'holder did not start', { log: logFile });
   throw new BrowserError('CALL_FAILED', msg('browser.lib.daemonNotStarted', { seconds: Math.round(timeoutMs / 1000), logFile }));
 }
 
@@ -408,7 +408,7 @@ export async function stopDaemon({ profileDir: dirOpt, role = 'test' } = {}) {
   const dir = dirOpt ? resolve(dirOpt) : profileDir(role);
   const st = daemonStatus(dir);
   if (!st) {
-    log.info('stopDaemon', 'держатель не запущен', { role, profileDir: dir });
+    log.info('stopDaemon', 'holder is not running', { role, profileDir: dir });
     return false;
   }
   try {
@@ -417,7 +417,7 @@ export async function stopDaemon({ profileDir: dirOpt, role = 'test' } = {}) {
     await cdp.send('Browser.close').catch(() => {});
     await browser.close().catch(() => {});
   } catch (e) {
-    log.warn('stopDaemon', 'по CDP не закрылся, завершаю процесс', { pid: st.pid, error: e.message });
+    log.warn('stopDaemon', 'did not close over CDP, killing the process', { pid: st.pid, error: e.message });
     try {
       process.kill(st.pid);
     } catch {
@@ -430,7 +430,7 @@ export async function stopDaemon({ profileDir: dirOpt, role = 'test' } = {}) {
     const file = resolve(dir, f);
     if (existsSync(file) && !isPidAlive(readJsonSafe(file).pid)) unlinkSync(file);
   }
-  log.info('stopDaemon', 'держатель остановлен', { pid: st.pid, alive: isPidAlive(st.pid) });
+  log.info('stopDaemon', 'holder stopped', { pid: st.pid, alive: isPidAlive(st.pid) });
   return true;
 }
 
@@ -445,7 +445,7 @@ export async function open(opts = {}) {
   const role = opts.role ?? 'test';
   if (role === 'donor') requireDonorConfig({ testProfile: profileDir('test') });
   const useDaemon = opts.daemon ?? process.env.TILDA_BROWSER_DAEMON !== '0';
-  log.debug('open', 'сессия', { role, daemon: useDaemon });
+  log.debug('open', 'session', { role, daemon: useDaemon });
   if (!useDaemon) return launchOwned({ ...opts, role });
   const dir = opts.profileDir ? resolve(opts.profileDir) : profileDir(role);
   const st = daemonStatus(dir) ?? (await startDaemon({ profileDir: dir, role }));
@@ -467,10 +467,10 @@ export async function setWindowState(session, state) {
     await cdp.send('Browser.setWindowBounds', { windowId, bounds });
     await cdp.detach();
     if (state === 'normal') await page.bringToFront();
-    log.debug('setWindowState', 'окно переключено', { state });
+    log.debug('setWindowState', 'window state changed', { state });
     return true;
   } catch (e) {
-    log.warn('setWindowState', 'не удалось переключить окно', { state, error: e.message });
+    log.warn('setWindowState', 'could not change window state', { state, error: e.message });
     return false;
   }
 }
@@ -487,20 +487,20 @@ export async function setDaemonWindow(state, { profileDir: dirOpt, role = 'test'
   const dir = dirOpt ? resolve(dirOpt) : profileDir(role);
   const st = daemonStatus(dir) ?? (state === 'normal' ? await startDaemon({ profileDir: dir, role }) : null);
   if (!st) {
-    log.info('setDaemonWindow', 'держатель не запущен — сворачивать нечего', { state, role });
+    log.info('setDaemonWindow', 'holder is not running, nothing to minimize', { state, role });
     return false;
   }
-  log.debug('setDaemonWindow', '[FIX] переключение окна держателя', { state, pid: st.pid, port: st.port });
+  log.debug('setDaemonWindow', '[FIX] switching holder window', { state, pid: st.pid, port: st.port });
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${st.port}`, { timeout: 15_000 });
   try {
     const context = browser.contexts()[0] ?? (await browser.newContext());
     const page = context.pages()[0] ?? (await context.newPage());
     const ok = await setWindowState({ context, page }, state);
     if (!ok) throw new BrowserError('CALL_FAILED', msg('browser.lib.windowNotSwitched', { state }));
-    log.info('setDaemonWindow', state === 'normal' ? '[FIX] окно держателя на экране' : '[FIX] окно держателя свёрнуто', { pid: st.pid });
+    log.info('setDaemonWindow', state === 'normal' ? '[FIX] holder window shown' : '[FIX] holder window minimized', { pid: st.pid });
     return true;
   } finally {
-    await browser.close().catch((e) => log.warn('setDaemonWindow', 'отключение от держателя не удалось', { error: e.message }));
+    await browser.close().catch((e) => log.warn('setDaemonWindow', 'disconnect from the holder failed', { error: e.message }));
   }
 }
 
@@ -528,7 +528,7 @@ export async function close(session) {
   } finally {
     releaseLock(session.lockFile);
   }
-  log.info('close', session.mode === 'attached' ? 'отключено от держателя, браузер живёт' : 'браузер закрыт', { profileDir: session.profileDir });
+  log.info('close', session.mode === 'attached' ? 'disconnected from the holder, browser stays open' : 'browser closed', { profileDir: session.profileDir });
 }
 
 /**
@@ -539,7 +539,7 @@ export async function openProject(session, { layers = ['tilda-project'], project
   const { page } = session;
   const role = session.role ?? 'test';
   const url = projectUrl(projectid, role);
-  log.debug('openProject', 'навигация', { url, role });
+  log.debug('openProject', 'navigating', { url, role });
   await page.goto(url, { waitUntil: 'load' });
   if (isSessionLost({ url: page.url() })) {
     log.error('openProject', '[FIX] SESSION_LOST', { url: page.url(), role, hint: messageText(LOGIN_HINTS[role]) });
@@ -549,12 +549,12 @@ export async function openProject(session, { layers = ['tilda-project'], project
   const projectOnPage = await page.evaluate(() => String(window.projectid));
   const wanted = String(resolveProjectIdFor(role, projectid));
   if (projectOnPage !== wanted) {
-    log.error('openProject', 'открыт другой проект', { role, wanted, got: projectOnPage });
+    log.error('openProject', 'another project is open', { role, wanted, got: projectOnPage });
     throw new BrowserError('CALL_FAILED', msg('browser.lib.wrongProject', { onPage: projectOnPage, wanted }));
   }
   const installed = await installLayers(page, layers, { protectedPages: session.protectedPages, writablePages: session.writablePages });
   installed.forEach((l) => session.layers.add(l.name));
-  log.info('openProject', 'страница проекта открыта, сессия жива', { role, projectid: projectOnPage, layers: installed.map((l) => l.name) });
+  log.info('openProject', 'project page open, session alive', { role, projectid: projectOnPage, layers: installed.map((l) => l.name) });
   return { projectid: projectOnPage, url: page.url(), layers: installed };
 }
 
@@ -568,7 +568,7 @@ export async function openProjectSettings(session, { layers = ['tilda-project'],
   const selector = SETTINGS_TAB_SELECT[tab];
   if (!selector) throw new BrowserError('CALL_FAILED', msg('browser.lib.unknownTab', { tab }));
   const url = projectSettingsUrl(projectid, role, tab);
-  log.debug('openProjectSettings', 'навигация', { url, role, tab });
+  log.debug('openProjectSettings', 'navigating', { url, role, tab });
   // Смена только хэша не перезагружает страницу — открываем с нуля, чтобы форма взяла свежие значения.
   await page.goto('about:blank');
   await page.goto(url, { waitUntil: 'load' });
@@ -580,12 +580,12 @@ export async function openProjectSettings(session, { layers = ['tilda-project'],
   const projectOnPage = await page.evaluate(() => String(window.projectid || new URLSearchParams(location.search).get('projectid') || ''));
   const wanted = String(resolveProjectIdFor(role, projectid));
   if (projectOnPage !== wanted) {
-    log.error('openProjectSettings', 'открыт другой проект', { role, wanted, got: projectOnPage });
+    log.error('openProjectSettings', 'another project is open', { role, wanted, got: projectOnPage });
     throw new BrowserError('CALL_FAILED', msg('browser.lib.wrongSettingsProject', { onPage: projectOnPage, wanted }));
   }
   const installed = await installLayers(page, layers, { protectedPages: session.protectedPages, writablePages: session.writablePages });
   installed.forEach((l) => session.layers.add(l.name));
-  log.info('openProjectSettings', 'страница настроек открыта', { role, projectid: projectOnPage, tab });
+  log.info('openProjectSettings', 'settings page open', { role, projectid: projectOnPage, tab });
   return { projectid: projectOnPage, layers: installed };
 }
 
@@ -601,7 +601,7 @@ export async function editorState(page) {
       records: document.querySelectorAll('[data-record-type]').length,
     }));
   } catch (e) {
-    log.debug('editorState', 'evaluate не удался', { url, error: e.message });
+    log.debug('editorState', 'evaluate failed', { url, error: e.message });
   }
   const lost = isSessionLost({ url }) || !state.pageid;
   return { url, ...state, sessionLost: lost };
@@ -621,13 +621,13 @@ export async function installLayers(page, names = ['tilda-zero'], { protectedPag
   for (const name of names) {
     const path = layerPath(name);
     if (!existsSync(path)) {
-      log.error('installLayers', 'файл слоя не найден', { name, path });
+      log.error('installLayers', 'layer file not found', { name, path });
       throw new BrowserError('LAYER_NOT_FOUND', msg('browser.lib.layerNotFound', { name, path }));
     }
     const code = readFileSync(path, 'utf8');
-    log.debug('installLayers', 'установка слоя', { name: basename(path), bytes: Buffer.byteLength(code) });
+    log.debug('installLayers', 'installing layer', { name: basename(path), bytes: Buffer.byteLength(code) });
     const result = await page.evaluate(wrapLayer(code));
-    log.debug('installLayers', 'слой установлен', { name: basename(path), result });
+    log.debug('installLayers', 'layer installed', { name: basename(path), result });
     installed.push({ name: basename(path, '.js'), bytes: Buffer.byteLength(code), result });
   }
   // Защита живой главной дублируется в браузерном слое, как и в Node (protectedPages);
@@ -638,7 +638,7 @@ export async function installLayers(page, names = ['tilda-zero'], { protectedPag
     T.writablePages = writable === null ? null : [...writable];
     return { protectedPages: T.protectedPages, writablePages: T.writablePages };
   }, { pages: configuredProtectedPages, writable });
-  log.debug('installLayers', 'защита в слое выставлена', guards);
+  log.debug('installLayers', 'protection set in the layer', guards);
   return installed;
 }
 
@@ -653,7 +653,7 @@ export async function setWritablePages(page, list) {
     T.writablePages = [...pages];
     return T.writablePages;
   }, list.map(String));
-  log.warn('setWritablePages', 'allow-список записи заменён', { writablePages: result, at: new Date().toISOString() });
+  log.warn('setWritablePages', 'write allow list replaced', { writablePages: result, at: new Date().toISOString() });
   return result;
 }
 
@@ -668,7 +668,7 @@ export async function setProtectedPages(page, list) {
     T.protectedPages = [...pages];
     return T.protectedPages;
   }, list.map(String));
-  log.warn('setProtectedPages', 'список защищённых страниц в браузерном слое заменён', { protectedPages: result, at: new Date().toISOString() });
+  log.warn('setProtectedPages', 'protected pages list in the browser layer replaced', { protectedPages: result, at: new Date().toISOString() });
   return result;
 }
 
@@ -695,12 +695,12 @@ export async function waitForEditorReady(page, { timeoutMs = 30_000, pollMs = 70
     await page.waitForTimeout(pollMs);
     const count = await page.evaluate(() => document.querySelectorAll('[data-record-type]').length);
     if (count === prev) {
-      log.debug('waitForEditorReady', 'блоки дорисованы', { records: count });
+      log.debug('waitForEditorReady', 'blocks rendered', { records: count });
       return count;
     }
     prev = count;
   }
-  log.warn('waitForEditorReady', 'число блоков не стабилизировалось, продолжаю', { records: prev, timeoutMs });
+  log.warn('waitForEditorReady', 'block count did not settle, continuing', { records: prev, timeoutMs });
   return prev;
 }
 
@@ -708,7 +708,7 @@ export async function openEditor(session, pageid, { layers = ['tilda-zero'], pro
   const { page } = session;
   const role = session.role ?? 'test';
   const url = editorUrl(pageid, projectid, role);
-  log.debug('openEditor', 'навигация', { url, role });
+  log.debug('openEditor', 'navigating', { url, role });
   await page.goto(url, { waitUntil: 'load' });
   if (!isSessionLost({ url: page.url() })) await waitForEditorReady(page);
   const state = await editorState(page);
@@ -717,12 +717,12 @@ export async function openEditor(session, pageid, { layers = ['tilda-zero'], pro
     throw new BrowserError('SESSION_LOST', sessionLostMessage(role), { url: state.url });
   }
   if (state.pageid !== String(pageid)) {
-    log.error('openEditor', 'редактор открыл другую страницу', { wanted: String(pageid), got: state.pageid });
+    log.error('openEditor', 'editor opened another page', { wanted: String(pageid), got: state.pageid });
     throw new BrowserError('CALL_FAILED', msg('browser.lib.wrongEditorPage', { actual: state.pageid, wanted: pageid }));
   }
   const installed = await installLayers(page, layers, { protectedPages: session.protectedPages, writablePages: session.writablePages });
   installed.forEach((l) => session.layers.add(l.name));
-  log.info('openEditor', 'редактор открыт, сессия жива', { role, pageid: state.pageid, records: state.records, layers: installed.map((l) => l.name) });
+  log.info('openEditor', 'editor open, session alive', { role, pageid: state.pageid, records: state.records, layers: installed.map((l) => l.name) });
   return { ...state, layers: installed };
 }
 
@@ -736,7 +736,7 @@ export async function waitForLogin(session, pageid, { timeoutMs = 10 * 60_000, p
   const { page } = session;
   const role = session.role ?? 'test';
   const deadline = Date.now() + timeoutMs;
-  log.info('waitForLogin', 'сессии нет — войдите в Тильду в открытом окне браузера', { role, target, timeoutMs });
+  log.info('waitForLogin', 'no session, sign in to Tilda in the open browser window', { role, target, timeoutMs });
   await page.goto('https://tilda.cc/login/', { waitUntil: 'domcontentloaded' });
   // Окно человеку нужно только здесь: развернуть на время входа, после входа свернуть обратно.
   if (session.minimized) await setWindowState(session, 'normal');
@@ -751,20 +751,20 @@ export async function waitForLogin(session, pageid, { timeoutMs = 10 * 60_000, p
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded' });
     } catch (e) {
-      log.debug('waitForLogin', 'навигация не удалась, жду дальше', { error: e.message });
+      log.debug('waitForLogin', 'navigation failed, waiting', { error: e.message });
       continue;
     }
     if (target === 'project') {
       const projectOnPage = isSessionLost({ url: page.url() }) ? '' : await page.evaluate(() => String(window.projectid || '')).catch(() => '');
       if (projectOnPage) {
-        log.info('waitForLogin', 'вход выполнен, страница проекта открыта', { role, projectid: projectOnPage });
+        log.info('waitForLogin', 'signed in, project page open', { role, projectid: projectOnPage });
         await hide();
         return { url: page.url(), projectid: projectOnPage };
       }
     } else {
       const state = await editorState(page);
       if (!state.sessionLost) {
-        log.info('waitForLogin', 'вход выполнен, сессия жива', { role, pageid: state.pageid });
+        log.info('waitForLogin', 'signed in, session alive', { role, pageid: state.pageid });
         await hide();
         return state;
       }
@@ -772,7 +772,7 @@ export async function waitForLogin(session, pageid, { timeoutMs = 10 * 60_000, p
     await page.goto('https://tilda.cc/login/', { waitUntil: 'domcontentloaded' });
   }
   await hide();
-  log.error('waitForLogin', 'вход не выполнен за отведённое время', { timeoutMs });
+  log.error('waitForLogin', 'sign-in did not finish in time', { timeoutMs });
   throw new BrowserError('SESSION_LOST', msg('browser.lib.loginTimeout', { seconds: Math.round(timeoutMs / 1000) }));
 }
 
@@ -812,10 +812,10 @@ export async function call(page, fn, args = [], opts = {}) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const started = Date.now();
     try {
-      log.debug('call', 'вызов', { fn, attempt, argBytes });
+      log.debug('call', 'call', { fn, attempt, argBytes });
       const result = await callOnce(page, fn, args, timeoutMs);
       const resultBytes = Buffer.byteLength(JSON.stringify(result ?? null));
-      log.debug('call', 'ответ', { fn, attempt, resultBytes, ms: Date.now() - started });
+      log.debug('call', 'result', { fn, attempt, resultBytes, ms: Date.now() - started });
       journal.push({ fn, attempt, ok: true, ms: Date.now() - started, resultBytes });
       return result;
     } catch (e) {
@@ -827,7 +827,7 @@ export async function call(page, fn, args = [], opts = {}) {
       }
       if (!isRetryable(e) || attempt === attempts) {
         const layer = layerErrorCode(message);
-        log.error('call', 'вызов не удался', { fn, attempt, layerCode: layer?.code, error: message.slice(0, 200) });
+        log.error('call', 'call failed', { fn, attempt, layerCode: layer?.code, error: message.slice(0, 200) });
         if (e instanceof BrowserError) throw e;
         // Код слоя (SAVE_FAILED и т. п.) идёт в ключ `browser.code.<КОД>`; незнакомый код — общий текст.
         // Код ошибки остаётся CALL_FAILED, код слоя — в data.layerCode.
@@ -838,7 +838,7 @@ export async function call(page, fn, args = [], opts = {}) {
         throw new BrowserError('CALL_FAILED', msg('browser.lib.callFailed', { fn, detail: message }), { fn, attempt });
       }
       const delay = retryDelayMs(attempt, opts.retry);
-      log.warn('call', 'ошибка, повтор', { fn, attempt, nextAttempt: attempt + 1, delayMs: delay, error: message.slice(0, 200) });
+      log.warn('call', 'error, retrying', { fn, attempt, nextAttempt: attempt + 1, delayMs: delay, error: message.slice(0, 200) });
       await new Promise((r) => setTimeout(r, delay));
     }
   }
@@ -852,7 +852,7 @@ export async function call(page, fn, args = [], opts = {}) {
  * (`attempts: 1`): повтор мог бы сохранить настройки дважды.
  */
 export async function callWithResponse(page, fn, args = [], { urlPart, bodyPart, timeoutMs = 30_000 } = {}) {
-  log.debug('callWithResponse', 'ожидание ответа', { fn, urlPart });
+  log.debug('callWithResponse', 'waiting for response', { fn, urlPart });
   const wait = page.waitForResponse((r) => r.url().includes(urlPart) && (r.request().postData() || '').includes(bodyPart), { timeout: timeoutMs });
   // Отказ ожидания до вызова не должен всплыть как необработанный.
   wait.catch(() => {});
@@ -861,11 +861,11 @@ export async function callWithResponse(page, fn, args = [], { urlPart, bodyPart,
   try {
     resp = await wait;
   } catch (e) {
-    log.error('callWithResponse', 'нет ответа сервера', { fn, urlPart, timeoutMs, error: String(e.message || e).slice(0, 120) });
+    log.error('callWithResponse', 'no server response', { fn, urlPart, timeoutMs, error: String(e.message || e).slice(0, 120) });
     throw new BrowserError('CALL_FAILED', msg('browser.lib.settingsNotSaved', { seconds: Math.round(timeoutMs / 1000) }), { fn });
   }
   const text = (await resp.text()).slice(0, 200);
-  log.info('callWithResponse', 'ответ получен', { fn, status: resp.status(), bytes: text.length });
+  log.info('callWithResponse', 'response received', { fn, status: resp.status(), bytes: text.length });
   return { result, status: resp.status(), text };
 }
 
@@ -900,7 +900,7 @@ export function captureRequests(page, filter, outFile, { maxBodyBytes = 512 * 10
     });
     pending.set(request, record);
     records.push(record);
-    log.debug('captureRequests', 'запрос', { method: record.method, url, postBytes: record.postBytes });
+    log.debug('captureRequests', 'request', { method: record.method, url, postBytes: record.postBytes });
   };
   const readResponse = async (response, record) => {
     record.status = response.status();
@@ -917,7 +917,7 @@ export function captureRequests(page, filter, outFile, { maxBodyBytes = 512 * 10
       record.bodyError = e.message;
     }
     flush();
-    log.debug('captureRequests', 'ответ', { url: record.url, status: record.status, bodyBytes: record.bodyBytes });
+    log.debug('captureRequests', 'response', { url: record.url, status: record.status, bodyBytes: record.bodyBytes });
   };
   const onResponse = (response) => {
     const record = pending.get(response.request());
@@ -929,7 +929,7 @@ export function captureRequests(page, filter, outFile, { maxBodyBytes = 512 * 10
   };
   page.on('request', onRequest);
   page.on('response', onResponse);
-  log.info('captureRequests', 'перехват включён', { outFile, filter: String(filter) });
+  log.info('captureRequests', 'capture enabled', { outFile, filter: String(filter) });
   return {
     records,
     async stop({ settleMs = 5_000 } = {}) {
@@ -939,9 +939,9 @@ export function captureRequests(page, filter, outFile, { maxBodyBytes = 512 * 10
       while ((inflight.size > 0 || pending.size > 0) && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 100));
       }
-      if (pending.size > 0) log.warn('captureRequests', 'ответы не дождались', { withoutResponse: pending.size });
+      if (pending.size > 0) log.warn('captureRequests', 'responses not received', { withoutResponse: pending.size });
       flush();
-      log.info('captureRequests', 'перехват выключен', { outFile, records: records.length });
+      log.info('captureRequests', 'capture disabled', { outFile, records: records.length });
       return records;
     },
   };

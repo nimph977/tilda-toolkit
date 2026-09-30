@@ -49,7 +49,7 @@ export function normalizeSchema(raw) {
     if (entry.kind === 'unknown') unknown.push(f.name);
     fields[f.name] = entry;
   }
-  if (unknown.length) log.debug('normalizeSchema', 'поля неизвестного типа', { tplid: raw?.tplid, fields: unknown });
-  log.debug('normalizeSchema', 'схема', { tplid: raw?.tplid, fields: Object.keys(fields).length, unknown: unknown.length });
+  if (unknown.length) log.debug('normalizeSchema', 'fields of unknown type', { tplid: raw?.tplid, fields: unknown });
+  log.debug('normalizeSchema', 'schema', { tplid: raw?.tplid, fields: Object.keys(fields).length, unknown: unknown.length });
   return { tplid: String(raw?.tplid ?? ''), fields };
 }

@@ -111,7 +111,7 @@ export function probeVariants(schema, current = {}) {
         skipped.push({ field, ...CALIBRATION_REASONS.unknownType(spec.type) });
     }
   }
-  log.debug('probeVariants', 'варианты', { variants: variants.length, skipped: skipped.length });
+  log.debug('probeVariants', 'variants', { variants: variants.length, skipped: skipped.length });
   return { variants, skipped };
 }
 
@@ -157,7 +157,7 @@ export function sampleContent(entry = {}) {
       );
     }
   }
-  log.debug('sampleContent', 'содержимое', { fields: Object.keys(out).length, list: Boolean(out.list) });
+  log.debug('sampleContent', 'sample content', { fields: Object.keys(out).length, list: Boolean(out.list) });
   return out;
 }
 
@@ -284,7 +284,7 @@ export function buildSettingsMap({ tplid, schema, baseFeatures = [], observation
       continue;
     }
     stats[rule.type] += 1;
-    log.debug('buildSettingsMap', 'поле', { field, key, kind, rule: rule.type, cases: rule.cases?.length });
+    log.debug('buildSettingsMap', 'field', { field, key, kind, rule: rule.type, cases: rule.cases?.length });
     if (key) {
       fields[field] = fields[field] || { kind: 'json', keys: {} };
       fields[field].keys[key] = { kind, rule };
@@ -292,6 +292,6 @@ export function buildSettingsMap({ tplid, schema, baseFeatures = [], observation
       fields[field] = { kind, rule };
     }
   }
-  log.info('buildSettingsMap', 'карта построена', { tplid, fields: Object.keys(fields).length, ...stats, skipped: skipped.length });
+  log.info('buildSettingsMap', 'settings map built', { tplid, fields: Object.keys(fields).length, ...stats, skipped: skipped.length });
   return { tplid: String(tplid), version: MAP_VERSION, calibratedAt: now || new Date().toISOString(), baseFeatures: B, fields, skipped };
 }

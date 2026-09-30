@@ -194,7 +194,7 @@ export function extractFeatures(html, { recid } = {}) {
     else out.add(f);
   }
   const result = [...out].sort();
-  log.debug('extractFeatures', 'признаки', { count: result.length, dropped, renamed });
+  log.debug('extractFeatures', 'features', { count: result.length, dropped, renamed });
   return result;
 }
 

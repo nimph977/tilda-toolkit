@@ -37,10 +37,10 @@ export function parseNewPageResponse(text, { comm = 'dublicatepage' } = {}) {
   const value = String(text ?? '').trim();
   if (/^\d+$/.test(value)) return { pageid: value };
   if (/you created maximum/i.test(value)) {
-    log.error('parseNewPageResponse', 'исчерпан лимит страниц', { comm, text: value.slice(0, 200) });
+    log.error('parseNewPageResponse', 'page limit exhausted', { comm, text: value.slice(0, 200) });
     throw new PageOpError('PAGE_LIMIT', msg('pageOps.pageLimit', { comm, text: value.slice(0, 200) }), { text: value });
   }
-  log.error('parseNewPageResponse', 'ответ не похож на pageid', { comm, text: value.slice(0, 200) });
+  log.error('parseNewPageResponse', 'response does not look like a pageid', { comm, text: value.slice(0, 200) });
   throw new PageOpError('PAGE_CREATE_FAILED', msg('pageOps.createFailed', { comm, text: value.slice(0, 200) }), { text: value });
 }
 
@@ -95,17 +95,17 @@ export async function setPageTitle(driver, pageid, title, { protectedIds = [] } 
   const text = String(title ?? '').trim();
   if (!text) throw new PageOpError('TITLE_EMPTY', msg('pageOps.titleEmpty'));
   if (protectedIds.map(String).includes(id)) {
-    log.error('setPageTitle', 'страница защищена — отказ до драйвера', { pageid: id });
+    log.error('setPageTitle', 'page is protected - refused before the driver', { pageid: id });
     throw new PageOpError('PROTECTED_PAGE', msg('pageOps.protectedPage', { id }), { pageid: id });
   }
-  log.debug('setPageTitle', 'запись заголовка', { pageid: id, length: text.length, mode: TITLE_WRITE_MODE });
+  log.debug('setPageTitle', 'writing title', { pageid: id, length: text.length, mode: TITLE_WRITE_MODE });
   const r = await driver.callWithResponse('setPageTitle', [id, text], { urlPart: '/projects/submit/', bodyPart: 'comm=savepagesettings' });
   const answer = String(r?.text ?? '').trim();
   if (answer !== 'OK' && answer !== '') {
-    log.error('setPageTitle', 'ответ не OK', { pageid: id, status: r?.status, body: answer.slice(0, 120) });
+    log.error('setPageTitle', 'response not OK', { pageid: id, status: r?.status, body: answer.slice(0, 120) });
     throw new PageOpError('TITLE_NOT_SAVED', msg('pageOps.titleNotSaved', { id, text: answer.slice(0, 120) }), { pageid: id, text: answer });
   }
-  log.info('setPageTitle', 'заголовок записан', { pageid: id, length: text.length });
+  log.info('setPageTitle', 'title written', { pageid: id, length: text.length });
   return { pageid: id, title: text };
 }
 
@@ -131,44 +131,44 @@ export async function setPageAlias(driver, pageid, alias, { protectedIds = [] } 
   const id = parseNumericId(pageid, 'pageid');
   const value = normalizePageAlias(alias);
   if (!ALIAS_RE.test(value)) {
-    log.error('setPageAlias', 'адрес не подходит — отказ до драйвера', { pageid: id, length: value.length });
+    log.error('setPageAlias', 'alias is not valid - refused before the driver', { pageid: id, length: value.length });
     throw new PageOpError('ALIAS_INVALID', msg('pageOps.aliasInvalid', { id }), { pageid: id });
   }
   if (protectedIds.map(String).includes(id)) {
-    log.error('setPageAlias', 'страница защищена — отказ до драйвера', { pageid: id });
+    log.error('setPageAlias', 'page is protected - refused before the driver', { pageid: id });
     throw new PageOpError('PROTECTED_PAGE', msg('pageOps.protectedPage', { id }), { pageid: id });
   }
-  log.debug('setPageAlias', 'запись адреса', { pageid: id, alias: value });
+  log.debug('setPageAlias', 'writing alias', { pageid: id, alias: value });
   const r = await driver.callWithResponse('setPageAlias', [id, value], { urlPart: '/projects/submit/', bodyPart: 'comm=savepagesettings' });
   const answer = String(r?.text ?? '').trim();
   if (ALIAS_TAKEN_RE.test(answer)) {
-    log.warn('setPageAlias', 'адрес занят другой страницей проекта', { pageid: id });
+    log.warn('setPageAlias', 'alias is taken by another page of the project', { pageid: id });
     throw new PageOpError('ALIAS_TAKEN', msg('pageOps.aliasTaken', { id }), { pageid: id, text: answer });
   }
   if (answer !== 'OK' && answer !== '') {
-    log.error('setPageAlias', 'ответ не OK', { pageid: id, status: r?.status, body: answer.slice(0, 120) });
+    log.error('setPageAlias', 'response not OK', { pageid: id, status: r?.status, body: answer.slice(0, 120) });
     throw new PageOpError('ALIAS_NOT_SAVED', msg('pageOps.aliasNotSaved', { id, text: answer.slice(0, 120) }), { pageid: id, text: answer });
   }
-  log.info('setPageAlias', 'адрес записан', { pageid: id });
+  log.info('setPageAlias', 'alias written', { pageid: id });
   return { pageid: id, alias: value };
 }
 
 export async function duplicatePage(driver, pageid) {
   const source = String(pageid);
-  log.debug('duplicatePage', 'запрос дубля', { source });
+  log.debug('duplicatePage', 'duplicate requested', { source });
   const r = await driver.call('duplicatePage', [source]);
   const { pageid: created } = parseNewPageResponse(r.text, { comm: 'dublicatepage' });
-  log.info('duplicatePage', `создан дубль ${created}`, { source, created, editor: editorUrl(created) });
+  log.info('duplicatePage', `duplicate created ${created}`, { source, created, editor: editorUrl(created) });
   return { source, pageid: created, editor: editorUrl(created) };
 }
 
 /** Пустая страница из шаблона «Пустая страница» (examplepageid=1231). */
 export async function createPage(driver, { projectid, examplepageid = BLANK_EXAMPLE_PAGE } = {}) {
   projectid = resolveProjectId(projectid);
-  log.debug('createPage', 'запрос пустой страницы', { projectid, examplepageid });
+  log.debug('createPage', 'blank page requested', { projectid, examplepageid });
   const r = await driver.call('createPage', [String(projectid), String(examplepageid)]);
   const { pageid: created } = parseNewPageResponse(r.text, { comm: 'addnewpagedublicateexample' });
-  log.info('createPage', `создана страница ${created}`, { projectid, created, editor: editorUrl(created) });
+  log.info('createPage', `page created ${created}`, { projectid, created, editor: editorUrl(created) });
   return { projectid: String(projectid), pageid: created, editor: editorUrl(created) };
 }
 
@@ -180,13 +180,13 @@ export async function publishPage(driver, pageid, opts = {}) {
   const id = String(pageid || '');
   if (!id) throw new PageOpError('PUBLISH_NO_PAGE', msg('pageOps.publishNoPage'));
   if (opts.confirmed !== true) {
-    log.warn('publishPage', 'публикация без подтверждения — отказ до обращения к браузеру', { pageid: id });
+    log.warn('publishPage', 'publishing without confirmation - refused before touching the browser', { pageid: id });
     throw new PageOpError('PUBLISH_NOT_CONFIRMED', msg('pageOps.publishNotConfirmed', { id }), { pageid: id });
   }
-  log.debug('publishPage', 'запрос публикации', { pageid: id });
+  log.debug('publishPage', 'publish requested', { pageid: id });
   const r = await driver.call('publishPage', [id, PUBLISH_CONFIRM]);
   const parsed = parsePublishResponse(r.text);
-  log.info('publishPage', `страница ${id} опубликована`, { pageid: id, link: parsed.link, wslink: parsed.wslink });
+  log.info('publishPage', `page ${id} published`, { pageid: id, link: parsed.link, wslink: parsed.wslink });
   return { pageid: id, ...parsed };
 }
 

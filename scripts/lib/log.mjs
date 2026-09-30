@@ -16,7 +16,7 @@ const LEVELS = { DEBUG: 10, INFO: 20, WARN: 30, ERROR: 40 };
 function resolveThreshold() {
   const raw = (process.env.LOG_LEVEL || 'INFO').toUpperCase();
   if (!(raw in LEVELS)) {
-    process.stderr.write(`[log] WARN неизвестный LOG_LEVEL=${raw}, использую INFO\n`);
+    process.stderr.write(`[log] WARN unknown LOG_LEVEL=${raw}, using INFO\n`);
     return LEVELS.INFO;
   }
   return LEVELS[raw];

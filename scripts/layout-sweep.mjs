@@ -135,14 +135,14 @@ export async function sweep({ pageid, recordid, widths, outDir, projectid, settl
         }
         return n;
       }, String(recordid));
-      log.debug('sweep', 'предпросмотр загружен', { width: page.viewportSize().width, records, hiddenFixed });
+      log.debug('sweep', 'preview loaded', { width: page.viewportSize().width, records, hiddenFixed });
     };
     // Режимы: reload — каждая ширина со свежей загрузкой (то, что видит посетитель); resize — окно
     // тянется без перезагрузки (ловит залипания скриптов Тильды: форма, переключённая на ≤640 в
     // столбик, при расширении окна назад не возвращается — 2026-09-21, ложный развал на 1200).
     await page.setViewportSize({ width: widths[0], height: widths[0] < 600 ? 640 : 900 });
     await load();
-    log.info('sweep', 'предпросмотр открыт', { pageid, recordid, mode, widths: widths.length });
+    log.info('sweep', 'preview opened', { pageid, recordid, mode, widths: widths.length });
     for (const [wi, width] of widths.entries()) {
       await page.setViewportSize({ width, height: width < 600 ? 640 : 900 });
       if (mode === 'reload' && wi > 0) await load();
@@ -167,7 +167,7 @@ export async function sweep({ pageid, recordid, widths, outDir, projectid, settl
       await page.waitForTimeout(150);
       await block.screenshot({ path: file, type: 'png' });
       results.push({ width, blockHeight: Math.round(m.blockHeight), elems: m.elems.filter((e) => e.visible).length, issues, file });
-      log.info('sweep', `ширина ${width}: высота блока ${Math.round(m.blockHeight)}, нарушений ${issues.length}`, { kinds: issues.map((i) => i.kind).join(',') || '-' });
+      log.info('sweep', `width ${width}: block height ${Math.round(m.blockHeight)}, issues ${issues.length}`, { kinds: issues.map((i) => i.kind).join(',') || '-' });
     }
   } finally {
     await page.close().catch(() => {});

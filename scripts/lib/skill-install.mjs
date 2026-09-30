@@ -89,7 +89,7 @@ export function rewriteLinks(text, { fileRel, srcRoot, dstRoot }) {
     rewritten += 1;
     return `](${fixed}${anchor})`;
   });
-  log.debug('rewriteLinks', 'ссылки пересчитаны', { fileRel, rewritten });
+  log.debug('rewriteLinks', 'links rewritten', { fileRel, rewritten });
   return result;
 }
 
@@ -168,7 +168,7 @@ export function inspectSkill({ root = repoRoot(), agent }) {
   const dst = join(root, ...segments);
   const expectedHash = treeHash(expectedTree(readSkillSource({ root }), { dstRoot: path }));
   const done = (state, actualHash = null) => {
-    log.debug('inspectSkill', 'копия осмотрена', { agent, path, state });
+    log.debug('inspectSkill', 'copy inspected', { agent, path, state });
     return { agent, path, state, expectedHash, actualHash };
   };
 
@@ -219,7 +219,7 @@ export function installSkill({ root = repoRoot(), agent }) {
   const info = inspectSkill({ root, agent });
   refuse(info);
   if (info.state === 'current') {
-    log.info('installSkill', 'копия актуальна', { agent, path: info.path, action: 'unchanged' });
+    log.info('installSkill', 'copy is up to date', { agent, path: info.path, action: 'unchanged' });
     return { agent, path: info.path, action: 'unchanged' };
   }
 
@@ -238,7 +238,7 @@ export function installSkill({ root = repoRoot(), agent }) {
     const marker = { skill: SKILL_NAME, source: SOURCE_ROOT, sha256: info.expectedHash };
     writeFileSync(join(tmp, MARKER), `${JSON.stringify(marker)}\n`);
     if (info.state === 'stale') {
-      log.warn('installSkill', 'удаляется устаревшая копия', { agent, path: info.path });
+      log.warn('installSkill', 'removing outdated copy', { agent, path: info.path });
       // Состояние `stale` значит: настоящая папка с маркером (проверено выше).
       rmSync(dst, { recursive: true, force: true });
     }
@@ -248,6 +248,6 @@ export function installSkill({ root = repoRoot(), agent }) {
     throw error;
   }
   const action = info.state === 'stale' ? 'updated' : 'installed';
-  log.info('installSkill', 'копия записана', { agent, path: info.path, action });
+  log.info('installSkill', 'copy written', { agent, path: info.path, action });
   return { agent, path: info.path, action };
 }

@@ -67,7 +67,7 @@ export async function fetchProjectCss(session, { slug }, opts = {}, deps = {}) {
   }
   const { css: path } = projectStylePaths(slug, opts);
   writeFileSync(path, css, 'utf8');
-  log.info('fetchProjectCss', 'CSS проекта сохранён', { bytes: css.length });
+  log.info('fetchProjectCss', 'project CSS saved', { bytes: css.length });
   return { path, bytes: css.length };
 }
 
@@ -86,7 +86,7 @@ function recordPath(projectid, now, opts = {}) {
  */
 export async function applyProjectStyle(driver, { desired, confirmed = false, confirm, projectid, now = new Date().toISOString() }, opts = {}) {
   if (!confirmed || confirm !== STYLE_CONFIRM) {
-    log.warn('applyProjectStyle', 'запись оформления без подтверждения — отказ до браузера');
+    log.warn('applyProjectStyle', 'style write without confirmation, refused before the browser');
     throw new ProjectStyleError('STYLE_NOT_CONFIRMED', msg('projectStyle.notConfirmed'));
   }
   const before = await driver.readProjectStyle();
@@ -98,13 +98,13 @@ export async function applyProjectStyle(driver, { desired, confirmed = false, co
   }
   const changedKeys = Object.keys(requested);
   if (!changedKeys.length) {
-    log.info('applyProjectStyle', 'оформление уже как у референса — записи нет', {});
+    log.info('applyProjectStyle', 'style already matches the reference, nothing to write', {});
     return { changed: [], otherChanged: [], record: null, fonts: 'C′', notApplied: [] };
   }
   const record = recordPath(projectid ?? 'project', now, opts);
   const entry = { at: now, before: before.values, requested };
   writeFileSync(record, JSON.stringify(entry, null, 2) + '\n', 'utf8');
-  log.info('applyProjectStyle', 'запись для отката сохранена', { record, keys: changedKeys });
+  log.info('applyProjectStyle', 'rollback record saved', { record, keys: changedKeys });
   const res = await driver.setProjectStyle(requested);
   if (String(res?.text ?? '').trim() !== 'OK') {
     throw new ProjectStyleError('SAVE_FAILED', msg('projectStyle.saveFailed', { text: String(res?.text ?? '').slice(0, 60), record }), { record });
@@ -120,7 +120,7 @@ export async function applyProjectStyle(driver, { desired, confirmed = false, co
   entry.otherChanged = otherChanged;
   entry.notApplied = notApplied;
   writeFileSync(record, JSON.stringify(entry, null, 2) + '\n', 'utf8');
-  log.info('applyProjectStyle', 'оформление записано', { changed: changedKeys, notApplied, otherChanged: otherChanged.length });
+  log.info('applyProjectStyle', 'style written', { changed: changedKeys, notApplied, otherChanged: otherChanged.length });
   if (notApplied.length) {
     throw new ProjectStyleError('STYLE_NOT_APPLIED', msg('projectStyle.notApplied', { notApplied: notApplied.join(', '), record }), { record, notApplied, otherChanged });
   }
@@ -202,7 +202,7 @@ export function playwrightStyleUi(page, browser) {
           submitted.push(key);
         }
       }
-      log.info('setProjectStyle', 'форма заполнена, сохранение', { submitted });
+      log.info('setProjectStyle', 'form filled, saving', { submitted });
       // Кнопка в шапке формы появляется не сразу после ввода — ждём, пока станет видна.
       await page.locator('button[type="submit"]', { hasText: 'Сохранить изменения' }).first().waitFor({ state: 'visible', timeout: 10000 });
       const saved = await browser.callWithResponse(page, 'clickSaveSettings', [], { urlPart: '/projects/submit/', bodyPart: 'comm=saveprojectsettings' });

@@ -91,7 +91,7 @@ export function extractBlockStyles(chunk) {
   const bgInline = open.match(BG_INLINE_RE);
   const bgRaw = bgAttr ? bgAttr[1] : bgInline ? bgInline[1] : null;
   const bgColor = bgRaw ? normalizeHex(bgRaw) : null;
-  if (bgRaw && !bgColor) log.warn('extractBlockStyles', 'фон не перенесён: значение не hex', { raw: String(bgRaw).trim().slice(0, 30) });
+  if (bgRaw && !bgColor) log.warn('extractBlockStyles', 'background not carried over: value is not hex', { raw: String(bgRaw).trim().slice(0, 30) });
 
   const typo = {};
   for (const m of text.replace(NARROW_MEDIA_RE, ' ').matchAll(TYPO_RULE_RE)) {
@@ -101,6 +101,6 @@ export function extractBlockStyles(chunk) {
   }
 
   const styles = { paddingTop: px(PT_CLASS_RE, PT_INLINE_RE), paddingBottom: px(PB_CLASS_RE, PB_INLINE_RE), bgColor, typo };
-  log.debug('extractBlockStyles', 'оформление', { paddingTop: styles.paddingTop, paddingBottom: styles.paddingBottom, bgColor: styles.bgColor, typo: Object.keys(typo) });
+  log.debug('extractBlockStyles', 'block styles', { paddingTop: styles.paddingTop, paddingBottom: styles.paddingBottom, bgColor: styles.bgColor, typo: Object.keys(typo) });
   return styles;
 }

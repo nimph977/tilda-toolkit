@@ -85,7 +85,7 @@ export function planAliases(site, donorPages, testPages) {
   const skipped = [];
   const skip = (label, { code, reason }) => {
     skipped.push({ label, code, reason });
-    log.debug('planAliases', 'пропуск', { label, reason: messageText(reason) });
+    log.debug('planAliases', 'skipped', { label, reason: messageText(reason) });
   };
   for (const entry of site?.pages ?? []) {
     const { label } = entry;
@@ -104,7 +104,7 @@ export function planAliases(site, donorPages, testPages) {
     planned.set(alias, label);
     todo.push({ label, pageid, alias });
   }
-  log.info('planAliases', 'план адресов', { todo: todo.length, skipped: skipped.length });
+  log.info('planAliases', 'address plan', { todo: todo.length, skipped: skipped.length });
   return { todo, skipped };
 }
 
@@ -114,7 +114,7 @@ export function readPageList(projectid, { pagesDir } = {}) {
   if (!existsSync(file)) throw new ToolError('NO_PAGE_LIST', msg('donorAliases.noPageList', { file: file.replace(/\\/g, '/') }));
   const data = JSON.parse(readFileSync(file, 'utf8'));
   const pages = Array.isArray(data.pages) ? data.pages : [];
-  log.debug('readPageList', 'перечень прочитан', { file: file.replace(/\\/g, '/'), pages: pages.length, captured: data.captured });
+  log.debug('readPageList', 'list read', { file: file.replace(/\\/g, '/'), pages: pages.length, captured: data.captured });
   return pages;
 }
 
@@ -131,7 +131,7 @@ export async function assignDonorAliases(driver, { slug, donorProjectId, testPro
   const testPages = readPageList(testProjectId, { pagesDir });
   const { todo, skipped } = planAliases(site, donorPages, testPages);
   if (dryRun) {
-    log.info('assignDonorAliases', 'dry-run: запись не выполнялась', { todo: todo.length, skipped: skipped.length });
+    log.info('assignDonorAliases', 'dry-run: nothing written', { todo: todo.length, skipped: skipped.length });
     return { dryRun: true, todo, skipped, assigned: [], failed: [], stopped: false };
   }
   const assigned = [];
@@ -144,19 +144,19 @@ export async function assignDonorAliases(driver, { slug, donorProjectId, testPro
       await setPageAlias(driver, item.pageid, item.alias, { protectedIds });
       assigned.push({ label: item.label, pageid: item.pageid });
       inRow = 0;
-      log.info('assignDonorAliases', 'адрес записан', { label: item.label, pageid: item.pageid });
-      log.debug('assignDonorAliases', 'адрес', { label: item.label, alias: item.alias });
+      log.info('assignDonorAliases', 'address written', { label: item.label, pageid: item.pageid });
+      log.debug('assignDonorAliases', 'address', { label: item.label, alias: item.alias });
     } catch (e) {
       inRow += 1;
       failed.push({ label: item.label, pageid: item.pageid, code: e.code ?? 'ERROR', reason: String(e.message || e).slice(0, 160) });
-      log.warn('assignDonorAliases', 'адрес не записан', { label: item.label, pageid: item.pageid, code: e.code, inRow });
+      log.warn('assignDonorAliases', 'address not written', { label: item.label, pageid: item.pageid, code: e.code, inRow });
       if (inRow >= MAX_FAILURES_IN_ROW) {
         stopped = true;
-        log.error('assignDonorAliases', `остановка: ${MAX_FAILURES_IN_ROW} отказа подряд`, { done: assigned.length, failed: failed.length, left: todo.length - i - 1 });
+        log.error('assignDonorAliases', `stopped: ${MAX_FAILURES_IN_ROW} refusals in a row`, { done: assigned.length, failed: failed.length, left: todo.length - i - 1 });
         break;
       }
     }
   }
-  log.info('assignDonorAliases', 'итог', { assigned: assigned.length, skipped: skipped.length, failed: failed.length, stopped });
+  log.info('assignDonorAliases', 'result', { assigned: assigned.length, skipped: skipped.length, failed: failed.length, stopped });
   return { dryRun: false, todo, skipped, assigned, failed, stopped };
 }

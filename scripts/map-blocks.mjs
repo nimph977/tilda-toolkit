@@ -68,8 +68,8 @@ export function buildLabels(inventory, rects) {
     return label;
   });
   const orphans = (rects || []).filter((r) => !inventory.some((rec) => String(rec.recordid) === String(r.recordid)));
-  if (orphans.length) log.warn('buildLabels', 'на виде страницы есть блоки, которых нет в инвентаре — инвентарь устарел?', { recordids: orphans.map((r) => String(r.recordid)) });
-  log.debug('buildLabels', 'подписи собраны', { total: labels.length, rendered: labels.filter((l) => l.rendered).length, coords: labels.filter((l) => l.rendered).map((l) => [l.n, l.top, l.height]) });
+  if (orphans.length) log.warn('buildLabels', 'the page view has blocks that are not in the inventory: is the inventory outdated?', { recordids: orphans.map((r) => String(r.recordid)) });
+  log.debug('buildLabels', 'labels built', { total: labels.length, rendered: labels.filter((l) => l.rendered).length, coords: labels.filter((l) => l.rendered).map((l) => [l.n, l.top, l.height]) });
   return labels;
 }
 
@@ -122,7 +122,7 @@ export async function mapPage(page, pageid, inventory, opts = {}) {
     await page.goto(url, { waitUntil: 'load', referer });
     await page.waitForTimeout(opts.settleMs ?? 2500);
     const rects = await page.evaluate(collectRects);
-    if (rects.length === 0) log.warn('mapPage', 'на виде страницы нет блоков — сессия или адрес предпросмотра?', { width, url: page.url() });
+    if (rects.length === 0) log.warn('mapPage', 'no blocks on the page view: session or preview address?', { width, url: page.url() });
     const labels = buildLabels(inventory, rects);
     const drawn = labels.filter((l) => l.rendered);
     const fontPx = width < 600 ? 14 : 26;
@@ -134,16 +134,16 @@ export async function mapPage(page, pageid, inventory, opts = {}) {
       const file = join(outDir, `${stamp}-map-${width}${parts.length > 1 ? `-${i + 1}` : ''}.jpg`);
       await page.screenshot({ path: file, type: 'jpeg', quality: 80, fullPage: true, clip: { x: 0, y: part.y, width, height: part.height } });
       files.push(file);
-      log.debug('mapPage', 'порция снята', { width, part: i + 1, of: parts.length, y: part.y, height: part.height, file });
+      log.debug('mapPage', 'part captured', { width, part: i + 1, of: parts.length, y: part.y, height: part.height, file });
     }
-    log.info('mapPage', `ширина ${width}: подписано ${drawn.length} из ${labels.length} блоков, ${files.length} файл(ов), высота ${height}`, { ms: Date.now() - t0 });
+    log.info('mapPage', `width ${width}: labelled ${drawn.length} of ${labels.length} blocks, ${files.length} file(s), height ${height}`, { ms: Date.now() - t0 });
     result.widths.push({ width, height, files, drawn: drawn.length, labels });
     result.files.push(...files);
     result.drawn = Math.max(result.drawn, drawn.length);
   }
   result.legend = join(outDir, `${stamp}-map.json`);
   writeFileSync(result.legend, JSON.stringify({ pageid: String(pageid), at, widths: result.widths }, null, 2) + '\n', 'utf8');
-  log.info('mapPage', 'карта блоков записана', { files: result.files.length, legend: result.legend });
+  log.info('mapPage', 'block map written', { files: result.files.length, legend: result.legend });
   await page.setViewportSize({ width: 1440, height: 960 }).catch(() => {});
   return result;
 }
@@ -154,13 +154,13 @@ export async function mapPage(page, pageid, inventory, opts = {}) {
  */
 export function openFile(path, { platform = process.platform, spawnImpl = spawn } = {}) {
   const [cmd, args] = platform === 'win32' ? ['cmd', ['/c', 'start', '', path]] : platform === 'darwin' ? ['open', [path]] : ['xdg-open', [path]];
-  log.debug('openFile', 'открываю файл', { cmd, args });
+  log.debug('openFile', 'opening file', { cmd, args });
   try {
     const child = spawnImpl(cmd, args, { detached: true, stdio: 'ignore' });
     if (child && typeof child.unref === 'function') child.unref();
-    if (child && typeof child.on === 'function') child.on('error', (e) => log.warn('openFile', 'просмотрщик не запустился', { path, error: e.message }));
+    if (child && typeof child.on === 'function') child.on('error', (e) => log.warn('openFile', 'viewer did not start', { path, error: e.message }));
   } catch (e) {
-    log.warn('openFile', 'просмотрщик не запустился', { path, error: e.message });
+    log.warn('openFile', 'viewer did not start', { path, error: e.message });
   }
   return { cmd, args };
 }

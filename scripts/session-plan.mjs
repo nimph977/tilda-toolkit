@@ -91,7 +91,7 @@ export function writeSession(session, opts = {}) {
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${session.name}.json`);
   writeFileSync(path, JSON.stringify(session, null, 2) + '\n', 'utf8');
-  log.debug('writeSession', 'план записан', { path, ops: session.ops.length });
+  log.debug('writeSession', 'plan written', { path, ops: session.ops.length });
   return path;
 }
 
@@ -113,13 +113,13 @@ export function openSession(pageid, opts = {}) {
   if (protectedPages().includes(page)) throw new StageError('PROTECTED_PAGE', msg('stage.protectedPage', { page }));
   const open = listSessions(page, opts).find((s) => !s.session.applied);
   if (open) {
-    log.debug('openSession', 'открытый план найден', { path: open.path, ops: open.session.ops.length });
+    log.debug('openSession', 'open plan found', { path: open.path, ops: open.session.ops.length });
     return open;
   }
   const at = opts.at || new Date();
   const session = { page, name: sessionName(page, at), createdAt: at.toISOString(), applied: null, ops: [] };
   const path = writeSession(session, opts);
-  log.info('openSession', 'новый план реплик', { path });
+  log.info('openSession', 'new replica plan', { path });
   return { path, session };
 }
 
@@ -134,23 +134,23 @@ export function stageOp(session, op) {
   const idx = session.ops.findIndex((x) => opAddress(x) === address);
   if (idx === -1) {
     session.ops.push(op);
-    log.info('stageOp', `операция добавлена (${kind})`, { address, ops: session.ops.length });
+    log.info('stageOp', `operation added (${kind})`, { address, ops: session.ops.length });
     return { action: 'added', index: session.ops.length - 1, kind, address };
   }
   const prev = session.ops[idx];
   const prevKind = opKind(prev);
   if (incompatible(prevKind, kind)) {
-    log.error('stageOp', 'несовместимые операции по одному адресу', { address, prev: prevKind, next: kind });
+    log.error('stageOp', 'incompatible operations for one address', { address, prev: prevKind, next: kind });
     throw new StageError('STAGE_CONFLICT', msg('stage.conflict', { address, prevKind, kind }), { address, prev: prevKind, next: kind });
   }
   if (prevKind === 'set' && kind === 'set') {
     const overwritten = Object.keys(op.set).filter((f) => f in prev.set && JSON.stringify(prev.set[f]) !== JSON.stringify(op.set[f]));
-    if (overwritten.length) log.warn('stageOp', 'поля уже стояли в плане — перезаписаны', { address, fields: overwritten });
+    if (overwritten.length) log.warn('stageOp', 'fields were already in the plan - overwritten', { address, fields: overwritten });
     session.ops[idx] = { ...prev, ...op, set: { ...prev.set, ...op.set } };
-    log.info('stageOp', 'операция слита с прежней', { address, fields: Object.keys(op.set) });
+    log.info('stageOp', 'operation merged with the previous one', { address, fields: Object.keys(op.set) });
     return { action: 'replaced', index: idx, kind, address, overwritten };
   }
-  log.warn('stageOp', 'операция по тому же адресу заменена целиком', { address, prev: prevKind, next: kind });
+  log.warn('stageOp', 'operation for the same address replaced entirely', { address, prev: prevKind, next: kind });
   session.ops[idx] = op;
   return { action: 'replaced', index: idx, kind, address, overwritten: [prevKind] };
 }
@@ -185,7 +185,7 @@ export function diffSession(session, opts = {}) {
   if (!session.ops.length) return { ops: 0, payloads: 0, changes: [] };
   const payloads = prepare(plan, { baseDir, out, emitCalls: false });
   const changes = describePayloads(payloads);
-  log.info('diffSession', `в плане ${session.ops.length} операций, изменений ${changes.length}, не применено`, { payloads: payloads.length });
+  log.info('diffSession', `plan has ${session.ops.length} operations, changes ${changes.length}, not applied`, { payloads: payloads.length });
   return { ops: session.ops.length, payloads: payloads.length, changes };
 }
 
@@ -197,7 +197,7 @@ export function markApplied(session, at = new Date().toISOString(), opts = {}) {
 export function dropSession(path) {
   if (!existsSync(path)) throw new StageError('NO_SESSION', msg('stage.noSession', { path }));
   rmSync(path);
-  log.info('dropSession', 'план реплик удалён', { path });
+  log.info('dropSession', 'replica plan removed', { path });
   return path;
 }
 

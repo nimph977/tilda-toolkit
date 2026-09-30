@@ -99,15 +99,15 @@ export function matchDonorPages(site, donorPages) {
       entry.donorPageid = String(r.page.pageid);
       entry.donorTitle = String(r.page.title ?? '');
       matched.push({ label: entry.label, donorPageid: entry.donorPageid, donorTitle: entry.donorTitle, by: r.by });
-      log.debug('matchDonorPages', 'пара найдена', { label: entry.label, donorPageid: entry.donorPageid, by: r.by });
+      log.debug('matchDonorPages', 'pair found', { label: entry.label, donorPageid: entry.donorPageid, by: r.by });
     } else {
       delete entry.donorPageid;
       delete entry.donorTitle;
       unmatched.push({ label: entry.label, code: r.code, reason: r.reason });
-      log.warn('matchDonorPages', 'метка без пары', { label: entry.label, reason: messageText(r.reason) });
+      log.warn('matchDonorPages', 'label without a pair', { label: entry.label, reason: messageText(r.reason) });
     }
   }
-  log.info('matchDonorPages', 'сопоставлено', { matched: matched.length, unmatched: unmatched.length });
+  log.info('matchDonorPages', 'matched', { matched: matched.length, unmatched: unmatched.length });
   return { site: copy, matched, unmatched };
 }
 
@@ -117,7 +117,7 @@ export function readDonorPages(donorProjectId, { pagesDir } = {}) {
   if (!existsSync(file)) throw new ToolError('NO_DONOR_PAGES', msg('donorMap.noDonorPages', { file: file.replace(/\\/g, '/') }));
   const data = JSON.parse(readFileSync(file, 'utf8'));
   const pages = Array.isArray(data.pages) ? data.pages : [];
-  log.debug('readDonorPages', 'перечень донора прочитан', { file: file.replace(/\\/g, '/'), pages: pages.length, captured: data.captured });
+  log.debug('readDonorPages', 'donor list read', { file: file.replace(/\\/g, '/'), pages: pages.length, captured: data.captured });
   return pages;
 }
 
@@ -128,6 +128,6 @@ export function mapDonorPages({ slug, donorProjectId, baseDir, pagesDir }) {
   const donorPages = readDonorPages(donorProjectId, { pagesDir });
   const result = matchDonorPages(site, donorPages);
   const path = writeSite(slug, result.site, { baseDir });
-  log.info('mapDonorPages', 'карта донора записана', { slug, matched: result.matched.length, unmatched: result.unmatched.length });
+  log.info('mapDonorPages', 'donor map written', { slug, matched: result.matched.length, unmatched: result.unmatched.length });
   return { ...result, path: path.replace(/\\/g, '/') };
 }

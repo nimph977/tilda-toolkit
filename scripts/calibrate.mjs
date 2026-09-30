@@ -66,13 +66,13 @@ export async function calibrateCatalog(
     sinceBatch += 1;
     if (batch > 0 && sinceBatch >= batch) {
       sinceBatch = 0;
-      log.info('calibrateCatalog', 'пауза после пачки предпросмотров', { batch, pauseS });
+      log.info('calibrateCatalog', 'pause after a batch of previews', { batch, pauseS });
       await sleep(pauseS * 1000);
     } else {
       await sleep(delayMs);
     }
   };
-  log.info('calibrateCatalog', 'калибровка начата', { pageid: String(pageid), tplids: tplids.length, force, delayMs, batch, pauseS });
+  log.info('calibrateCatalog', 'calibration started', { pageid: String(pageid), tplids: tplids.length, force, delayMs, batch, pauseS });
 
   for (const raw of tplids) {
     const tplid = String(raw);
@@ -96,7 +96,7 @@ export async function calibrateCatalog(
     } catch (e) {
       if (e.code === 'SESSION_LOST') throw e;
       result.failed.push({ tplid, error: String(e.message).slice(0, 200) });
-      log.error('calibrateCatalog', 'временный блок не создан', { tplid, error: String(e.message).slice(0, 200) });
+      log.error('calibrateCatalog', 'temporary block not created', { tplid, error: String(e.message).slice(0, 200) });
       continue;
     }
     let previews = 0;
@@ -117,7 +117,7 @@ export async function calibrateCatalog(
       const again = await preview(base);
       const d = diffFeatures(baseFeatures, again);
       const noiseFeatures = [...d.added, ...d.removed];
-      if (noiseFeatures.length) log.debug('calibrateCatalog', 'шум предпросмотра', { tplid, noise: noiseFeatures.length });
+      if (noiseFeatures.length) log.debug('calibrateCatalog', 'preview noise', { tplid, noise: noiseFeatures.length });
       const { variants, skipped } = probeVariants(schema, base);
       const observations = [];
       const failed = [];
@@ -127,12 +127,12 @@ export async function calibrateCatalog(
           const features = await preview({ ...base, [v.field]: v.value });
           observations.push({ ...v, features });
           failuresInRow = 0;
-          log.debug('calibrateCatalog', 'предпросмотр', { tplid, field: v.field, key: v.key, ms: Date.now() - t });
+          log.debug('calibrateCatalog', 'preview', { tplid, field: v.field, key: v.key, ms: Date.now() - t });
         } catch (e) {
           if (e.code === 'SESSION_LOST' || /SESSION_LOST/.test(e.message)) throw e;
           failed.push({ field: v.field, key: v.key, error: e.code || String(e.message).slice(0, 60) });
           failuresInRow += 1;
-          log.warn('calibrateCatalog', 'предпросмотр не получен', { tplid, field: v.field, key: v.key, error: String(e.message).slice(0, 120) });
+          log.warn('calibrateCatalog', 'preview not received', { tplid, field: v.field, key: v.key, error: String(e.message).slice(0, 120) });
           if (failuresInRow > MAX_PREVIEW_FAILURES) throw new CalibrationError('PREVIEW_FAILED', msg('calibrate.previewFailed', { max: MAX_PREVIEW_FAILURES }));
         }
       }
@@ -140,17 +140,17 @@ export async function calibrateCatalog(
       map.schema = schema.fields;
       writeFileSync(settingsMapPath(tplid, opts), JSON.stringify(map, null, 2) + '\n');
       result.calibrated.push({ tplid, fields: Object.keys(map.fields).length, skipped: map.skipped.length, previews });
-      log.info('calibrateCatalog', 'шаблон откалиброван', { tplid, fields: Object.keys(map.fields).length, skipped: map.skipped.length, previews, ms: Date.now() - started });
+      log.info('calibrateCatalog', 'template calibrated', { tplid, fields: Object.keys(map.fields).length, skipped: map.skipped.length, previews, ms: Date.now() - started });
     } catch (e) {
       // Потеря сессии прерывает весь прогон; удаление в finally попробует убрать блок.
       if (e.code === 'SESSION_LOST' || /SESSION_LOST/.test(e.message)) throw e;
       result.failed.push({ tplid, error: String(e.message).slice(0, 200), previews });
-      log.error('calibrateCatalog', 'калибровка шаблона сорвалась', { tplid, previews, error: String(e.message).slice(0, 200) });
+      log.error('calibrateCatalog', 'template calibration failed', { tplid, previews, error: String(e.message).slice(0, 200) });
     } finally {
       await deleteTemp(driver, pageid, tplid, recordid, result);
     }
   }
-  log.info('calibrateCatalog', 'калибровка завершена', { calibrated: result.calibrated.length, skipped: result.skipped.length, failed: result.failed.length, previews: result.previews });
+  log.info('calibrateCatalog', 'calibration finished', { calibrated: result.calibrated.length, skipped: result.skipped.length, failed: result.failed.length, previews: result.previews });
   return result;
 }
 
@@ -169,6 +169,6 @@ async function deleteTemp(driver, pageid, tplid, recordid, result) {
     await driver.call('deleteRecord', [pageid, recordid], { attempts: 1 });
   } catch (e) {
     result.failed.push({ tplid, error: 'DELETE_FAILED' });
-    log.error('calibrateCatalog', 'временный блок не удалён — удалите блок вручную: последний на черновой', { tplid, error: String(e.message).slice(0, 120) });
+    log.error('calibrateCatalog', 'temporary block not removed - remove it manually: the last one on the draft page', { tplid, error: String(e.message).slice(0, 120) });
   }
 }

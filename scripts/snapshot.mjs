@@ -42,7 +42,7 @@ function appendIndex(entry, opts) {
     try {
       list = JSON.parse(readFileSync(p, 'utf8'));
     } catch (e) {
-      log.warn('appendIndex', 'индекс повреждён, начинаю заново', { path: p, error: e.message });
+      log.warn('appendIndex', 'index is damaged, starting over', { path: p, error: e.message });
     }
   }
   list.push(entry);
@@ -60,27 +60,27 @@ export function save({ kind, pageid, recordid, data, source = '' }, opts) {
   if (existsSync(path)) {
     // Цикл apply переснимает блок при каждом запуске; неизменившийся снимок бэкапа не заслуживает.
     if (readFileSync(path, 'utf8') === json) {
-      log.debug('save', 'снимок не изменился, бэкап не нужен', { path });
+      log.debug('save', 'snapshot unchanged, no backup needed', { path });
     } else {
       backup = path.replace(/\.json$/, `.${stamp()}.json`);
       copyFileSync(path, backup);
-      log.info('save', 'старый снимок отодвинут', { backup });
+      log.info('save', 'old snapshot moved aside', { backup });
     }
   }
   writeFileSync(path, json, 'utf8');
   appendIndex({ kind, pageid: String(pageid), recordid: String(recordid), path: path.replace(root(opts), '').replace(/\\/g, '/'), at: new Date().toISOString(), source, bytes: json.length, backup: backup && basename(backup) }, opts);
-  log.info('save', 'снимок записан', { path, bytes: json.length });
+  log.info('save', 'snapshot written', { path, bytes: json.length });
   return { path, backup };
 }
 
 export function load({ kind, pageid, recordid }, opts) {
   const path = snapshotPath({ kind, pageid, recordid }, opts);
   if (!existsSync(path)) {
-    log.error('load', 'снимка нет', { path });
+    log.error('load', 'snapshot missing', { path });
     throw new ToolError('NO_SNAPSHOT', msg('snapshot.noSnapshot', { path }));
   }
   const data = JSON.parse(readFileSync(path, 'utf8'));
-  log.debug('load', 'снимок прочитан', { path, keys: Object.keys(data).length });
+  log.debug('load', 'snapshot read', { path, keys: Object.keys(data).length });
   return data;
 }
 
@@ -111,8 +111,8 @@ export function importDump(dump, opts) {
     inventory = dump.inventory.length;
   }
   const errors = (dump.errors || []).length;
-  if (errors) log.error('importDump', 'часть блоков не прочиталась — снимков для них нет', { errors, first: dump.errors[0] });
-  log.info('importDump', 'дамп разложен', { pageid, zero, records, inventory, errors });
+  if (errors) log.error('importDump', 'some blocks were not read, no snapshots for them', { errors, first: dump.errors[0] });
+  log.info('importDump', 'dump unpacked', { pageid, zero, records, inventory, errors });
   return { pageid, zero, records, inventory, errors };
 }
 
@@ -127,7 +127,7 @@ export function list(pageid, opts) {
       if (m) out.push({ kind, recordid: m[1], path: join(dir, f) });
     }
   }
-  log.debug('list', 'снимки страницы', { pageid, count: out.length });
+  log.debug('list', 'page snapshots', { pageid, count: out.length });
   return out;
 }
 
@@ -137,7 +137,7 @@ if (process.argv[1]?.endsWith('snapshot.mjs')) {
   if (cmd === 'save') {
     const [kind, pageid, recordid, file, source] = rest;
     if (!kind || !pageid || !recordid || !file) {
-      log.error('cli', 'не хватает аргументов', { usage: 'save <zero|record> <pageid> <recordid> <файл.json> [источник]' });
+      log.error('cli', 'arguments missing', { usage: 'save <zero|record> <pageid> <recordid> <file.json> [source]' });
       process.exit(2);
     }
     const data = JSON.parse(readFileSync(file, 'utf8'));
@@ -145,7 +145,7 @@ if (process.argv[1]?.endsWith('snapshot.mjs')) {
   } else if (cmd === 'import') {
     const [file] = rest;
     if (!file) {
-      log.error('cli', 'не хватает аргументов', { usage: 'import <файл-дампа.json> — результат window.__tilda.snapshotPage()' });
+      log.error('cli', 'arguments missing', { usage: 'import <dump-file.json> — result of window.__tilda.snapshotPage()' });
       process.exit(2);
     }
     const dump = JSON.parse(readFileSync(file, 'utf8'));
@@ -155,7 +155,7 @@ if (process.argv[1]?.endsWith('snapshot.mjs')) {
   } else if (cmd === 'list') {
     console.log(JSON.stringify(list(rest[0]), null, 2));
   } else if (cmd) {
-    log.error('cli', 'неизвестная команда', { cmd });
+    log.error('cli', 'unknown command', { cmd });
     process.exit(2);
   }
 }

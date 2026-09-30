@@ -176,6 +176,6 @@ export function decodeSettings(features = [], map = {}, defaults = {}) {
   }
   const baseSet = new Set(baseFeatures);
   const unexplained = features.filter((f) => !baseSet.has(f) && !used.has(f));
-  log.debug('decodeSettings', 'итог', { decided: Object.keys(values).length, undecided: undecided.length, unexplained: unexplained.length });
+  log.debug('decodeSettings', 'settings decoded', { decided: Object.keys(values).length, undecided: undecided.length, unexplained: unexplained.length });
   return { values, undecided, unexplained };
 }

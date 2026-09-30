@@ -43,7 +43,7 @@ export function loadCatalog(tplid, opts) {
   try {
     return JSON.parse(readFileSync(path, 'utf8'));
   } catch (e) {
-    log.error('loadCatalog', 'файл каталога не разобрался', { path, error: e.message });
+    log.error('loadCatalog', 'catalog file could not be parsed', { path, error: e.message });
     throw e;
   }
 }
@@ -65,11 +65,11 @@ export function loadSettingsMap(tplid, opts) {
   try {
     map = JSON.parse(readFileSync(path, 'utf8'));
   } catch (e) {
-    log.error('loadSettingsMap', 'файл карты не разобрался', { path, error: e.message });
+    log.error('loadSettingsMap', 'map file could not be parsed', { path, error: e.message });
     throw e;
   }
   if (map?.version !== MAP_VERSION) {
-    log.warn('loadSettingsMap', 'версия карты не та — карта считается отсутствующей', { tplid: String(tplid), version: map?.version, expected: MAP_VERSION });
+    log.warn('loadSettingsMap', 'map version mismatch - the map is treated as missing', { tplid: String(tplid), version: map?.version, expected: MAP_VERSION });
     return null;
   }
   return map;
@@ -103,7 +103,7 @@ export function tplidsFromSlug(slug, opts) {
     const parsed = JSON.parse(readFileSync(join(structure, name), 'utf8'));
     for (const tplid of tplidsFromStructure(parsed)) seen.add(tplid);
   }
-  log.debug('tplidsFromSlug', 'шаблоны слепка', { slug, count: seen.size });
+  log.debug('tplidsFromSlug', 'snapshot templates', { slug, count: seen.size });
   return [...seen];
 }
 
@@ -176,7 +176,7 @@ export async function captureCatalog(
   mkdirSync(catalogDir(opts), { recursive: true });
   const result = { pageid, captured: [], unavailable: [], skipped: [], failed: [] };
   const list = tplids.map(String);
-  log.info('captureCatalog', 'снятие каталога начато', { pageid, tplids: list.length, force });
+  log.info('captureCatalog', 'catalog capture started', { pageid, tplids: list.length, force });
 
   for (let i = 0; i < list.length; i += 1) {
     const tplid = list[i];
@@ -198,10 +198,10 @@ export async function captureCatalog(
       if (isAccessError(e.message)) {
         writeFileSync(catalogPath(tplid, opts), JSON.stringify(unavailableEntry({ tplid, capturedAt, error: e.message }), null, 2) + '\n');
         result.unavailable.push({ tplid });
-        log.warn('captureCatalog', 'шаблон недоступен на тарифе', { tplid });
+        log.warn('captureCatalog', 'template is not available on the plan', { tplid });
       } else {
         result.failed.push({ tplid, error: e.message });
-        log.error('captureCatalog', 'блок не создан', { tplid, error: e.message });
+        log.error('captureCatalog', 'block not created', { tplid, error: e.message });
       }
       if (!last) await sleep(delayMs);
       continue;
@@ -214,23 +214,23 @@ export async function captureCatalog(
       writeFileSync(catalogPath(tplid, opts), JSON.stringify(entry, null, 2) + '\n');
       fields = fieldCount(entry);
       result.captured.push({ tplid, fields, cards: entry.cardKeys.length });
-      log.debug('captureCatalog', 'поля эталона', { tplid, content: entry.tabs?.content, settings: entry.tabs?.settings });
+      log.debug('captureCatalog', 'reference block fields', { tplid, content: entry.tabs?.content, settings: entry.tabs?.settings });
     } catch (e) {
       result.failed.push({ tplid, recordid, error: e.message });
-      log.error('captureCatalog', 'эталон не прочитан', { tplid, recordid, error: e.message });
+      log.error('captureCatalog', 'reference block not read', { tplid, recordid, error: e.message });
     } finally {
       try {
         await driver.call('deleteRecord', [pageid, recordid], { attempts: 1 });
       } catch (e) {
-        log.error('captureCatalog', 'эталонный блок не удалён — удалите вручную', { tplid, recordid, error: e.message });
+        log.error('captureCatalog', 'reference block not removed - remove it manually', { tplid, recordid, error: e.message });
         result.failed.push({ tplid, recordid, error: 'DELETE_FAILED' });
       }
     }
-    log.info('captureCatalog', 'эталон снят', { tplid, recordid, fields });
+    log.info('captureCatalog', 'reference block captured', { tplid, recordid, fields });
     if (!last) await sleep(delayMs);
   }
 
-  log.info('captureCatalog', 'снятие каталога завершено', {
+  log.info('captureCatalog', 'catalog capture finished', {
     captured: result.captured.length, unavailable: result.unavailable.length, skipped: result.skipped.length, failed: result.failed.length,
   });
   return result;
