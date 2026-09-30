@@ -40,6 +40,10 @@ jobs:
         run: node .github/scripts/install-check.mjs
         env:
           EXPECT_CHROME: present
+      - name: Newcomer path check (en)
+        run: node .github/scripts/docs-path-check.mjs --doc docs/en/getting-started.md
+        env:
+          EXPECT_CHROME: present
 
   clean-linux:
     name: test (clean Linux container)
@@ -72,6 +76,10 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Install check (setup + doctor, no Chrome)
         run: node .github/scripts/install-check.mjs
+        env:
+          EXPECT_CHROME: absent
+      - name: Newcomer path check (en, no Chrome)
+        run: node .github/scripts/docs-path-check.mjs --doc docs/en/getting-started.md
         env:
           EXPECT_CHROME: absent
 

@@ -16,15 +16,21 @@ run a manual acceptance check on a copy of the page first.
 
 ## Quick start
 
-Requirements: Node.js 24+, Google Chrome installed, access to your Tilda project in Chrome.
+Requirements: a Tilda account with a project in it and the ID of that project, Node.js 24+,
+Google Chrome installed, git.
 
-```powershell
+Easiest: give an AI agent the ready prompt — [Install with an AI agent](docs/en/getting-started.md#install-with-an-ai-agent).
+Or run the commands yourself in bash (on Windows, Git Bash):
+
+```bash
 git clone https://github.com/nimph977/tilda-toolkit.git
 cd tilda-toolkit
 npm ci
-node scripts/tilda.mjs setup --site D:\Sites\example-site --project <project ID> --agent claude
-node scripts/tilda.mjs --site D:\Sites\example-site doctor
+node scripts/tilda.mjs setup --site ~/tilda-sites/example-site --project <project ID> --agent claude
+node scripts/tilda.mjs --site ~/tilda-sites/example-site doctor
 ```
+
+What each step should print is in [Getting started](docs/en/getting-started.md).
 
 `setup` creates the site folder outside the repository, puts a `.env` into it and installs the
 skill for the agent (`--agent codex` for Codex, `--agent all` for both). `doctor` only checks and
@@ -32,30 +38,6 @@ prints install commands for whatever is missing; it installs nothing itself.
 
 The site is chosen with the `--site <site folder>` flag (or `TILDA_SITE_DIR`); site data lives in
 its folder, not in the repository.
-
-## Install with an AI agent
-
-Open Claude Code or Codex in an empty folder and paste this request:
-
-```text
-Install tilda-toolkit from https://github.com/nimph977/tilda-toolkit.
-1. Clone the repository and run npm ci in it.
-2. Run node scripts/tilda.mjs setup --site <site folder outside the repository> --project <Tilda project ID> --agent claude
-   (for Codex, use --agent codex). Ask me for the site folder and the ID.
-3. Run node scripts/tilda.mjs --site <site folder> doctor and show me the result.
-4. If doctor prints FAIL, show me its fix command and ask before installing
-   anything. Do not install system programs without my consent.
-```
-
-The project ID is the `projectid` number in the address of the project's page list in the Tilda
-account: `https://tilda.ru/projects/?projectid=<ID>`.
-
-`setup` installs the `tilda-manager` skill into the agent folder inside the repository
-(`.claude/skills/tilda-manager` or `.agents/skills/tilda-manager`). After installation, restart
-the agent session in the repository folder. Running `setup` again updates the copy, and `doctor`
-reports when it is out of date.
-
-Other agents: have them read [AGENTS.md](AGENTS.md) and [skills/tilda-manager/SKILL.md](skills/tilda-manager/SKILL.md).
 
 ## Language
 
@@ -87,7 +69,7 @@ Details: [Configuration](docs/en/configuration.md).
   in one command (`donor check`); the project's home page is set with `page role --index`.
 - **Agent skill** — [skills/tilda-manager/SKILL.md](skills/tilda-manager/SKILL.md): editing a
   page, building from a reference, transfer through the donor account, human gates. Installed by
-  `setup`, see [Install with an AI agent](#install-with-an-ai-agent).
+  `setup`, see [Install with an AI agent](docs/en/getting-started.md#install-with-an-ai-agent).
 - **Installation check** — `doctor`: Node.js, dependencies, Chrome, git, the site folder and the skill; read-only.
 
 ## Example
@@ -109,7 +91,7 @@ The result of `apply`: `written, verify mismatches: 0`. The plan schema and a sy
 
 | Section | Description |
 | --- | --- |
-| [Getting started](docs/en/getting-started.md) | Installation (`setup`, `doctor`), the site folder, the first run, acceptance on a new site |
+| [Getting started](docs/en/getting-started.md) | Install with an AI agent or by hand (`setup`, `doctor`), the site folder, the first run, acceptance on a new site |
 | [Configuration](docs/en/configuration.md) | The site folder, the `TILDA_*` variables, `LOG_LEVEL`, what stays out of Git |
 | [Workflow](docs/en/workflow.md) | Snapshot, plan, write, verify, rollback, `promote`, building from a reference, transfer through the donor account, safety rules |
 | [CLI commands](docs/en/cli.md) | All commands, flags, exit codes, result files |

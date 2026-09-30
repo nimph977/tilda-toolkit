@@ -2,37 +2,77 @@
 
 # Getting started
 
+## Install with an AI agent
+
+Open Claude Code or Codex in an empty folder and paste this request:
+
+<!-- agent-prompt:start -->
+```text
+Install tilda-toolkit from https://github.com/nimph977/tilda-toolkit.
+1. Clone the repository and run npm ci in it.
+2. Run node scripts/tilda.mjs setup --site <site folder outside the repository> --project <Tilda project ID> --agent claude
+   (for Codex, use --agent codex). Ask me for the site folder and the ID.
+3. Run node scripts/tilda.mjs --site <site folder> doctor and show me the result.
+   Success is "result: ok" and exit code 0; one WARN that the protection list is empty is normal for a test project.
+4. If doctor prints FAIL, show me its fix command and ask before installing
+   anything. Do not install system programs without my consent.
+```
+<!-- agent-prompt:end -->
+
+The project ID is the `projectid` number in the address of the project's page list in the Tilda
+account: `https://tilda.ru/projects/?projectid=<ID>`.
+
+`setup` installs the `tilda-manager` skill into the agent folder inside the repository
+(`.claude/skills/tilda-manager` or `.agents/skills/tilda-manager`). After installation, restart
+the agent session in the repository folder. Running `setup` again updates the copy, and `doctor`
+reports when it is out of date.
+
+Other agents: have them read [AGENTS.md](../../AGENTS.md) and [skills/tilda-manager/SKILL.md](../../skills/tilda-manager/SKILL.md).
+
 ## Requirements
 
+Have these ready before the first command:
+
+- a Tilda account with a project in it, and the ID of that project (the `projectid` number in the
+  address `https://tilda.ru/projects/?projectid=<ID>`); a person signs in to Tilda in Chrome later, at the first run;
 - Node.js 24 or newer;
 - an installed Google Chrome;
-- access to the needed Tilda project in Chrome (a person signs in).
+- git (only to clone the repository).
+
+If something is missing, `doctor` names it and prints the command that installs it; this page does not
+teach how to install programs.
 
 The only Node dependency is `playwright-core` 1.63.0. Chrome is not downloaded
 automatically: the one installed in the system is used.
 
 ## Installation
 
-Run the steps one at a time in PowerShell:
+The second way, for working in a terminal: run the steps one at a time. The commands are for bash
+(macOS, Linux; on Windows use Git Bash, or let an agent translate them to PowerShell). Replace
+`<project ID>` with your project ID; the site folder `~/tilda-sites/example-site` is created by `setup`.
 
-```powershell
+<!-- newcomer-path:start -->
+```bash
 git clone https://github.com/nimph977/tilda-toolkit.git
 cd tilda-toolkit
 npm ci
-node scripts/tilda.mjs setup --site D:\Sites\example-site --project <project ID> --agent claude
-node scripts/tilda.mjs --site D:\Sites\example-site doctor
+node scripts/tilda.mjs setup --site ~/tilda-sites/example-site --project <project ID> --agent claude
+node scripts/tilda.mjs --site ~/tilda-sites/example-site doctor
 ```
+<!-- newcomer-path:end -->
 
 The expected result of each step:
 
 | Step | Result |
 | --- | --- |
 | `npm ci` | no errors |
-| `setup` | the summary `status: done`, exit code 0 |
-| `doctor` | items `ok`, exit code 0 |
+| `setup` | a few `INFO [...]` lines (the log, written to stderr; not errors), then the summary `status: done`; exit code 0 |
+| `doctor` | `result: ok`, exit code 0, and exactly one `WARN site … protection list is empty`, which is normal for a test project |
+
+Right after `npm ci`, `doctor` without `--site` checks only the programs (`skip site`) and also gives
+`result: ok`. That is an intermediate check for those who have no Tilda account yet, not the end of the path.
 
 For Codex use `--agent codex` instead of `--agent claude`, for both agents — `--agent all`.
-You can hand the same steps to an agent with a ready prompt: [Install with an AI agent](../../README.md#install-with-an-ai-agent).
 
 The message language is chosen with the `--lang en|ru` flag or the `TILDA_LANG` variable (more in [Message language](configuration.md#message-language)); for example, `setup --lang en` also writes the language into the site `.env`.
 
