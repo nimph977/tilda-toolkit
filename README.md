@@ -118,6 +118,13 @@ done by hand in the Tilda interface. Snapshots serve for comparison and rollback
 site export. The donor's project is only read: blocks are copied into the buffer of the donor's
 account with the owner's explicit permission, and writing goes only into the test project.
 
+## Contributing
+
+- Bugs and ideas: [open an issue](https://github.com/nimph977/tilda-toolkit/issues/new/choose) with a form.
+- Pull requests: see [CONTRIBUTING.md](CONTRIBUTING.md).
+- Vulnerabilities: report privately, see [SECURITY.md](SECURITY.md).
+- Changes by version: [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Third-party code: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

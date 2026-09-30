@@ -97,6 +97,7 @@ docs/                # user documentation: docs/en and docs/ru
 - A new user-facing message gets a key in both dictionaries (`locales/en.json`, `locales/ru.json`);
   `npm test` checks keys, placeholders and unused keys.
 - Check every change with `npm test`; for CLI changes also run `node scripts/tilda.mjs --help`.
+- A user-visible change gets a line under `## [Unreleased]` in `CHANGELOG.md`.
 
 ## Code conventions
 
@@ -138,5 +139,8 @@ Docs are in English (`docs/en`) and Russian (`docs/ru`).
 | Architecture map | [docs/en/architecture.md](docs/en/architecture.md) |
 | Russian documentation | [docs/ru/getting-started.md](docs/ru/getting-started.md) |
 | Agent skill | [skills/tilda-manager/SKILL.md](skills/tilda-manager/SKILL.md) |
+| Changelog | [CHANGELOG.md](CHANGELOG.md) |
+| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Security policy | [SECURITY.md](SECURITY.md) |
 | Third-party notices | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) |
 | License | [LICENSE](LICENSE) — MIT |

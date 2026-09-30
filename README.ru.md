@@ -116,6 +116,13 @@ node scripts/tilda.mjs --site $site apply    --page 200002 --plan .\my-plan.json
 Проект донора только читается: блоки копируются в буфер его аккаунта по явному разрешению
 владельца, запись идёт только в тестовый проект.
 
+## Участие
+
+- Ошибки и идеи: [откройте issue](https://github.com/nimph977/tilda-toolkit/issues/new/choose) по форме.
+- Pull request: [CONTRIBUTING.md](CONTRIBUTING.md) (на английском).
+- Уязвимости: сообщайте приватно, см. [SECURITY.md](SECURITY.md) (на английском).
+- Изменения по версиям: [CHANGELOG.md](CHANGELOG.md) (на английском).
+
 ## Лицензия
 
 MIT — см. [LICENSE](LICENSE). Сведения о стороннем коде: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
