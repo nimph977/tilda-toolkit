@@ -4,6 +4,7 @@ import { readFileSync, mkdtempSync, rmSync, existsSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import vm from 'node:vm';
+import { chromium } from 'playwright-core';
 import {
   BrowserError, LOGIN_HINTS, buildCallExpression, call, close, externalCdp, isRetryable, isSessionLost, layerErrorCode, open, retryDelayMs, sessionLostMessage,
   projectSettingsUrl, editorUrl, profileDir, sessionProject, setDaemonWindow, startDaemon, stopDaemon, stripCookies, wrapLayer,
@@ -370,16 +371,144 @@ test('close of an external session only disconnects: pages and Chrome stay', asy
   writeFileSync(lockFile, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
   const calls = { browser: 0, context: 0 };
   try {
+    // close у подключённого по CDP браузера разрывает только соединение: Chrome и вкладки
+    // (чужие и вкладка агента) остаются внешнему владельцу — проверено живым Chrome.
     await close({
       mode: 'attached',
       browser: { close: async () => { calls.browser += 1; } },
       context: { close: async () => { calls.context += 1; } },
+      daemon: { port: 9334, external: true },
       lockFile,
     });
     assert.equal(calls.browser, 1, 'the CDP connection must be closed');
     assert.equal(calls.context, 0, 'the context of the external Chrome must not be closed');
     assert.equal(existsSync(lockFile), false, 'the lock must be released');
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Подмена chromium.connectOverCDP: фиктивный browser/context вместо сети.
+
+/** Фиктивная вкладка: url и window.name с теми же формами вызовов, что использует слой. */
+function fakeTab(url, name = '') {
+  return {
+    _url: url,
+    _name: name,
+    url() { return this._url; },
+    async goto(next) { this._url = next; },
+    // Геттер `() => window.name` зовётся без аргументов, сеттер `(name) => { window.name = name }` — с одним.
+    async evaluate(fn, ...args) {
+      if (args.length) {
+        this._name = args[0];
+        return undefined;
+      }
+      return this._name;
+    },
+    setDefaultNavigationTimeout() {},
+  };
+}
+
+/** Фиктивный контекст внешнего Chrome: общий список вкладок, newPage добавляет вкладку. */
+function fakeExternalContext(pages) {
+  return {
+    _pages: pages,
+    pages() { return this._pages; },
+    async newPage() {
+      const page = fakeTab('about:blank');
+      this._pages.push(page);
+      return page;
+    },
+  };
+}
+
+/**
+ * Фиктивное соединение: closed считает вызовы close у объекта-соединения — это разрыв связи,
+ * а не закрытие Chrome (для закрытия Chrome нужен отдельный CDP-вызов Browser.close).
+ */
+function fakeExternalBrowser(context) {
+  return {
+    _context: context,
+    closed: 0,
+    contexts() { return [this._context]; },
+    async newContext() { throw new Error('unexpected newContext on the external Chrome'); },
+    async close() { this.closed += 1; },
+  };
+}
+
+async function withFakeConnectOverCDP(fake, fn) {
+  const saved = chromium.connectOverCDP;
+  chromium.connectOverCDP = fake;
+  try {
+    return await fn();
+  } finally {
+    chromium.connectOverCDP = saved;
+  }
+}
+
+test('open with TILDA_BROWSER_CDP creates or finds its own agent tab and leaves foreign tabs alone', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tilda-cdp-agent-'));
+  const foreignUrl = 'https://tilda.ru/projects/?projectid=100007';
+  const foreign = fakeTab(foreignUrl, 'owner-tab');
+  const browser = fakeExternalBrowser(fakeExternalContext([foreign]));
+  const saved = { TILDA_BROWSER_CDP: process.env.TILDA_BROWSER_CDP, TILDA_BROWSER_PROFILE: process.env.TILDA_BROWSER_PROFILE, TILDA_PROTECTED_PAGES: process.env.TILDA_PROTECTED_PAGES };
+  process.env.TILDA_BROWSER_CDP = 'http://127.0.0.1:9334';
+  process.env.TILDA_BROWSER_PROFILE = dir;
+  process.env.TILDA_PROTECTED_PAGES = '';
+  try {
+    await withFakeConnectOverCDP(async () => browser, async () => {
+      // Своей вкладки нет — создаётся и помечается, чужая не открывается и не навигируется.
+      const first = await open();
+      assert.equal(browser.contexts()[0].pages().length, 2, 'exactly one agent tab may be added');
+      const agent = browser.contexts()[0].pages()[1];
+      assert.equal(first.page, agent, 'the session must work in the new agent tab');
+      assert.equal(agent.url(), 'about:blank#tilda-toolkit', 'the agent tab must be marked by address');
+      assert.equal(agent._name, 'tilda-toolkit-agent', 'the agent tab must be marked by window.name');
+      assert.equal(foreign._url, foreignUrl, 'the foreign tab must not be navigated');
+      assert.equal(foreign._name, 'owner-tab', 'the foreign tab must not be touched');
+      await close(first);
+      assert.equal(browser.closed, 1, 'only the connection must be dropped');
+      assert.equal(existsSync(join(dir, 'command.lock')), false, 'the lock must be released');
+
+      // Вкладка агента ушла на работу (url уже не метка) — находится по window.name, дубля нет.
+      agent._url = foreignUrl;
+      const second = await open();
+      assert.equal(second.page, agent, 'the marked tab must be reused, not duplicated');
+      assert.equal(browser.contexts()[0].pages().length, 2, 'no extra tabs may appear');
+      await close(second);
+      assert.equal(browser.closed, 2);
+      assert.equal(existsSync(join(dir, 'command.lock')), false, 'the lock must be released');
+    });
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('open with TILDA_BROWSER_CDP releases the lock and drops the connection when the agent tab fails after the connection', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tilda-cdp-agent-fail-'));
+  const context = fakeExternalContext([fakeTab('https://tilda.ru/projects/')]);
+  context.newPage = async () => { throw new Error('target closed'); };
+  const browser = fakeExternalBrowser(context);
+  const saved = { TILDA_BROWSER_CDP: process.env.TILDA_BROWSER_CDP, TILDA_BROWSER_PROFILE: process.env.TILDA_BROWSER_PROFILE, TILDA_PROTECTED_PAGES: process.env.TILDA_PROTECTED_PAGES };
+  process.env.TILDA_BROWSER_CDP = 'http://127.0.0.1:9334';
+  process.env.TILDA_BROWSER_PROFILE = dir;
+  process.env.TILDA_PROTECTED_PAGES = '';
+  try {
+    await withFakeConnectOverCDP(
+      async () => browser,
+      () => assert.rejects(open(), (e) => e.code === 'CALL_FAILED' && /agent tab/.test(e.message)),
+    );
+    assert.equal(browser.closed, 1, 'the connection must be dropped on failure');
+    assert.equal(existsSync(join(dir, 'command.lock')), false, 'the lock must be released');
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 });

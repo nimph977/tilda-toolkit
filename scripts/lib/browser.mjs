@@ -467,9 +467,40 @@ export function externalCdp(env = process.env) {
 }
 
 /**
+ * Вкладка агента во внешнем Chrome: свои команды работают в ней, чужие вкладки не трогаются.
+ * Метка двойная: адрес `about:blank#tilda-toolkit` — пока вкладка не ушла на работу, и
+ * `window.name` — он переживает любые навигации, поэтому вкладка находится и после команды,
+ * когда в ней открыт результат для человека. Создаётся не больше одной.
+ */
+const AGENT_TAB_URL = 'about:blank#tilda-toolkit';
+const AGENT_TAB_NAME = 'tilda-toolkit-agent';
+
+/** Найти вкладку агента среди страниц внешнего Chrome; чужие вкладки только читаются. */
+async function findAgentTab(context) {
+  for (const page of context.pages()) {
+    if (page.url() === AGENT_TAB_URL) return page;
+    try {
+      if ((await page.evaluate(() => window.name)) === AGENT_TAB_NAME) return page;
+    } catch {
+      // Служебная или недоступная вкладка — не наша, пропускаем без изменений.
+    }
+  }
+  return null;
+}
+
+/** Создать и пометить вкладку агента: адрес-метка сразу, window.name — на все следующие навигации. */
+async function createAgentTab(context) {
+  const page = await context.newPage();
+  await page.goto(AGENT_TAB_URL);
+  await page.evaluate((name) => { window.name = name; }, AGENT_TAB_NAME);
+  return page;
+}
+
+/**
  * Подключиться к внешнему Chrome по адресу из `TILDA_BROWSER_CDP` (режим attached): держатель не
- * читается и не поднимается, свой Chrome не запускается, профиль — только для lock-файлов. При
- * отключении (`close`) браузер не закрывается: страницы и Chrome остаются внешнему владельцу.
+ * читается и не поднимается, профиль — только для lock-файлов. Работается во вкладке агента,
+ * чужие вкладки не открываются. При отключении (`close`) браузер не закрывается: вкладки и
+ * Chrome остаются внешнему владельцу, вкладка агента живёт между командами.
  */
 async function openExternal(cdp, opts = {}) {
   const role = opts.role ?? 'test';
@@ -486,14 +517,24 @@ async function openExternal(cdp, opts = {}) {
     log.error('openExternal', 'could not connect to the external Chrome', { url: cdp.url, error: e.message });
     throw new BrowserError('CALL_FAILED', msg('browser.lib.cdpNoAnswer', { url: cdp.url, reason: e.message }));
   }
-  const context = browser.contexts()[0] ?? (await browser.newContext());
-  const page = context.pages()[0] ?? (await context.newPage());
-  page.setDefaultNavigationTimeout(opts.navigationTimeoutMs ?? 60_000);
-  // daemon — заглушка: у внешнего Chrome нет ни pid, ни daemon.json, порт известен из адреса.
-  const daemon = { port: cdp.port, external: true };
-  const session = { mode: 'attached', browser, context, page, profileDir: dir, lockFile, protectedPages: guard, layers: new Set(), minimized: true, daemon, role, projectid, writablePages };
-  log.info('openExternal', 'connected to the external Chrome over CDP', { role, projectid, url: cdp.url, protectedPages: guard, writablePages });
-  return session;
+  // Всё после соединения — под одним try: при любой ошибке соединение закрывается (у подключённого
+  // по CDP браузера close только разрывает связь — Chrome и вкладки остаются внешнему владельцу),
+  // блокировка команды снимается; иначе lock остаётся висеть.
+  try {
+    const context = browser.contexts()[0] ?? (await browser.newContext());
+    const page = (await findAgentTab(context)) ?? (await createAgentTab(context));
+    page.setDefaultNavigationTimeout(opts.navigationTimeoutMs ?? 60_000);
+    // daemon — заглушка: у внешнего Chrome нет ни pid, ни daemon.json, порт известен из адреса.
+    const daemon = { port: cdp.port, external: true };
+    const session = { mode: 'attached', browser, context, page, profileDir: dir, lockFile, protectedPages: guard, layers: new Set(), minimized: true, daemon, role, projectid, writablePages };
+    log.info('openExternal', 'connected to the external Chrome over CDP', { role, projectid, url: cdp.url, protectedPages: guard, writablePages });
+    return session;
+  } catch (e) {
+    await browser.close().catch(() => {});
+    releaseLock(lockFile);
+    log.error('openExternal', 'could not prepare the agent tab, connection dropped', { url: cdp.url, error: e.message });
+    throw new BrowserError('CALL_FAILED', msg('browser.lib.cdpPrepareFailed', { url: cdp.url, reason: e.message }));
+  }
 }
 
 /**
@@ -583,8 +624,10 @@ export async function openBackgroundPage(context) {
 }
 
 /**
- * Завершить работу с сессией. Подключение к держателю — только отключиться, Chrome и сессия
- * Тильды остаются; свой Chrome — закрыть. Lock снимается в обоих случаях.
+ * Завершить работу с сессией. Подключение к держателю или внешнему Chrome — только закрыть
+ * соединение: у подключённого по CDP браузера close лишь разрывает связь, Chrome и вкладки
+ * (в том числе вкладка агента с результатом) остаются человеку; свой Chrome — закрыть.
+ * Lock снимается во всех случаях.
  */
 export async function close(session) {
   if (!session) return;

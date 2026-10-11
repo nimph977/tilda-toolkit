@@ -101,6 +101,7 @@
   "browser.lib.callTimeout": "вызов {fn} не завершился за {ms} мс",
   "browser.lib.cdpHolderUnused": "задана TILDA_BROWSER_CDP: используется внешний Chrome, держатель не используется",
   "browser.lib.cdpNoAnswer": "внешний Chrome по адресу {url} не отвечает: {reason}",
+  "browser.lib.cdpPrepareFailed": "подключился к внешнему Chrome по адресу {url}, но не смог подготовить вкладку агента: {reason}",
   "browser.lib.daemonNoAnswer": "держатель браузера (pid {pid}, порт {port}) не отвечает: {reason}",
   "browser.lib.daemonNotStarted": "держатель браузера не поднялся за {seconds} с — смотрите {logFile}",
   "browser.lib.layerNotFound": "слой {name} не найден: {path}",

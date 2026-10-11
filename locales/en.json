@@ -101,6 +101,7 @@
   "browser.lib.callTimeout": "call {fn} did not finish within {ms} ms",
   "browser.lib.cdpHolderUnused": "TILDA_BROWSER_CDP is set: an external Chrome is used, the browser holder is not",
   "browser.lib.cdpNoAnswer": "the external Chrome at {url} is not responding: {reason}",
+  "browser.lib.cdpPrepareFailed": "connected to the external Chrome at {url}, but could not prepare the agent tab: {reason}",
   "browser.lib.daemonNoAnswer": "the browser holder (pid {pid}, port {port}) is not responding: {reason}",
   "browser.lib.daemonNotStarted": "the browser holder did not start within {seconds} s — see {logFile}",
   "browser.lib.layerNotFound": "layer {name} not found: {path}",
