@@ -61,8 +61,9 @@ Rules:
   `.env`: if such a variable is set only in the shell environment (for example, left over from another site)
   and is missing from the site `.env`, this is a refusal with code `2` naming the variable. Other `TILDA_*` variables from the environment
   that are absent from the site `.env` (for example `TILDA_DEFAULT_PAGE`) work, but the CLI prints a warning with their names.
-  The debug `TILDA_BROWSER_DAEMON` and `TILDA_BROWSER_VISIBLE`, as well as `TILDA_LANG`, cause no warnings.
-  `node --env-file=<file>` together with `--site` does not work for these three variables — put them into the site `.env`.
+  The debug `TILDA_BROWSER_DAEMON` and `TILDA_BROWSER_VISIBLE`, the connection setting `TILDA_BROWSER_CDP`,
+  as well as `TILDA_LANG`, cause no warnings.
+  `node --env-file=<file>` together with `--site` does not work for these four variables — put them into the site `.env`.
 - The template catalog is shared by all sites and is set only by `TILDA_CATALOG_DIR`; it is not derived from the site folder.
 - A browser profile is a sign-in to one Tilda account, not to one site. Each site folder has its own profile;
   sites of one account can point to a shared profile through `TILDA_BROWSER_PROFILE` (they cannot work
@@ -80,6 +81,7 @@ Rules:
 | `TILDA_CATALOG_DIR` | for catalog commands and `reference plan` | The template catalog folder shared by all sites (`<tplid>.json`, `<tplid>.settings.json`). There is no default. |
 | `TILDA_BASELINE_DIR` | no | The path for snapshots, inventory, journal and screenshots. By default `<site folder>/site-baseline`. |
 | `TILDA_BROWSER_PROFILE` | no | The path to a separate Chrome profile. By default `<site folder>/.browser-profile`. |
+| `TILDA_BROWSER_CDP` | no | The address of an already running external Chrome, for example `http://127.0.0.1:9222`. While it is set, commands connect to this Chrome over CDP and the built-in holder is not used; `browser start` and `browser stop` refuse. |
 | `TILDA_REFERENCE_DIR` | no | The folder of reference-site snapshots (HTML, structure, pictures) for `reference fetch`. By default `<site folder>/site-reference`. |
 | `TILDA_DONOR_PROJECT_ID` | for donor commands | The numeric ID of the donor project for `browser --donor`, `session --donor` and `donor …`. It must differ from `TILDA_PROJECT_ID`. The agent finds it in the snapshot: the `data-tilda-project-id` attribute in the markup of published pages. |
 | `TILDA_DONOR_BROWSER_PROFILE` | for donor commands except `donor aliases`, `donor links`, `donor check` | The path to the Chrome profile of the donor holder, for example `./.browser-profile-donor` (relative to the site folder). The profile keeps the session of the donor account. The three excepted commands need only `TILDA_DONOR_PROJECT_ID`: they do not open the donor holder but read the saved list of its pages. It must differ from the profile of the test holder. There is no default. |

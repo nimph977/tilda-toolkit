@@ -34,7 +34,7 @@ export const SITE_PATH_VARS = [
 export const SITE_IDENTITY_VARS = ['TILDA_PROJECT_ID', 'TILDA_PROTECTED_PAGES', 'TILDA_DONOR_PROJECT_ID'];
 
 /** Переменные процесса, не зависящие от сайта: из окружения допустимы без предупреждения. */
-export const SITE_NEUTRAL_VARS = ['TILDA_SITE_DIR', 'TILDA_BROWSER_DAEMON', 'TILDA_BROWSER_VISIBLE', 'TILDA_LANG'];
+export const SITE_NEUTRAL_VARS = ['TILDA_SITE_DIR', 'TILDA_BROWSER_DAEMON', 'TILDA_BROWSER_VISIBLE', 'TILDA_BROWSER_CDP', 'TILDA_LANG'];
 
 /** Ключи `.env` сайта, которые применяются: настройки инструмента `TILDA_*` и порог логов. */
 export function isSiteVar(key) {

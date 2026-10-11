@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import vm from 'node:vm';
 import {
-  BrowserError, LOGIN_HINTS, buildCallExpression, call, isRetryable, isSessionLost, layerErrorCode, retryDelayMs, sessionLostMessage,
-  projectSettingsUrl, editorUrl, profileDir, sessionProject, setDaemonWindow, stripCookies, wrapLayer,
+  BrowserError, LOGIN_HINTS, buildCallExpression, call, close, externalCdp, isRetryable, isSessionLost, layerErrorCode, open, retryDelayMs, sessionLostMessage,
+  projectSettingsUrl, editorUrl, profileDir, sessionProject, setDaemonWindow, startDaemon, stopDaemon, stripCookies, wrapLayer,
   openProject, openProjectSettings,
 } from '../lib/browser.mjs';
 import { ConfigError } from '../lib/config.mjs';
@@ -299,4 +299,87 @@ test('call: a lost session keeps the SESSION_LOST code and its own message key',
   const error = await call(failingPage('SESSION_LOST: login page'), 'f', [], { attempts: 1 }).then(() => null, (e) => e);
   assert.equal(error.code, 'SESSION_LOST');
   assert.equal(error.key, 'browser.lib.sessionLost');
+});
+
+// ---------------------------------------------------------------------------
+// Внешний Chrome по TILDA_BROWSER_CDP
+// ---------------------------------------------------------------------------
+
+test('externalCdp reads TILDA_BROWSER_CDP and refuses a value without a port', () => {
+  assert.equal(externalCdp({}), null);
+  assert.equal(externalCdp({ TILDA_BROWSER_CDP: '  ' }), null);
+  assert.deepEqual(externalCdp({ TILDA_BROWSER_CDP: 'http://127.0.0.1:9222' }), { url: 'http://127.0.0.1:9222', port: 9222 });
+  const bad = (value) => externalCdp({ TILDA_BROWSER_CDP: value });
+  assert.throws(() => bad('127.0.0.1:9222'), (e) => e instanceof ConfigError && e.variable === 'TILDA_BROWSER_CDP');
+  assert.throws(() => bad('http://127.0.0.1'), (e) => e instanceof ConfigError && e.variable === 'TILDA_BROWSER_CDP');
+  assert.throws(() => bad('ftp://127.0.0.1:9222'), (e) => e instanceof ConfigError && e.variable === 'TILDA_BROWSER_CDP');
+});
+
+test('open with TILDA_BROWSER_CDP connects to that address and starts no holder', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tilda-cdp-open-'));
+  // Ручная установка/возврат: withEnv вернул бы окружение до завершения await в open().
+  const saved = { TILDA_BROWSER_CDP: process.env.TILDA_BROWSER_CDP, TILDA_BROWSER_PROFILE: process.env.TILDA_BROWSER_PROFILE, TILDA_PROTECTED_PAGES: process.env.TILDA_PROTECTED_PAGES };
+  process.env.TILDA_BROWSER_CDP = 'http://127.0.0.1:1';
+  process.env.TILDA_BROWSER_PROFILE = dir;
+  process.env.TILDA_PROTECTED_PAGES = '';
+  try {
+    // Порт 1 на loopback — отказ соединения без сети; держатель не поднимается, свой Chrome не запускается.
+    await assert.rejects(open(), (e) => e.code === 'CALL_FAILED' && /127\.0\.0\.1:1/.test(e.message));
+    assert.equal(existsSync(join(dir, 'daemon.json')), false, 'the holder must not start');
+    assert.equal(existsSync(join(dir, 'daemon.log')), false, 'the holder must not start');
+    assert.equal(existsSync(join(dir, 'command.lock')), false, 'the command lock must be released');
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('open refuses a malformed TILDA_BROWSER_CDP before touching the profile', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tilda-cdp-bad-'));
+  try {
+    await withEnv({ TILDA_BROWSER_CDP: '127.0.0.1:9222', TILDA_BROWSER_PROFILE: dir, TILDA_PROTECTED_PAGES: '' }, () =>
+      assert.rejects(open(), (e) => e instanceof ConfigError && e.variable === 'TILDA_BROWSER_CDP'),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('browser start and stop refuse while an external Chrome is configured', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tilda-cdp-guard-'));
+  // Ручная установка/возврат: withEnv вернул бы окружение после первого await, а вызова два.
+  const saved = process.env.TILDA_BROWSER_CDP;
+  process.env.TILDA_BROWSER_CDP = 'http://127.0.0.1:9222';
+  try {
+    await assert.rejects(startDaemon({ profileDir: dir }), (e) => e.code === 'CALL_FAILED' && /TILDA_BROWSER_CDP/.test(e.message));
+    await assert.rejects(stopDaemon({ profileDir: dir }), (e) => e.code === 'CALL_FAILED' && /TILDA_BROWSER_CDP/.test(e.message));
+    assert.equal(existsSync(join(dir, 'daemon.json')), false, 'no holder writes may appear');
+  } finally {
+    if (saved === undefined) delete process.env.TILDA_BROWSER_CDP;
+    else process.env.TILDA_BROWSER_CDP = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('close of an external session only disconnects: pages and Chrome stay', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tilda-cdp-close-'));
+  const lockFile = join(dir, 'command.lock');
+  writeFileSync(lockFile, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+  const calls = { browser: 0, context: 0 };
+  try {
+    await close({
+      mode: 'attached',
+      browser: { close: async () => { calls.browser += 1; } },
+      context: { close: async () => { calls.context += 1; } },
+      lockFile,
+    });
+    assert.equal(calls.browser, 1, 'the CDP connection must be closed');
+    assert.equal(calls.context, 0, 'the context of the external Chrome must not be closed');
+    assert.equal(existsSync(lockFile), false, 'the lock must be released');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -942,6 +942,10 @@ async function cmdBrowser(values, positionals) {
   const profile = browser.profileDir(role);
   const flag = values.donor ? ' --donor' : '';
   log.debug('browser', 'action', { action, role, profile });
+  if ((action === 'start' || action === 'stop') && role === 'test' && browser.externalCdp()) {
+    log.warn('browser', 'external Chrome over TILDA_BROWSER_CDP, the holder is not used', { action });
+    return { status: msg('cli.browser.status.externalCdp'), role, exitCode: EXIT.REFUSED };
+  }
   if (action === 'status') {
     const st = browser.daemonStatus(profile);
     return st ? { status: msg('cli.browser.status.holderRunning'), role, pid: st.pid, port: st.port, startedAt: st.startedAt, profile } : { status: msg('cli.browser.status.holderNotRunning'), role, profile };

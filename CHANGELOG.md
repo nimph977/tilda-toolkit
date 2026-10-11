@@ -6,6 +6,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- External Chrome over CDP: set `TILDA_BROWSER_CDP` (for example `http://127.0.0.1:9222`) and commands connect to this already running Chrome instead of the built-in holder; `browser start` and `browser stop` refuse while it is set.
+
 ## [0.1.0] - 2026-09-30
 
 First public release.

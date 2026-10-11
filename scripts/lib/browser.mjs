@@ -14,7 +14,8 @@
  *
  * Экспорт:
  *   open(opts) → session               подключиться к держателю (поднять при нужде) или запустить свой Chrome;
- *                                       opts.role = 'test' (по умолчанию) | 'donor' — свой профиль и ID проекта
+ *                                       opts.role = 'test' (по умолчанию) | 'donor' — свой профиль и ID проекта;
+ *                                       TILDA_BROWSER_CDP — внешний Chrome вместо держателя
  *   sessionProject(role, env)           ID проекта роли или null (держатель и reference fetch живут без .env)
  *   openEditor(session, pageid, opts)   открыть редактор и поставить слои заново
  *   installLayers(page, names, opts)    подать scripts/browser/<name>.js в страницу; opts.writablePages — allow-список записи
@@ -42,7 +43,7 @@ import { createLogger } from './log.mjs';
 import { attachMessage, hasKey, messageText, msg } from './i18n.mjs';
 import { repoRoot, protectedPages, testProfileDir, assertOutsideRepo } from './paths.mjs';
 import { resetTildaZoom } from './browser-profile.mjs';
-import { resolveProjectIdFor, getProjectIdFor, getDonorProfile, requireDonorConfig, PROJECT_ROLES } from './config.mjs';
+import { ConfigError, resolveProjectIdFor, getProjectIdFor, getDonorProfile, requireDonorConfig, PROJECT_ROLES } from './config.mjs';
 
 const log = createLogger('browser');
 
@@ -365,6 +366,12 @@ export async function attach(daemon, opts = {}) {
  * daemon.json. Процесс отвязан от текущего и переживает его завершение.
  */
 export async function startDaemon({ profileDir: dirOpt, role = 'test', timeoutMs = 45_000 } = {}) {
+  // Внешний Chrome по TILDA_BROWSER_CDP заменяет держателя: свой Chrome не запускаем. Защищает и
+  // `browser show` (setDaemonWindow → startDaemon) — иначе он поднял бы держателя поверх внешнего.
+  if (role !== 'donor' && externalCdp()) {
+    log.warn('startDaemon', 'external Chrome over TILDA_BROWSER_CDP, the holder is not used', { role });
+    throw new BrowserError('CALL_FAILED', msg('browser.lib.cdpHolderUnused'));
+  }
   // Для донора конфигурация обязательна и проверяется до создания каталога профиля.
   if (role === 'donor') requireDonorConfig({ testProfile: profileDir('test') });
   const dir = dirOpt ? resolve(dirOpt) : profileDir(role);
@@ -405,6 +412,11 @@ export async function startDaemon({ profileDir: dirOpt, role = 'test', timeoutMs
 
 /** Остановить держателя: закрыть Chrome по CDP; процесс держателя завершится сам. */
 export async function stopDaemon({ profileDir: dirOpt, role = 'test' } = {}) {
+  // Внешний Chrome не наш: его (и его holder-записи) не трогаем ни при каких условиях.
+  if (role !== 'donor' && externalCdp()) {
+    log.warn('stopDaemon', 'external Chrome over TILDA_BROWSER_CDP, the holder is not used', { role });
+    throw new BrowserError('CALL_FAILED', msg('browser.lib.cdpHolderUnused'));
+  }
   const dir = dirOpt ? resolve(dirOpt) : profileDir(role);
   const st = daemonStatus(dir);
   if (!st) {
@@ -435,7 +447,59 @@ export async function stopDaemon({ profileDir: dirOpt, role = 'test' } = {}) {
 }
 
 /**
- * Получить сессию браузера. По умолчанию — подключение к держателю (при нужде он поднимается);
+ * Адрес внешнего Chrome из `TILDA_BROWSER_CDP` (например `http://127.0.0.1:9222`): `{ url, port }`;
+ * не задана (или пустая) — `null`. Задана, но это не адрес http(s) с портом, — `ConfigError` сразу,
+ * а не ошибка подключения с непонятной причиной. Чистая.
+ */
+export function externalCdp(env = process.env) {
+  const raw = env.TILDA_BROWSER_CDP?.trim();
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new ConfigError(msg('config.cdpUrlBad'), 'TILDA_BROWSER_CDP');
+  }
+  if (!/^https?:$/.test(parsed.protocol) || !parsed.port) {
+    throw new ConfigError(msg('config.cdpUrlBad'), 'TILDA_BROWSER_CDP');
+  }
+  return { url: raw, port: Number(parsed.port) };
+}
+
+/**
+ * Подключиться к внешнему Chrome по адресу из `TILDA_BROWSER_CDP` (режим attached): держатель не
+ * читается и не поднимается, свой Chrome не запускается, профиль — только для lock-файлов. При
+ * отключении (`close`) браузер не закрывается: страницы и Chrome остаются внешнему владельцу.
+ */
+async function openExternal(cdp, opts = {}) {
+  const role = opts.role ?? 'test';
+  const dir = opts.profileDir ? resolve(opts.profileDir) : profileDir(role);
+  const guard = sessionGuard(role, opts);
+  const projectid = sessionProject(role);
+  const writablePages = role === 'donor' ? [] : null;
+  const lockFile = acquireLock(dir, COMMAND_LOCK_FILE, msg('browser.lib.whatCommand'));
+  let browser;
+  try {
+    browser = await chromium.connectOverCDP(cdp.url, { timeout: opts.connectTimeoutMs ?? 15_000 });
+  } catch (e) {
+    releaseLock(lockFile);
+    log.error('openExternal', 'could not connect to the external Chrome', { url: cdp.url, error: e.message });
+    throw new BrowserError('CALL_FAILED', msg('browser.lib.cdpNoAnswer', { url: cdp.url, reason: e.message }));
+  }
+  const context = browser.contexts()[0] ?? (await browser.newContext());
+  const page = context.pages()[0] ?? (await context.newPage());
+  page.setDefaultNavigationTimeout(opts.navigationTimeoutMs ?? 60_000);
+  // daemon — заглушка: у внешнего Chrome нет ни pid, ни daemon.json, порт известен из адреса.
+  const daemon = { port: cdp.port, external: true };
+  const session = { mode: 'attached', browser, context, page, profileDir: dir, lockFile, protectedPages: guard, layers: new Set(), minimized: true, daemon, role, projectid, writablePages };
+  log.info('openExternal', 'connected to the external Chrome over CDP', { role, projectid, url: cdp.url, protectedPages: guard, writablePages });
+  return session;
+}
+
+/**
+ * Получить сессию браузера. TILDA_BROWSER_CDP=<адрес> — подключение к внешнему Chrome: держатель
+ * не читается и не поднимается (роль `donor` ведёт себя как раньше — у держателя донора свой
+ * профиль и свой вход). По умолчанию — подключение к держателю (при нужде он поднимается);
  * TILDA_BROWSER_DAEMON=0 или opts.daemon=false — свой Chrome в этом процессе (закроется в close).
  * Возвращает session: { mode, context, page, profileDir, lockFile, protectedPages, layers, minimized,
  * role, projectid, writablePages }. Для роли `donor` конфигурация `TILDA_DONOR_*` обязательна — это
@@ -444,8 +508,10 @@ export async function stopDaemon({ profileDir: dirOpt, role = 'test' } = {}) {
 export async function open(opts = {}) {
   const role = opts.role ?? 'test';
   if (role === 'donor') requireDonorConfig({ testProfile: profileDir('test') });
+  const cdp = externalCdp();
+  if (cdp && role !== 'donor') return openExternal(cdp, { ...opts, role });
   const useDaemon = opts.daemon ?? process.env.TILDA_BROWSER_DAEMON !== '0';
-  log.debug('open', 'session', { role, daemon: useDaemon });
+  log.debug('open', 'session', { role, daemon: useDaemon, externalCdp: Boolean(cdp) });
   if (!useDaemon) return launchOwned({ ...opts, role });
   const dir = opts.profileDir ? resolve(opts.profileDir) : profileDir(role);
   const st = daemonStatus(dir) ?? (await startDaemon({ profileDir: dir, role }));

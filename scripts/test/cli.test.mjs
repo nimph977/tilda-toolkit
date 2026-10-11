@@ -27,6 +27,22 @@ function run(args, profile) {
   return spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env, timeout: 10_000 });
 }
 
+test('browser start and stop refuse while TILDA_BROWSER_CDP points at an external Chrome', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tilda-cli-cdp-'));
+  const profile = join(root, 'profile');
+  try {
+    for (const action of ['start', 'stop']) {
+      const env = { ...process.env, LOG_LEVEL: 'ERROR', TILDA_BROWSER_CDP: 'http://127.0.0.1:9222', TILDA_BROWSER_PROFILE: profile, TILDA_PROTECTED_PAGES: '' };
+      const result = spawnSync(process.execPath, [cli, 'browser', action], { encoding: 'utf8', env, timeout: 10_000 });
+      assert.equal(result.status, 1, `${action}: ${result.stdout}\n${result.stderr}`);
+      assert.match(result.stdout, /TILDA_BROWSER_CDP/);
+      assert.equal(existsSync(profile), false, 'no holder may start for an external Chrome');
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('page role without --confirm refuses before the browser starts', () => {
   const root = mkdtempSync(join(tmpdir(), 'tilda-cli-role-'));
   const profile = join(root, 'profile');
