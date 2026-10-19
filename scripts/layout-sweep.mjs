@@ -17,8 +17,10 @@
  * `TILDA_PROJECT_ID` и, для внешнего Chrome, `TILDA_BROWSER_CDP`.
  *
  * Итог: <out>/<width>.png на каждую ширину, <out>/report.json, таблица в консоль;
- * код выхода 1, если есть нарушения. Параллельные процессы с разными --widths допустимы:
- * у каждого своя вкладка и своя папка --out.
+ * код выхода 1, если есть нарушения. Ширина, на которой блок не показан (display: none из
+ * screenmin/screenmax, всплывающее окно), записывается как { width, hidden: true, reason } без снимка
+ * и проверок: это не нарушение, на число нарушений и код выхода она не влияет.
+ * Параллельные процессы с разными --widths допустимы: у каждого своя вкладка и своя папка --out.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -125,6 +127,32 @@ export function verticalGaps(elems) {
   return gaps;
 }
 
+/**
+ * Причина, по которой блок не показан на ширине (чистая функция по данным `probeBlock`). Порядок
+ * проверки: `display` самого блока → предок с `display: none` → `visibility` → нулевая рамка →
+ * `not visible` (проба не нашла причины: блок скрылся между проверками). К любой причине добавляются
+ * классы блока `t-screenmin-*`/`t-screenmax-*`: по ним видно, что блок скрыт экранным условием.
+ */
+export function hiddenReason({ display, visibility, width, height, hiddenAncestor, screenClasses = [] }) {
+  let reason;
+  if (display === 'none') reason = 'display: none';
+  else if (hiddenAncestor) reason = `display: none on ancestor ${hiddenAncestor}`;
+  else if (visibility === 'hidden' || visibility === 'collapse') reason = 'visibility: hidden';
+  else if (!(width > 0) || !(height > 0)) reason = `zero size ${px(width)}×${px(height)}`;
+  else reason = 'not visible';
+  return screenClasses.length ? `${reason} (${screenClasses.join(' ')})` : reason;
+}
+
+/** Сумма нарушений по измеренным ширинам; у скрытой ширины поля `issues` нет, в сумму она не входит. */
+export function totalIssues(results) {
+  return results.reduce((n, r) => n + (r.hidden ? 0 : r.issues.length), 0);
+}
+
+/** `true`, если ширины есть и блок скрыт на каждой: тогда ничего не измерено. */
+export function allHidden(results) {
+  return results.length > 0 && results.every((r) => r.hidden);
+}
+
 /** Снять коробки элементов блока в странице предпросмотра. */
 async function measureBlock(page, recordid) {
   return page.evaluate((rid) => {
@@ -164,6 +192,81 @@ async function hideFixedOutside(page, recordid) {
     }
     return n;
   }, String(recordid));
+}
+
+/**
+ * Ждать, пока размеры блока и его элементов перестанут меняться (два одинаковых замера подряд, не
+ * больше 10 замеров): Тильда перестраивает Zero Block и форму не сразу, и на смене брейкпоинта
+ * ловятся промежуточные состояния (2026-09-21: ложные overlap на 640 и 1200).
+ * Сверяются размеры всех элементов, а не только высота блока: тексты меняют высоту, когда веб-шрифт
+ * подменяет запасной уже после load/fonts.ready (ложные overlap 17–44 px).
+ */
+async function stabilize(page, recordid) {
+  for (let i = 0, prev = ''; i < 10; i++) {
+    const sig = await page.evaluate((rid) => { const b = document.getElementById(`rec${rid}`); if (!b) return ''; return [b.getBoundingClientRect().height, ...[...b.querySelectorAll('.t396__elem')].map((e) => Math.round(e.getBoundingClientRect().height))].join(','); }, String(recordid));
+    if (sig === prev) break;
+    prev = sig;
+    await page.waitForTimeout(500);
+  }
+}
+
+/**
+ * Данные для `hiddenReason`: вычисленные стили блока, его рамка, первый предок с `display: none`
+ * (`тег#id`) и классы `t-screenmin-*`/`t-screenmax-*`. Блока нет в странице — `{ found: false }`.
+ */
+async function probeBlock(page, recordid) {
+  return page.evaluate((rid) => {
+    const block = document.getElementById(`rec${rid}`);
+    if (!block) return { found: false };
+    const cs = getComputedStyle(block);
+    const r = block.getBoundingClientRect();
+    let hiddenAncestor = null;
+    for (let a = block.parentElement; a && !hiddenAncestor; a = a.parentElement) {
+      if (getComputedStyle(a).display === 'none') hiddenAncestor = `${a.tagName.toLowerCase()}${a.id ? '#' + a.id : ''}`;
+    }
+    const screenClasses = [...block.classList].filter((c) => /^t-screen(min|max)-/.test(c));
+    return { found: true, display: cs.display, visibility: cs.visibility, width: r.width, height: r.height, hiddenAncestor, screenClasses };
+  }, String(recordid));
+}
+
+/** Функции, работающие в странице; `measureWidth` берёт их отсюда, тест подставляет свои. */
+const WIDTH_DEPS = { stabilize, probe: probeBlock, measure: measureBlock, hideFixed: hideFixedOutside };
+
+/**
+ * Одна ширина прогона (окно уже сужено/расширено и предпросмотр загружен): ждёт стабилизации, затем
+ * либо записывает ширину как скрытую — `{ width, hidden: true, reason }`, без снимка и проверок, —
+ * либо измеряет блок, снимает его и возвращает запись с замерами. Блока нет в странице — исключение.
+ * `block.isVisible()` не ждёт: тем же условием Playwright отказывает `scrollIntoViewIfNeeded` и
+ * `screenshot`, которые на скрытом блоке висели бы 30 с и валили весь прогон.
+ */
+export async function measureWidth(page, { width, recordid, outDir, settleMs }, deps = WIDTH_DEPS) {
+  // Дать Тильде перестроить блок: на смене брейкпоинта измерение сразу после resize ловит промежуточное состояние.
+  await page.waitForTimeout(settleMs);
+  await deps.stabilize(page, recordid);
+  const block = page.locator(`#rec${recordid}`);
+  if (!(await block.isVisible())) {
+    const probe = await deps.probe(page, recordid);
+    log.debug('sweep', 'visibility probe', { width, found: probe.found, display: probe.display, visibility: probe.visibility });
+    if (!probe.found) throw new Error(`block rec${recordid} not found`);
+    const reason = hiddenReason(probe);
+    log.info('sweep', `width ${width}: block hidden`, { reason });
+    return { width, hidden: true, reason };
+  }
+  const m = await deps.measure(page, recordid);
+  if (m.error) throw new Error(m.error);
+  const issues = checkBoxes(m.elems, m);
+  const file = join(outDir, `${width}.png`);
+  await block.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(150);
+  const lateFixed = await deps.hideFixed(page, recordid); // то, что показала прокрутка к блоку
+  log.debug('sweep', 'fixed elements hidden before the screenshot', { width, lateFixed });
+  await block.screenshot({ path: file, type: 'png' });
+  const boxes = relativeBoxes(m.elems, m);
+  const gaps = verticalGaps(m.elems);
+  log.debug('sweep', 'measurements', { width, boxes: boxes.length, gaps: gaps.length });
+  const result = { width, blockHeight: Math.round(m.blockHeight), elems: m.elems.filter((e) => e.visible).length, boxes, gaps, issues, file };
+  log.info('sweep', `width ${width}: block height ${result.blockHeight}, issues ${issues.length}`, { kinds: issues.map((i) => i.kind).join(',') || '-' });
+  return result;
 }
 
 /**
@@ -229,53 +332,46 @@ export async function sweep({ pageid, recordid, widths, outDir, projectid, settl
     for (const [wi, width] of widths.entries()) {
       await page.setViewportSize({ width, height: width < 600 ? 640 : 900 });
       if (mode === 'reload' && wi > 0) await load();
-      // Тильда перестраивает Zero Block и форму не сразу: ждём, пока высота блока перестанет меняться
-      // (два одинаковых замера подряд), но не дольше 3 с — иначе на смене брейкпоинта ловятся
-      // промежуточные состояния (2026-09-21: ложные overlap на 640 и 1200).
-      await page.waitForTimeout(settleMs);
-      // Стабилизация: не только высота блока, а размеры всех его элементов — тексты меняют высоту,
-      // когда веб-шрифт подменяет запасной уже после load/fonts.ready (ложные overlap 17–44 px).
-      for (let i = 0, prev = ''; i < 10; i++) {
-        const sig = await page.evaluate((rid) => { const b = document.getElementById(`rec${rid}`); if (!b) return ''; return [b.getBoundingClientRect().height, ...[...b.querySelectorAll('.t396__elem')].map((e) => Math.round(e.getBoundingClientRect().height))].join(','); }, String(recordid));
-        if (sig === prev) break;
-        prev = sig;
-        await page.waitForTimeout(500);
-      }
-      const m = await measureBlock(page, recordid);
-      if (m.error) throw new Error(m.error);
-      const issues = checkBoxes(m.elems, m);
-      const file = join(outDir, `${width}.png`);
-      const block = page.locator(`#rec${recordid}`);
-      await block.scrollIntoViewIfNeeded();
-      await page.waitForTimeout(150);
-      const lateFixed = await hideFixedOutside(page, recordid); // то, что показала прокрутка к блоку
-      log.debug('sweep', 'fixed elements hidden before the screenshot', { width, lateFixed });
-      await block.screenshot({ path: file, type: 'png' });
-      const boxes = relativeBoxes(m.elems, m);
-      const gaps = verticalGaps(m.elems);
-      log.debug('sweep', 'measurements', { width, boxes: boxes.length, gaps: gaps.length });
-      results.push({ width, blockHeight: Math.round(m.blockHeight), elems: m.elems.filter((e) => e.visible).length, boxes, gaps, issues, file });
-      log.info('sweep', `width ${width}: block height ${Math.round(m.blockHeight)}, issues ${issues.length}`, { kinds: issues.map((i) => i.kind).join(',') || '-' });
+      results.push(await measureWidth(page, { width, recordid, outDir, settleMs }));
     }
   } finally {
     await page.close().catch(() => {});
     await browser.close().catch(() => {});
   }
+  if (allHidden(results)) log.warn('sweep', 'block hidden at every requested width', { widths });
   const report = { pageid, recordid, widths, mode, generatedAt: new Date().toISOString(), results };
   writeFileSync(join(outDir, 'report.json'), JSON.stringify(report, null, 2) + '\n');
   return report;
 }
 
-function printTable(report) {
-  console.log(`\nblock ${report.recordid} on page ${report.pageid}: widths ${report.widths.join(', ')}`);
-  console.log('width | height | issues');
+/**
+ * Строки таблицы отчёта (чистая функция). Скрытая ширина — `hidden` в колонке нарушений и причина
+ * строкой под ней; если блок скрыт на каждой ширине, последней строкой идёт предупреждение.
+ */
+export function formatTable(report) {
+  const lines = ['', `block ${report.recordid} on page ${report.pageid}: widths ${report.widths.join(', ')}`, 'width | height | issues'];
   for (const r of report.results) {
+    if (r.hidden) {
+      lines.push(`${String(r.width).padStart(6)} | ${'-'.padStart(6)} | hidden`, `         · ${r.reason}`);
+      continue;
+    }
     const kinds = {};
     for (const i of r.issues) kinds[i.kind] = (kinds[i.kind] || 0) + 1;
     const s = Object.entries(kinds).map(([k, n]) => `${k}×${n}`).join(' ') || 'none';
-    console.log(`${String(r.width).padStart(6)} | ${String(r.blockHeight).padStart(6)} | ${s}`);
-    for (const i of r.issues) console.log(`         · ${i.kind} ${i.type || ''} ${i.elem || ''}${i.other ? '+' + i.other : ''}: ${i.detail}${i.text ? ' — «' + i.text + '»' : ''}`);
+    lines.push(`${String(r.width).padStart(6)} | ${String(r.blockHeight).padStart(6)} | ${s}`);
+    for (const i of r.issues) lines.push(`         · ${i.kind} ${i.type || ''} ${i.elem || ''}${i.other ? '+' + i.other : ''}: ${i.detail}${i.text ? ' — «' + i.text + '»' : ''}`);
   }
+  if (allHidden(report.results)) lines.push('block hidden at every requested width');
+  return lines;
+}
+
+function printTable(report) {
+  for (const line of formatTable(report)) console.log(line);
+}
+
+/** Итоговая строка: по ней обёртка отличает нарушения (код 1 со строкой) от сбоя (код 1 без строки). */
+export function totalLine(total, outDir) {
+  return `total issues: ${total}; screenshots and report.json — ${outDir}`;
 }
 
 /** Разбор командной строки; неизвестный флаг — исключение `TypeError` (строгий режим `parseArgs`). */
@@ -287,7 +383,11 @@ export function parseSweepArgs(argv) {
   return values;
 }
 
-/** Прогон из командной строки: возвращает код выхода (0 — нарушений нет, 1 — нарушения, 2 — не хватает аргументов); сбой — исключение. */
+/**
+ * Прогон из командной строки: возвращает код выхода (0 — нарушений нет, 1 — нарушения, 2 — не хватает аргументов);
+ * сбой — исключение. Скрытая ширина — не нарушение и на код не влияет; если блок скрыт на всех ширинах,
+ * после таблицы выводится `block hidden at every requested width`, итог `total issues: 0`, код 0: блок не измерен.
+ */
 async function main(argv) {
   const values = parseSweepArgs(argv);
   if (!values.page || !values.block) { console.error('--page <pageid> --block <recordid> are required'); return 2; }
@@ -300,8 +400,8 @@ async function main(argv) {
   log.debug('main', 'arguments', { page: values.page, block: values.block, widths: widths.length, mode, out: outDir, site: Boolean(values.site) });
   const report = await sweep({ pageid: values.page, recordid: values.block, widths, outDir, mode });
   printTable(report);
-  const total = report.results.reduce((n, r) => n + r.issues.length, 0);
-  console.log(`\ntotal issues: ${total}; screenshots and report.json — ${outDir}`);
+  const total = totalIssues(report.results);
+  console.log(`\n${totalLine(total, outDir)}`);
   return total ? 1 : 0;
 }
 

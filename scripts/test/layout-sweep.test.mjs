@@ -5,7 +5,10 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseWidthSpec, parseSweepArgs, cdpTarget, boxesOverlap, checkBoxes, relativeBoxes, verticalGaps } from '../layout-sweep.mjs';
+import {
+  parseWidthSpec, parseSweepArgs, cdpTarget, boxesOverlap, checkBoxes, relativeBoxes, verticalGaps,
+  hiddenReason, totalIssues, allHidden, formatTable, totalLine, measureWidth,
+} from '../layout-sweep.mjs';
 import { t } from '../lib/i18n.mjs';
 import { setLogLevel } from '../lib/log.mjs';
 
@@ -117,6 +120,133 @@ test('verticalGaps: фигура и скрытый элемент не учас�
     el('t2', 'text', box(10, 200, 200, 20)),
   ];
   assert.deepEqual(verticalGaps(elems), [{ elem: 't2', above: 't1', gap: 50 }]);
+});
+
+const probe = (extra = {}) => ({ found: true, display: 'block', visibility: 'visible', width: 640, height: 300, hiddenAncestor: null, screenClasses: [], ...extra });
+
+test('hiddenReason: пять причин по данным пробы', () => {
+  assert.equal(hiddenReason(probe({ display: 'none', width: 0, height: 0 })), 'display: none');
+  assert.equal(hiddenReason(probe({ hiddenAncestor: 'div#popup' })), 'display: none on ancestor div#popup');
+  assert.equal(hiddenReason(probe({ visibility: 'hidden' })), 'visibility: hidden');
+  assert.equal(hiddenReason(probe({ visibility: 'collapse' })), 'visibility: hidden');
+  assert.equal(hiddenReason(probe({ width: 640, height: 0 })), 'zero size 640×0');
+  assert.equal(hiddenReason(probe({ width: 0, height: 120.4 })), 'zero size 0×120');
+  assert.equal(hiddenReason(probe()), 'not visible');
+});
+
+test('hiddenReason: классы screenmin/screenmax в конце; порядок — display раньше нулевого размера', () => {
+  assert.equal(hiddenReason(probe({ display: 'none', width: 0, height: 0, screenClasses: ['t-screenmin-980px'] })), 'display: none (t-screenmin-980px)');
+  assert.equal(hiddenReason(probe({ display: 'none', screenClasses: ['t-screenmin-980px', 't-screenmax-1200px'] })), 'display: none (t-screenmin-980px t-screenmax-1200px)');
+  assert.equal(hiddenReason(probe({ display: 'none', hiddenAncestor: 'div#popup', visibility: 'hidden', width: 0, height: 0 })), 'display: none', 'display блока важнее предка, видимости и размера');
+  assert.equal(hiddenReason(probe({ hiddenAncestor: 'section', visibility: 'hidden', width: 0, height: 0 })), 'display: none on ancestor section', 'предок важнее видимости и размера');
+  assert.equal(hiddenReason(probe({ visibility: 'hidden', width: 0, height: 0 })), 'visibility: hidden', 'видимость важнее нулевого размера');
+});
+
+const hiddenRec = (width, reason = 'display: none') => ({ width, hidden: true, reason });
+const measuredRec = (width, issues = []) => ({ width, blockHeight: 500, elems: 3, boxes: [], gaps: [], issues, file: `/tmp/x/${width}.png` });
+const issue = (kind, extra = {}) => ({ kind, detail: 'd', ...extra });
+
+test('totalIssues: скрытая ширина в сумму не входит; пустой список — 0', () => {
+  assert.equal(totalIssues([hiddenRec(320), measuredRec(1440, [issue('overflow'), issue('below', { type: 'text', elem: 't1' })])]), 2);
+  assert.equal(totalIssues([hiddenRec(320), hiddenRec(1440)]), 0);
+  assert.equal(totalIssues([]), 0);
+});
+
+test('allHidden: все скрыты — да; часть скрыта и пустой список — нет', () => {
+  assert.equal(allHidden([hiddenRec(320), hiddenRec(1440)]), true);
+  assert.equal(allHidden([hiddenRec(320), measuredRec(1440)]), false);
+  assert.equal(allHidden([measuredRec(320)]), false);
+  assert.equal(allHidden([]), false);
+});
+
+const reportOf = (results) => ({ pageid: '100001', recordid: '100002', widths: results.map((r) => r.width), results });
+
+test('formatTable: скрытая, измеренная с нарушением и без — точные строки', () => {
+  const report = reportOf([
+    hiddenRec(320, 'display: none (t-screenmin-980px)'),
+    measuredRec(1000, [issue('overlap', { type: 'text+form', elem: 't1', other: 'f1', detail: '110×20 px', text: 'a | b' })]),
+    measuredRec(1440),
+  ]);
+  assert.deepEqual(formatTable(report), [
+    '',
+    'block 100002 on page 100001: widths 320, 1000, 1440',
+    'width | height | issues',
+    '   320 |      - | hidden',
+    '         · display: none (t-screenmin-980px)',
+    '  1000 |    500 | overlap×1',
+    '         · overlap text+form t1+f1: 110×20 px — «a | b»',
+    '  1440 |    500 | none',
+  ]);
+});
+
+test('formatTable: «скрыто везде» заканчивается предупреждением, «скрыто на части» — нет', () => {
+  const all = formatTable(reportOf([hiddenRec(320), hiddenRec(1440)]));
+  assert.equal(all.at(-1), 'block hidden at every requested width');
+  assert.deepEqual(all.slice(3), ['   320 |      - | hidden', '         · display: none', '  1440 |      - | hidden', '         · display: none', 'block hidden at every requested width']);
+  const part = formatTable(reportOf([hiddenRec(320), measuredRec(1440)]));
+  assert.ok(!part.includes('block hidden at every requested width'));
+});
+
+test('totalLine: текст итоговой строки, на который опирается обёртка, не меняется', () => {
+  assert.equal(totalLine(2, '/tmp/x'), 'total issues: 2; screenshots and report.json — /tmp/x');
+  assert.equal(totalLine(0, '/tmp/x'), 'total issues: 0; screenshots and report.json — /tmp/x');
+});
+
+/** Поддельная страница: `locator()` отдаёт блок, у которого записываются вызовы прокрутки и снимка. */
+function fakePage({ visible }) {
+  const calls = [];
+  const block = {
+    isVisible: async () => { calls.push('isVisible'); return visible; },
+    scrollIntoViewIfNeeded: async () => { calls.push('scrollIntoViewIfNeeded'); },
+    screenshot: async (opts) => { calls.push(`screenshot ${opts.path}`); },
+  };
+  return { calls, waitForTimeout: async () => {}, locator: (selector) => { calls.push(`locator ${selector}`); return block; } };
+}
+
+/** Подмена функций в странице; `calls` — та же запись, что у страницы, чтобы видеть порядок вызовов. */
+function fakeDeps(page, { probeResult = probe({ display: 'none', width: 0, height: 0 }), measureResult } = {}) {
+  return {
+    stabilize: async () => { page.calls.push('stabilize'); },
+    probe: async () => { page.calls.push('probe'); return probeResult; },
+    measure: async () => { page.calls.push('measure'); return measureResult; },
+    hideFixed: async () => { page.calls.push('hideFixed'); return 0; },
+  };
+}
+
+const MEASURE = { innerWidth: 1440, scrollWidth: 1440, blockLeft: 0, blockTop: 100, blockBottom: 600, blockHeight: 499.6, elems: [] };
+const OPTS = { width: 320, recordid: '100002', outDir: '/tmp/x', settleMs: 0 };
+
+test('measureWidth: скрытая ширина — запись из трёх полей, без прокрутки, снимка и замера', async () => {
+  const page = fakePage({ visible: false });
+  const deps = fakeDeps(page, { probeResult: probe({ display: 'none', width: 0, height: 0, screenClasses: ['t-screenmin-980px'] }) });
+  const result = await measureWidth(page, OPTS, deps);
+  assert.deepEqual(result, { width: 320, hidden: true, reason: 'display: none (t-screenmin-980px)' });
+  assert.deepEqual(page.calls, ['stabilize', 'locator #rec100002', 'isVisible', 'probe']);
+});
+
+test('measureWidth: блока нет в странице — исключение с прежним текстом', async () => {
+  const page = fakePage({ visible: false });
+  const deps = fakeDeps(page, { probeResult: { found: false } });
+  await assert.rejects(() => measureWidth(page, OPTS, deps), { message: 'block rec100002 not found' });
+  assert.ok(!page.calls.includes('scrollIntoViewIfNeeded'));
+});
+
+test('measureWidth: показанный блок — замер, прокрутка, снимок, запись с высотой и файлом', async () => {
+  const page = fakePage({ visible: true });
+  const deps = fakeDeps(page, { measureResult: MEASURE });
+  const result = await measureWidth(page, { ...OPTS, width: 1440 }, deps);
+  assert.equal(result.width, 1440);
+  assert.equal(result.blockHeight, 500);
+  assert.equal(result.file, '/tmp/x/1440.png');
+  assert.ok(!('hidden' in result), 'у измеренной ширины поля hidden нет');
+  assert.deepEqual(page.calls, ['stabilize', 'locator #rec100002', 'isVisible', 'measure', 'scrollIntoViewIfNeeded', 'hideFixed', 'screenshot /tmp/x/1440.png']);
+});
+
+test('measureWidth: ошибка замера показанного блока не глотается', async () => {
+  const page = fakePage({ visible: true });
+  const deps = fakeDeps(page, { measureResult: { error: 'block rec100002 not found' } });
+  await assert.rejects(() => measureWidth(page, OPTS, deps), { message: 'block rec100002 not found' });
+  assert.ok(!page.calls.includes('screenshot /tmp/x/320.png'));
 });
 
 test('cdpTarget: внешний Chrome главнее держателя; держатель без порта и пустой выбор — null', () => {
