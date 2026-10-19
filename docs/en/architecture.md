@@ -33,6 +33,7 @@ are kept by `catalog.mjs` (`settingsMapPath`, `loadSettingsMap`); `reference-pla
 | `scripts/promote.mjs`, `page-ops.mjs`, `session-plan.mjs` | promotion, page operations, the cumulative plan |
 | `scripts/page-list.mjs` | list of the project pages (`page list`): parsing the dashboard response and normalization without network, the driver comes from outside |
 | `scripts/shot.mjs`, `map-blocks.mjs`, `link-check.mjs`, `upload.mjs` | page view commands and upload |
+| `scripts/layout-sweep.mjs` | measuring a block at several window widths: a separate script run directly, not a `tilda.mjs` command (see [layout-sweep](cli.md#layout-sweep)); the choice of the browser target, the checks, the element boxes and the gaps are pure functions without network |
 | `scripts/apply-plan.mjs`, `zero-model.mjs`, `list-model.mjs` | plan preparation and verification, block models |
 | `scripts/snapshot.mjs`, `journal.mjs`, `find-replace.mjs` | snapshots, the journal, search over snapshots |
 | `scripts/reference.mjs`, `catalog.mjs`, `reference-plan.mjs` | building from a reference: a site snapshot through the holder, the catalog of template fields, the `newRecord` plan generator |

@@ -63,6 +63,8 @@ session in the browser holder. The others work on local snapshots without networ
 | `donor links` | ● | Donor links in the live blocks of a label → paths to pages of the copy (`--slug --source`, `--dry-run`): addresses on the donor domain and `/page<donor ID>.html` links (relative, on the donor domain and on its `*.tilda.ws` subdomain) — by the pairs of the site map. Only the link address changes. A path without a page in the copy and form fields (`formmsgurl`) stay with a reason. A snapshot before writing, `verify` after, the plan is `<site folder>/plans/donor-links-<slug>-<label>.json`. |
 | `donor check` | ● | Checks after the transfer by the snapshot labels (`--slug`, `--source P01,P02`; by default all transferred labels, duplicates of donor pages are skipped with a reason): links of the page view (donor domain, relative addresses, donor pages by ID), HTML blocks, `formmsgurl` on the donor domain, map completeness, the home page of the project. Read-only, a 3 s pause between labels. The result is `reports/checks.json` and a section between markers in `reports/transfer-summary.md` with manual items. Exit code 1 — link violations, label failures, an incomplete map or a wrong home page; for "wrong home page" a ready command `page role --index <pageid> --confirm` appears in the summary section and in `next`. |
 
+The separate script `scripts/layout-sweep.mjs` is not in this table: it is described in [layout-sweep](#layout-sweep).
+
 ## Flags
 
 | Flag | Commands | Purpose |
