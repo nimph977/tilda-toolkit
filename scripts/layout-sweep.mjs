@@ -20,6 +20,8 @@
  * код выхода 1, если есть нарушения. Ширина, на которой блок не показан (display: none из
  * screenmin/screenmax, всплывающее окно), записывается как { width, hidden: true, reason } без снимка
  * и проверок: это не нарушение, на число нарушений и код выхода она не влияет.
+ * У показанной ширины поле `notes` — пояснения к результату; сейчас одно: у блока без Zero-элементов
+ * outside/overlap/clipped/below и коробки не проверялись, считаются только overflow и высота блока.
  * Параллельные процессы с разными --widths допустимы: у каждого своя вкладка и своя папка --out.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -143,6 +145,17 @@ export function hiddenReason({ display, visibility, width, height, hiddenAncesto
   return screenClasses.length ? `${reason} (${screenClasses.join(' ')})` : reason;
 }
 
+/** Пояснение к ширине, где у блока нет ни одного `.t396__elem`: проверки по элементам ничего не проверили. */
+export const NO_ZERO_ELEMS_NOTE = 'no Zero Block elements: only overflow and block height checked';
+
+/**
+ * Пояснения к измеренной ширине (чистая функция). `elemCount` — число `.t396__elem` в блоке, скрытые
+ * входят в счёт: блок с элементами, спрятанными на этой ширине, пояснения не получает.
+ */
+export function widthNotes({ elemCount }) {
+  return elemCount === 0 ? [NO_ZERO_ELEMS_NOTE] : [];
+}
+
 /** Сумма нарушений по измеренным ширинам; у скрытой ширины поля `issues` нет, в сумму она не входит. */
 export function totalIssues(results) {
   return results.reduce((n, r) => n + (r.hidden ? 0 : r.issues.length), 0);
@@ -264,7 +277,9 @@ export async function measureWidth(page, { width, recordid, outDir, settleMs }, 
   const boxes = relativeBoxes(m.elems, m);
   const gaps = verticalGaps(m.elems);
   log.debug('sweep', 'measurements', { width, boxes: boxes.length, gaps: gaps.length });
-  const result = { width, blockHeight: Math.round(m.blockHeight), elems: m.elems.filter((e) => e.visible).length, boxes, gaps, issues, file };
+  const notes = widthNotes({ elemCount: m.elems.length });
+  if (notes.length) log.debug('sweep', 'no Zero Block elements in the block', { width });
+  const result = { width, blockHeight: Math.round(m.blockHeight), elems: m.elems.filter((e) => e.visible).length, boxes, gaps, issues, notes, file };
   log.info('sweep', `width ${width}: block height ${result.blockHeight}, issues ${issues.length}`, { kinds: issues.map((i) => i.kind).join(',') || '-' });
   return result;
 }
@@ -360,6 +375,7 @@ export function formatTable(report) {
     const s = Object.entries(kinds).map(([k, n]) => `${k}×${n}`).join(' ') || 'none';
     lines.push(`${String(r.width).padStart(6)} | ${String(r.blockHeight).padStart(6)} | ${s}`);
     for (const i of r.issues) lines.push(`         · ${i.kind} ${i.type || ''} ${i.elem || ''}${i.other ? '+' + i.other : ''}: ${i.detail}${i.text ? ' — «' + i.text + '»' : ''}`);
+    for (const note of r.notes) lines.push(`         · ${note}`);
   }
   if (allHidden(report.results)) lines.push('block hidden at every requested width');
   return lines;

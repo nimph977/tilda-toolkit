@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   parseWidthSpec, parseSweepArgs, cdpTarget, boxesOverlap, checkBoxes, relativeBoxes, verticalGaps,
-  hiddenReason, totalIssues, allHidden, formatTable, totalLine, measureWidth,
+  hiddenReason, totalIssues, allHidden, formatTable, totalLine, measureWidth, widthNotes, NO_ZERO_ELEMS_NOTE,
 } from '../layout-sweep.mjs';
 import { t } from '../lib/i18n.mjs';
 import { setLogLevel } from '../lib/log.mjs';
@@ -143,7 +143,7 @@ test('hiddenReason: классы screenmin/screenmax в конце; порядо
 });
 
 const hiddenRec = (width, reason = 'display: none') => ({ width, hidden: true, reason });
-const measuredRec = (width, issues = []) => ({ width, blockHeight: 500, elems: 3, boxes: [], gaps: [], issues, file: `/tmp/x/${width}.png` });
+const measuredRec = (width, issues = [], notes = []) => ({ width, blockHeight: 500, elems: 3, boxes: [], gaps: [], issues, notes, file: `/tmp/x/${width}.png` });
 const issue = (kind, extra = {}) => ({ kind, detail: 'd', ...extra });
 
 test('totalIssues: скрытая ширина в сумму не входит; пустой список — 0', () => {
@@ -240,6 +240,52 @@ test('measureWidth: показанный блок — замер, прокрут
   assert.equal(result.file, '/tmp/x/1440.png');
   assert.ok(!('hidden' in result), 'у измеренной ширины поля hidden нет');
   assert.deepEqual(page.calls, ['stabilize', 'locator #rec100002', 'isVisible', 'measure', 'scrollIntoViewIfNeeded', 'hideFixed', 'screenshot /tmp/x/1440.png']);
+});
+
+test('widthNotes: без Zero-элементов — одно пояснение, с элементами — пусто', () => {
+  assert.deepEqual(widthNotes({ elemCount: 0 }), ['no Zero Block elements: only overflow and block height checked']);
+  assert.equal(NO_ZERO_ELEMS_NOTE, 'no Zero Block elements: only overflow and block height checked');
+  assert.deepEqual(widthNotes({ elemCount: 1 }), []);
+  assert.deepEqual(widthNotes({ elemCount: 5 }), []);
+});
+
+test('measureWidth: блок без Zero-элементов — elems 0, пустые boxes и gaps, пояснение в notes', async () => {
+  const page = fakePage({ visible: true });
+  const result = await measureWidth(page, OPTS, fakeDeps(page, { measureResult: MEASURE }));
+  assert.equal(result.elems, 0);
+  assert.deepEqual(result.boxes, []);
+  assert.deepEqual(result.gaps, []);
+  assert.deepEqual(result.notes, [NO_ZERO_ELEMS_NOTE]);
+});
+
+test('measureWidth: элементы есть, но скрыты на ширине — elems 0, а пояснения нет', async () => {
+  const page = fakePage({ visible: true });
+  const hidden = el('h1', 'text', box(0, 100, 200, 40), { visible: false });
+  const result = await measureWidth(page, OPTS, fakeDeps(page, { measureResult: { ...MEASURE, elems: [hidden] } }));
+  assert.equal(result.elems, 0);
+  assert.deepEqual(result.notes, []);
+});
+
+test('measureWidth: показанный блок с видимым элементом — notes пуст, boxes заполнены', async () => {
+  const page = fakePage({ visible: true });
+  const text = el('t1', 'text', box(10, 120, 200, 40));
+  const result = await measureWidth(page, OPTS, fakeDeps(page, { measureResult: { ...MEASURE, elems: [text] } }));
+  assert.equal(result.elems, 1);
+  assert.deepEqual(result.notes, []);
+  assert.deepEqual(result.boxes, [{ id: 't1', type: 'text', left: 10, top: 20, width: 200, height: 40 }]);
+});
+
+test('formatTable: пояснение стоит строкой под шириной, после строк нарушений', () => {
+  const note = `         · ${NO_ZERO_ELEMS_NOTE}`;
+  const withIssue = measuredRec(320, [issue('overflow', { detail: 'scrollWidth 340 > 320' })], [NO_ZERO_ELEMS_NOTE]);
+  assert.deepEqual(formatTable(reportOf([withIssue, measuredRec(1440, [], [NO_ZERO_ELEMS_NOTE])])).slice(3), [
+    '   320 |    500 | overflow×1',
+    '         · overflow  : scrollWidth 340 > 320',
+    note,
+    '  1440 |    500 | none',
+    note,
+  ]);
+  assert.deepEqual(formatTable(reportOf([measuredRec(1440)])).slice(3), ['  1440 |    500 | none'], 'нет пояснений — нет строк');
 });
 
 test('measureWidth: ошибка замера показанного блока не глотается', async () => {
