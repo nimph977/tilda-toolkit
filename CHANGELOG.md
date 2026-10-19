@@ -8,6 +8,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - External Chrome over CDP: set `TILDA_BROWSER_CDP` (for example `http://127.0.0.1:9222`) and commands connect to this already running Chrome instead of the built-in holder; `browser start` and `browser stop` refuse while it is set. Commands work in their own marked agent tab (foreign tabs are never used or closed); a failure after the connection releases the command lock and drops the connection without closing the external Chrome.
+- `layout-sweep` (measuring one block at several window widths) takes the site folder (`--site` or `TILDA_SITE_DIR`) and its `.env`, connects to the external Chrome from `TILDA_BROWSER_CDP` before the browser holder, and works in its own tab without a command lock. `report.json` gets `boxes` (element boxes relative to the block) and `gaps` (vertical gaps between elements) for every width. The script is described in the CLI reference.
+
+### Fixed
+- `layout-sweep` hides fixed elements that appear only after scrolling to the block (the "up" button), so they no longer land in the block screenshot.
 
 ## [0.1.0] - 2026-09-30
 

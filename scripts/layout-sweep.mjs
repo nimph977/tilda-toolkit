@@ -60,7 +60,7 @@ export function boxesOverlap(a, b, minPx = 4) {
 export function checkBoxes(elems, { innerWidth, blockBottom, scrollWidth }) {
   const issues = [];
   if (scrollWidth > innerWidth + 1) issues.push({ kind: 'overflow', detail: `scrollWidth ${scrollWidth} > ${innerWidth}` });
-  const content = elems.filter((e) => e.visible && e.type !== 'shape');
+  const content = contentElems(elems);
   for (const e of content) {
     if (e.box.right > innerWidth + 1 || e.box.left < -1) issues.push({ kind: 'outside', elem: e.id, type: e.type, detail: `left ${Math.round(e.box.left)}, right ${Math.round(e.box.right)} at width ${innerWidth}`, text: e.text });
     if (e.box.bottom > blockBottom + 1) issues.push({ kind: 'below', elem: e.id, type: e.type, detail: `bottom ${Math.round(e.box.bottom)} > block bottom ${Math.round(blockBottom)}`, text: e.text });
@@ -85,6 +85,46 @@ export function checkBoxes(elems, { innerWidth, blockBottom, scrollWidth }) {
   return issues;
 }
 
+/** Целые пиксели; `+ 0` превращает -0 (округление малого отрицательного) в 0. */
+function px(v) {
+  return Math.round(v) + 0;
+}
+
+/** Видимые нефигурные элементы: их проверяет `checkBoxes`, между ними считаются зазоры (фоновая фигура на весь блок не в счёт). */
+function contentElems(elems) {
+  return elems.filter((e) => e.visible && e.type !== 'shape');
+}
+
+/**
+ * Коробки видимых элементов (фигуры тоже) в целых px относительно левого верхнего угла блока.
+ * Чистая функция, тестируется без браузера.
+ */
+export function relativeBoxes(elems, { blockLeft, blockTop }) {
+  return elems
+    .filter((e) => e.visible)
+    .map((e) => ({ id: e.id, type: e.type, left: px(e.box.left - blockLeft), top: px(e.box.top - blockTop), width: px(e.box.width), height: px(e.box.height) }));
+}
+
+/**
+ * Вертикальные зазоры: для каждого видимого нефигурного B — ближайший сверху A (`A.top < B.top`,
+ * перекрытие по горизонтали > 0, наибольший `A.bottom`); `gap = B.top − A.bottom`, отрицательный —
+ * наложение. Порядок по `B.top`; без A записи нет. Чистая функция.
+ */
+export function verticalGaps(elems) {
+  const content = contentElems(elems);
+  const gaps = [];
+  for (const b of [...content].sort((x, y) => x.box.top - y.box.top)) {
+    let above = null;
+    for (const a of content) {
+      if (a.box.top >= b.box.top) continue;
+      if (Math.min(a.box.right, b.box.right) - Math.max(a.box.left, b.box.left) <= 0) continue;
+      if (!above || a.box.bottom > above.box.bottom) above = a;
+    }
+    if (above) gaps.push({ elem: b.id, above: above.id, gap: px(b.box.top - above.box.bottom) });
+  }
+  return gaps;
+}
+
 /** Снять коробки элементов блока в странице предпросмотра. */
 async function measureBlock(page, recordid) {
   return page.evaluate((rid) => {
@@ -104,7 +144,25 @@ async function measureBlock(page, recordid) {
         text: (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 40),
       };
     });
-    return { innerWidth: window.innerWidth, scrollWidth: document.documentElement.scrollWidth, blockTop: br.top + sy, blockBottom: br.bottom + sy, blockHeight: br.height, elems };
+    return { innerWidth: window.innerWidth, scrollWidth: document.documentElement.scrollWidth, blockLeft: br.left, blockTop: br.top + sy, blockBottom: br.bottom + sy, blockHeight: br.height, elems };
+  }, String(recordid));
+}
+
+/**
+ * Спрятать закреплённые (fixed) видимые элементы вне блока: иначе они попадают в кадр блока.
+ * Возвращает число спрятанных. Зовётся дважды: после загрузки и перед снимком — кнопка «вверх»
+ * (t190) на загрузке `display: none` и показывается только после прокрутки к блоку.
+ */
+async function hideFixedOutside(page, recordid) {
+  return page.evaluate((rid) => {
+    const block = document.getElementById(`rec${rid}`);
+    let n = 0;
+    for (const el of document.querySelectorAll('body *')) {
+      if (block && block.contains(el)) continue;
+      const cs = getComputedStyle(el);
+      if (cs.position === 'fixed' && cs.display !== 'none' && cs.visibility !== 'hidden') { el.style.setProperty('visibility', 'hidden', 'important'); n++; }
+    }
+    return n;
   }, String(recordid));
 }
 
@@ -159,16 +217,7 @@ export async function sweep({ pageid, recordid, widths, outDir, projectid, settl
       await page.addStyleTag({ content: '.t-animate, [data-animate-style], .t396__elem { opacity: 1 !important; transform: none !important; }' });
       const records = await page.evaluate(() => document.querySelectorAll('.t-rec').length);
       if (!records) throw new Error(`no blocks on the preview - is the session alive? url ${page.url()}`);
-      const hiddenFixed = await page.evaluate((rid) => {
-        const block = document.getElementById(`rec${rid}`);
-        let n = 0;
-        for (const el of document.querySelectorAll('body *')) {
-          if (block && block.contains(el)) continue;
-          const cs = getComputedStyle(el);
-          if (cs.position === 'fixed' && cs.display !== 'none') { el.style.setProperty('visibility', 'hidden', 'important'); n++; }
-        }
-        return n;
-      }, String(recordid));
+      const hiddenFixed = await hideFixedOutside(page, recordid);
       log.debug('sweep', 'preview loaded', { width: page.viewportSize().width, records, hiddenFixed });
     };
     // Режимы: reload — каждая ширина со свежей загрузкой (то, что видит посетитель); resize — окно
@@ -199,8 +248,13 @@ export async function sweep({ pageid, recordid, widths, outDir, projectid, settl
       const block = page.locator(`#rec${recordid}`);
       await block.scrollIntoViewIfNeeded();
       await page.waitForTimeout(150);
+      const lateFixed = await hideFixedOutside(page, recordid); // то, что показала прокрутка к блоку
+      log.debug('sweep', 'fixed elements hidden before the screenshot', { width, lateFixed });
       await block.screenshot({ path: file, type: 'png' });
-      results.push({ width, blockHeight: Math.round(m.blockHeight), elems: m.elems.filter((e) => e.visible).length, issues, file });
+      const boxes = relativeBoxes(m.elems, m);
+      const gaps = verticalGaps(m.elems);
+      log.debug('sweep', 'measurements', { width, boxes: boxes.length, gaps: gaps.length });
+      results.push({ width, blockHeight: Math.round(m.blockHeight), elems: m.elems.filter((e) => e.visible).length, boxes, gaps, issues, file });
       log.info('sweep', `width ${width}: block height ${Math.round(m.blockHeight)}, issues ${issues.length}`, { kinds: issues.map((i) => i.kind).join(',') || '-' });
     }
   } finally {

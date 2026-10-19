@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseWidthSpec, parseSweepArgs, cdpTarget, boxesOverlap, checkBoxes } from '../layout-sweep.mjs';
+import { parseWidthSpec, parseSweepArgs, cdpTarget, boxesOverlap, checkBoxes, relativeBoxes, verticalGaps } from '../layout-sweep.mjs';
 import { t } from '../lib/i18n.mjs';
 import { setLogLevel } from '../lib/log.mjs';
 
@@ -56,6 +56,67 @@ test('checkBoxes: кнопка, целиком накрытая формой —
   assert.equal(issues.length, 1);
   assert.equal(issues[0].kind, 'overlap');
   assert.equal(issues[0].detail, '330×65 px');
+});
+
+test('relativeBoxes: целые px от угла блока, фигуры входят, скрытые нет', () => {
+  const elems = [
+    el('bg', 'shape', box(-490, 1000, 1700, 400)),
+    el('t1', 'text', box(10.4, 1000.6, 200.5, 19.4)),
+    el('hid', 'text', box(0, 0, 1000, 1000), { visible: false }),
+  ];
+  assert.deepEqual(relativeBoxes(elems, { blockLeft: 10, blockTop: 1000 }), [
+    { id: 'bg', type: 'shape', left: -500, top: 0, width: 1700, height: 400 },
+    { id: 't1', type: 'text', left: 0, top: 1, width: 201, height: 19 },
+  ]);
+});
+
+test('verticalGaps: колонка из трёх элементов — зазор до ближайшего сверху, порядок по top', () => {
+  const elems = [
+    el('t3', 'text', box(10, 130, 200, 20)),
+    el('t1', 'text', box(10, 0, 200, 50)),
+    el('t2', 'text', box(10, 70, 200, 30)),
+  ];
+  assert.deepEqual(verticalGaps(elems), [
+    { elem: 't2', above: 't1', gap: 20 },
+    { elem: 't3', above: 't2', gap: 30 },
+  ]);
+});
+
+test('verticalGaps: ближайший сверху — с наибольшим bottom; без перекрытия по горизонтали записи нет', () => {
+  const elems = [
+    el('a1', 'text', box(0, 0, 100, 20)),
+    el('a2', 'text', box(0, 30, 100, 40)),   // bottom 70 — ближе к b, чем a1
+    el('b', 'text', box(50, 100, 100, 20)),
+    el('side', 'text', box(100, 200, 100, 20)), // с a1/a2 только касается краем (100), с b перекрывается по 50 px
+    el('far', 'text', box(400, 300, 50, 20)),   // над ним по горизонтали никого — записи нет
+  ];
+  assert.deepEqual(verticalGaps(elems), [
+    { elem: 'a2', above: 'a1', gap: 10 },
+    { elem: 'b', above: 'a2', gap: 30 },
+    { elem: 'side', above: 'b', gap: 80 },
+  ]);
+});
+
+test('verticalGaps: касание краями по горизонтали — не перекрытие', () => {
+  const elems = [el('a', 'text', box(0, 0, 100, 50)), el('b', 'text', box(100, 100, 100, 50))];
+  assert.deepEqual(verticalGaps(elems), []);
+});
+
+test('verticalGaps: наложение — отрицательный зазор; -0 приводится к 0', () => {
+  const overlapping = [el('a', 'text', box(0, 0, 100, 50)), el('b', 'text', box(0, 40, 100, 50))];
+  assert.deepEqual(verticalGaps(overlapping), [{ elem: 'b', above: 'a', gap: -10 }]);
+  const almost = [el('a', 'text', box(0, 0, 100, 50.4)), el('b', 'text', box(0, 50, 100, 20))];
+  assert.deepEqual(verticalGaps(almost), [{ elem: 'b', above: 'a', gap: 0 }]);
+});
+
+test('verticalGaps: фигура и скрытый элемент не участвуют ни сверху, ни снизу', () => {
+  const elems = [
+    el('bg', 'shape', box(-500, 0, 1700, 1000)),   // на весь блок — иначе стала бы «ближайшей сверху» для всех
+    el('t1', 'text', box(10, 100, 200, 50)),
+    el('hid', 'text', box(10, 160, 200, 200), { visible: false }),
+    el('t2', 'text', box(10, 200, 200, 20)),
+  ];
+  assert.deepEqual(verticalGaps(elems), [{ elem: 't2', above: 't1', gap: 50 }]);
 });
 
 test('cdpTarget: внешний Chrome главнее держателя; держатель без порта и пустой выбор — null', () => {

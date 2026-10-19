@@ -141,6 +141,69 @@ session in the browser holder. The others work on local snapshots without networ
 | `TILDA_REFERENCE_DIR/<slug>/reports/transfer-summary.md` | the site transfer summary: a table of labels, totals, false preview differences; compiled by the agent from the reports. The section between `<!-- donor-check:start -->` and `<!-- donor-check:end -->` is written by `donor check` |
 | `TILDA_REFERENCE_DIR/<slug>/reports/checks.json` | the `donor check` result: labels, violations, HTML blocks, forms, map completeness, home page, manual items |
 
+## layout-sweep
+
+`scripts/layout-sweep.mjs` is a separate script, not a `tilda.mjs` command: it measures one block on the page preview at several window widths. It only reads the preview and never writes to Tilda.
+
+```
+node scripts/layout-sweep.mjs --site <site folder> --page <pageid> --block <recordid> [--widths 320,640] [--out <folder>] [--tag <name>] [--mode reload|resize]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--site <folder>` | The site folder. Without it `TILDA_SITE_DIR` is used, as in `tilda.mjs`; if both are set they must point to one folder. The `.env` of the site supplies `TILDA_PROJECT_ID` and `TILDA_BROWSER_CDP`. |
+| `--page`, `--block` | The page and the block (`recordid`); both are required. |
+| `--widths` | A range `320-1440:40` (from, to, step; the default) or a list `320,375,768`. The last width of a range is always included. |
+| `--out` | The result folder. By default `<TILDA_BASELINE_DIR>/shots/<pageid>/sweep-<recordid>-<tag or time>/`. |
+| `--tag` | A name for the default folder instead of the time. |
+| `--mode` | `reload` (default): every width loads the preview anew, as a visitor sees it. `resize`: the window is resized without a reload; this catches Tilda scripts that stay stuck in a state after the width changes. |
+
+The script does not read `--lang`; its messages are in English.
+
+**Browser.** The script connects to the first of these that exists: the external Chrome from `TILDA_BROWSER_CDP`, then the browser holder started by `browser start`. With neither it stops with `the browser holder is not running: node scripts/tilda.mjs browser start`. It works in its own tab and closes it at the end; it takes no command lock, so runs with different `--widths` and `--out` may go in parallel. The holder window stays minimized; the window of an external Chrome is left as it is. The browser must hold a signed-in Tilda session: without it the script stops with `no blocks on the preview - is the session alive?` — sign in to Tilda in that browser and run again.
+
+**Checks** at every width:
+
+| Check | What it finds |
+| --- | --- |
+| `overflow` | The page scrolls horizontally. |
+| `outside` | An element of the block (not a shape) goes beyond the left or right edge of the window. |
+| `overlap` | Visible texts, buttons, forms or pictures overlap by more than 4 px on both axes. |
+| `clipped` | A text is taller than its box. |
+| `below` | An element lies below the bottom of the block. |
+
+**Result** (in `--out`): `<width>.png` for every width — the block only, and `report.json`:
+
+| Field | Contents |
+| --- | --- |
+| `pageid`, `recordid`, `widths`, `mode`, `generatedAt` | what was measured and when |
+| `results[]` | one entry per width |
+| `results[].width`, `blockHeight`, `elems` | the width, the block height in px, the number of visible elements |
+| `results[].boxes` | visible elements, shapes included: `id`, `type`, `left`, `top`, `width`, `height` in whole px from the top-left corner of the block |
+| `results[].gaps` | vertical gaps: for each visible element (shapes excluded) `elem`, `above` — the nearest element above it that shares a horizontal span with it — and `gap = elem.top − above.bottom`; a negative `gap` means an overlap; an element with nothing above it has no entry |
+| `results[].issues`, `file` | the violations of the checks above and the PNG path |
+
+The console gets a table by width and the last line `total issues: <N>; screenshots and report.json — <folder>`.
+
+**Exit codes** differ from the table above (a configuration error here is `1`, not `2`):
+
+| Code | Meaning |
+| --- | --- |
+| `0` | No violations. |
+| `1` | There are violations, or any failure: no browser, a lost Tilda session, an unknown flag, a refusal of `--site` or its `.env`. A failure has no `total issues` line. |
+| `2` | `--page` or `--block` is missing. |
+
+There is no code `3`. A refusal of the site folder prints one of these messages (`<…>` stands for the value):
+
+| Reason | Message |
+| --- | --- |
+| The folder does not exist | `site folder not found: <folder>` |
+| The folder has no `.env` | `no .env in the site folder: <folder>` |
+| `--site` and `TILDA_SITE_DIR` differ | `--site and TILDA_SITE_DIR point to different folders: <a> and <b>` |
+| `TILDA_PROJECT_ID`, `TILDA_PROTECTED_PAGES` or `TILDA_DONOR_PROJECT_ID` is set only in the environment | `variables are set only in the environment, not in the site .env: <names> — add them to the site .env or remove them from the environment` |
+| Another `TILDA_*` variable has different values in the environment and in the `.env` | `variables are set in both the environment and the site .env with different values: <names> — remove them from the environment` |
+| `TILDA_BROWSER_CDP` is not an address | `TILDA_BROWSER_CDP must be an http:// or https:// address with a port, for example http://127.0.0.1:9222` |
+
 ## See also
 
 - [Workflow](workflow.md) — in what order to apply the commands
