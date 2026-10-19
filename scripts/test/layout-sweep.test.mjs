@@ -1,9 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWidthSpec, boxesOverlap, checkBoxes } from '../layout-sweep.mjs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseWidthSpec, parseSweepArgs, cdpTarget, boxesOverlap, checkBoxes } from '../layout-sweep.mjs';
+import { t } from '../lib/i18n.mjs';
 import { setLogLevel } from '../lib/log.mjs';
 
 setLogLevel('ERROR');
+
+const script = fileURLToPath(new URL('../layout-sweep.mjs', import.meta.url));
 
 const box = (left, top, width, height) => ({ left, top, right: left + width, bottom: top + height, width, height });
 const el = (id, type, b, extra = {}) => ({ id, type, visible: true, box: b, clipped: false, scrollHeight: 0, clientHeight: 0, text: id, ...extra });
@@ -48,6 +56,113 @@ test('checkBoxes: кнопка, целиком накрытая формой —
   assert.equal(issues.length, 1);
   assert.equal(issues[0].kind, 'overlap');
   assert.equal(issues[0].detail, '330×65 px');
+});
+
+test('cdpTarget: внешний Chrome главнее держателя; держатель без порта и пустой выбор — null', () => {
+  const external = { url: 'http://127.0.0.1:9222', port: 9222 };
+  assert.deepEqual(cdpTarget({ external, holder: { port: 5555 } }), { source: 'external', url: 'http://127.0.0.1:9222' });
+  assert.deepEqual(cdpTarget({ external }), { source: 'external', url: 'http://127.0.0.1:9222' });
+  assert.deepEqual(cdpTarget({ external: null, holder: { port: 5555 } }), { source: 'holder', url: 'http://127.0.0.1:5555' });
+  assert.equal(cdpTarget({ external: null, holder: {} }), null, 'держатель без порта');
+  assert.equal(cdpTarget({ external: null, holder: null }), null);
+  assert.equal(cdpTarget(), null);
+});
+
+test('parseSweepArgs: --site разобран, без него undefined, неизвестный флаг — исключение', () => {
+  const withSite = parseSweepArgs(['--site', '/tmp/site', '--page', '100001', '--block', '100002', '--widths', '320,640']);
+  assert.deepEqual({ ...withSite }, { site: '/tmp/site', page: '100001', block: '100002', widths: '320,640' }); // parseArgs возвращает объект без прототипа
+  const withoutSite = parseSweepArgs(['--page', '100001', '--block', '100002']);
+  assert.equal(withoutSite.site, undefined);
+  assert.throws(() => parseSweepArgs(['--bogus']), TypeError);
+});
+
+// Подпроцесс: окружение без TILDA_*, папки сайтов и их .env — во временной папке ОС, вне репозитория.
+function sweepEnv(extra = {}) {
+  const env = { ...process.env, LOG_LEVEL: 'DEBUG' };
+  for (const key of Object.keys(env)) if (key.startsWith('TILDA_')) delete env[key];
+  return { ...env, ...extra };
+}
+
+function runSweep(args, extraEnv) {
+  return spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: sweepEnv(extraEnv), timeout: 20_000 });
+}
+
+/** Временная папка сайта; `.env` пишется, если передан текст. Удаляется после `fn`. */
+function withSites(envTexts, fn) {
+  const root = mkdtempSync(join(tmpdir(), 'tilda-sweep-'));
+  try {
+    const sites = envTexts.map((text, i) => {
+      const dir = join(root, `site${i}`);
+      mkdirSync(dir);
+      if (text !== null) writeFileSync(join(dir, '.env'), text);
+      return dir;
+    });
+    return fn(...sites);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+const SWEEP_ARGS = ['--page', '100001', '--block', '100002'];
+const ENV_BASE = 'TILDA_PROJECT_ID=100001\nTILDA_PROTECTED_PAGES=\n';
+const ENV_EXTERNAL = `${ENV_BASE}TILDA_BROWSER_CDP=http://127.0.0.1:1\n`;
+
+/** Сбой без итоговой строки (контракт обёртки: код 1 без `total issues` — сбой). */
+function assertFailure(result) {
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.doesNotMatch(result.stdout, /total issues/);
+}
+
+test('layout-sweep --site без .env: отказ папки сайта, держатель не проверяется', () => {
+  withSites([null], (site) => {
+    const result = runSweep(['--site', site, ...SWEEP_ARGS]);
+    assertFailure(result);
+    assert.ok(result.stderr.includes(t('en', 'site.noEnv', { dir: site })), result.stderr);
+    assert.doesNotMatch(result.stderr, /the browser holder is not running/);
+  });
+});
+
+test('layout-sweep: TILDA_BROWSER_CDP из .env сайта выбирает внешний Chrome, а не держатель', () => {
+  withSites([ENV_EXTERNAL], (site) => {
+    const result = runSweep(['--site', site, ...SWEEP_ARGS]);
+    assertFailure(result);
+    assert.match(result.stderr, /127\.0\.0\.1:1/);
+    assert.match(result.stderr, /"source":"external"/);
+    assert.doesNotMatch(result.stderr, /the browser holder is not running/);
+  });
+});
+
+test('layout-sweep: папка сайта из TILDA_SITE_DIR без --site даёт тот же результат', () => {
+  withSites([ENV_EXTERNAL], (site) => {
+    const result = runSweep(SWEEP_ARGS, { TILDA_SITE_DIR: site });
+    assertFailure(result);
+    assert.match(result.stderr, /127\.0\.0\.1:1/);
+    assert.match(result.stderr, /"source":"external"/);
+    assert.doesNotMatch(result.stderr, /the browser holder is not running/);
+  });
+});
+
+test('layout-sweep: --site и TILDA_SITE_DIR на разные папки — отказ', () => {
+  withSites([ENV_EXTERNAL, ENV_EXTERNAL], (a, b) => {
+    const result = runSweep(['--site', a, ...SWEEP_ARGS], { TILDA_SITE_DIR: b });
+    assertFailure(result);
+    assert.ok(result.stderr.includes(t('en', 'site.dirsDiffer', { flag: a, env: b })), result.stderr);
+  });
+});
+
+test('layout-sweep без --page: код 2, прежний контракт', () => {
+  const result = runSweep(['--block', '100002']);
+  assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /--page <pageid> --block <recordid> are required/);
+  assert.doesNotMatch(result.stdout, /total issues/);
+});
+
+test('layout-sweep без TILDA_BROWSER_CDP и без держателя: прежняя ошибка про держатель', () => {
+  withSites([ENV_BASE], (site) => {
+    const result = runSweep(['--site', site, ...SWEEP_ARGS]);
+    assertFailure(result);
+    assert.match(result.stderr, /the browser holder is not running: node scripts\/tilda\.mjs browser start/);
+  });
 });
 
 test('formFieldChanges: удаление элемента формы целиком допускается, правка поля — нет', async () => {

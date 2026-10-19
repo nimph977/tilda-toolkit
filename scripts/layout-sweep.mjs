@@ -9,8 +9,12 @@
  *   clipped    — текст выше своей коробки (scrollHeight > clientHeight + 2);
  *   below      — элемент ниже низа блока.
  *
- *   node scripts/layout-sweep.mjs --page <pageid> --block <recordid> [--widths 320-1440:40 | 320,375,768]
+ *   node scripts/layout-sweep.mjs [--site <папка сайта>] --page <pageid> --block <recordid>
+ *                                 [--widths 320-1440:40 | 320,375,768]
  *                                 [--out <dir>] [--tag <имя>] [--mode reload|resize]
+ *
+ * Сайт выбирается, как у `tilda.mjs`: `--site <папка>` или `TILDA_SITE_DIR`; `.env` сайта задаёт
+ * `TILDA_PROJECT_ID` и, для внешнего Chrome, `TILDA_BROWSER_CDP`.
  *
  * Итог: <out>/<width>.png на каждую ширину, <out>/report.json, таблица в консоль;
  * код выхода 1, если есть нарушения. Параллельные процессы с разными --widths допустимы:
@@ -22,7 +26,8 @@ import { parseArgs } from 'node:util';
 import { chromium } from 'playwright-core';
 import { createLogger } from './lib/log.mjs';
 import { baselineDir } from './lib/paths.mjs';
-import { daemonStatus, editorUrl, openBackgroundPage } from './lib/browser.mjs';
+import { applySite } from './lib/site.mjs';
+import { daemonStatus, editorUrl, externalCdp, openBackgroundPage } from './lib/browser.mjs';
 import { previewUrl } from './shot.mjs';
 
 const log = createLogger('layout-sweep');
@@ -103,13 +108,42 @@ async function measureBlock(page, recordid) {
   }, String(recordid));
 }
 
+/**
+ * Куда подключаться по CDP: внешний Chrome (`TILDA_BROWSER_CDP`, результат `externalCdp()`) главнее
+ * держателя; держатель без порта и отсутствие обоих — `null`. Чистая функция.
+ */
+export function cdpTarget({ external, holder } = {}) {
+  if (external) return { source: 'external', url: external.url };
+  if (holder?.port) return { source: 'holder', url: `http://127.0.0.1:${holder.port}` };
+  return null;
+}
+
 export async function sweep({ pageid, recordid, widths, outDir, projectid, settleMs = 700, mode = 'reload' }) {
-  const st = daemonStatus();
-  if (!st) throw new Error('the browser holder is not running: node scripts/tilda.mjs browser start');
+  // Внешний адрес проверяется первым; держатель читается только без него: daemonStatus() нужен профиль сайта.
+  const external = externalCdp();
+  const holder = external ? null : daemonStatus();
+  log.debug('sweep', 'target candidates', { external: Boolean(external), holderPort: holder?.port ?? null });
+  const target = cdpTarget({ external, holder });
+  if (!target) throw new Error('the browser holder is not running: node scripts/tilda.mjs browser start');
+  log.info('sweep', 'browser target', { source: target.source, url: target.url });
   mkdirSync(outDir, { recursive: true });
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${st.port}`, { timeout: 15_000 });
+  // Ни lock профиля, ни lock команды не берутся: вкладка своя и только читает предпросмотр.
+  // browser.close() у подключения по CDP лишь рвёт связь — Chrome и чужие вкладки остаются целы.
+  const browser = await chromium.connectOverCDP(target.url, { timeout: 15_000 });
+  // Вход в Tilda живёт в первом контексте; в новом (browser.newContext()) cookies входа нет.
   const context = browser.contexts()[0];
-  const page = await openBackgroundPage(context); // окно держателя остаётся свёрнутым
+  if (!context) {
+    await browser.close().catch(() => {});
+    throw new Error(`no browser context at ${target.url}`);
+  }
+  // Вкладка. Держатель: его окно всегда свёрнуто, Chrome разворачивает его при новой вкладке —
+  // openBackgroundPage сворачивает обратно. Внешний Chrome: окно принадлежит хосту, не сворачиваем.
+  // Проба 2026-10-19 на окне :98 (about:blank/data:): newPage() оставил окно в том же состоянии
+  // (S0 = S1: normal, то же windowId), снимок 320×640 и 640×900 верный без сворачивания;
+  // 'minimized' Chrome принял без ошибки, но состояние осталось normal (S2 = normal: оконного
+  // менеджера нет) — сворачивание там ничего не даёт, а на машине с менеджером спрятало бы чужое окно.
+  const page = target.source === 'holder' ? await openBackgroundPage(context) : await context.newPage();
+  log.debug('sweep', 'agent tab opened', { source: target.source, minimized: target.source === 'holder' });
   const results = [];
   try {
     // Загрузка предпросмотра: показать анимируемые элементы стилем и спрятать закреплённые элементы
@@ -190,18 +224,34 @@ function printTable(report) {
   }
 }
 
-const isMain = process.argv[1] && /layout-sweep\.mjs$/.test(process.argv[1].replace(/\\/g, '/'));
-if (isMain) {
-  const { values } = parseArgs({ options: { page: { type: 'string' }, block: { type: 'string' }, widths: { type: 'string' }, out: { type: 'string' }, tag: { type: 'string' }, mode: { type: 'string' } } });
+/** Разбор командной строки; неизвестный флаг — исключение `TypeError` (строгий режим `parseArgs`). */
+export function parseSweepArgs(argv) {
+  const { values } = parseArgs({
+    args: argv,
+    options: { site: { type: 'string' }, page: { type: 'string' }, block: { type: 'string' }, widths: { type: 'string' }, out: { type: 'string' }, tag: { type: 'string' }, mode: { type: 'string' } },
+  });
+  return values;
+}
+
+/** Прогон из командной строки: возвращает код выхода (0 — нарушений нет, 1 — нарушения, 2 — не хватает аргументов); сбой — исключение. */
+async function main(argv) {
+  const values = parseSweepArgs(argv);
+  if (!values.page || !values.block) { console.error('--page <pageid> --block <recordid> are required'); return 2; }
+  // .env сайта грузится до чтения путей и ID проекта: baselineDir(), previewUrl() и externalCdp() берут их из окружения.
+  applySite({ flag: values.site });
   const mode = values.mode === 'resize' ? 'resize' : 'reload';
-  if (!values.page || !values.block) { console.error('--page <pageid> --block <recordid> are required'); process.exit(2); }
   const widths = parseWidthSpec(values.widths);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const outDir = values.out || join(baselineDir(), 'shots', String(values.page), `sweep-${values.block}-${values.tag || stamp}`);
-  sweep({ pageid: values.page, recordid: values.block, widths, outDir, mode }).then((report) => {
-    printTable(report);
-    const total = report.results.reduce((n, r) => n + r.issues.length, 0);
-    console.log(`\ntotal issues: ${total}; screenshots and report.json — ${outDir}`);
-    process.exit(total ? 1 : 0);
-  }).catch((e) => { log.error('main', e.message); console.error(e.stack); process.exit(1); });
+  log.debug('main', 'arguments', { page: values.page, block: values.block, widths: widths.length, mode, out: outDir, site: Boolean(values.site) });
+  const report = await sweep({ pageid: values.page, recordid: values.block, widths, outDir, mode });
+  printTable(report);
+  const total = report.results.reduce((n, r) => n + r.issues.length, 0);
+  console.log(`\ntotal issues: ${total}; screenshots and report.json — ${outDir}`);
+  return total ? 1 : 0;
+}
+
+const isMain = process.argv[1] && /layout-sweep\.mjs$/.test(process.argv[1].replace(/\\/g, '/'));
+if (isMain) {
+  main(process.argv.slice(2)).then((code) => process.exit(code)).catch((e) => { log.error('main', e.message); console.error(e.stack); process.exit(1); });
 }
