@@ -33,7 +33,7 @@ tilda.mjs  →  команды-оркестраторы  →  модели и с
 | `scripts/promote.mjs`, `page-ops.mjs`, `session-plan.mjs` | накат, операции страницы, накопительный план |
 | `scripts/page-list.mjs` | перечень страниц проекта (`page list`): разбор ответа кабинета и нормализация без сети, драйвер приходит снаружи |
 | `scripts/shot.mjs`, `map-blocks.mjs`, `link-check.mjs`, `upload.mjs` | команды вида страницы и загрузка |
-| `scripts/layout-sweep.mjs` | замер блока при нескольких ширинах окна: отдельный скрипт, запускается напрямую, а не командой `tilda.mjs` (см. [layout-sweep](cli.md#layout-sweep)); выбор браузера, проверки, коробки и зазоры элементов — чистые функции без сети |
+| `scripts/layout-sweep.mjs` | замер блока при нескольких ширинах окна: отдельный скрипт, запускается напрямую, а не командой `tilda.mjs` (см. [layout-sweep](cli.md#layout-sweep)); выбор браузера, проверки, коробки и зазоры элементов, причина скрытия блока на ширине, пояснения и строки таблицы — чистые функции без сети |
 | `scripts/apply-plan.mjs`, `zero-model.mjs`, `list-model.mjs` | подготовка и сверка плана, модели блоков |
 | `scripts/snapshot.mjs`, `journal.mjs`, `find-replace.mjs` | снимки, журнал, поиск по снимкам |
 | `scripts/reference.mjs`, `catalog.mjs`, `reference-plan.mjs` | сборка по референсу: слепок сайта через держатель, каталог полей шаблонов, генератор плана `newRecord` |

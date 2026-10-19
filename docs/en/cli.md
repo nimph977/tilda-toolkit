@@ -174,7 +174,11 @@ The script does not read `--lang`; its messages are in English.
 | `clipped` | A text is taller than its box. |
 | `below` | An element lies below the bottom of the block. |
 
-**Result** (in `--out`): `<width>.png` for every width — the block only, and `report.json`:
+`outside`, `overlap`, `clipped`, `below`, `boxes` and `gaps` work only on Zero Block elements (`.t396__elem`); `overflow` looks at the whole page. A block without Zero Block elements gets only `overflow` and the block height, and the table and the `notes` field of the width say so: `no Zero Block elements: only overflow and block height checked`. For such a block `total issues: 0` does not mean the elements were checked.
+
+**A hidden width.** If the block is not shown at a width, the width is recorded as hidden and the run goes on: no screenshot, no checks, no 30-second wait. This happens when the block is `display: none` (a block with `t-screenmin-980px` or `t-screenmax-980px` is hidden at the other widths), sits in a hidden parent, is a popup, or has a zero size. The table shows `hidden` and the reason under it. The reason is one of `display: none`, `display: none on ancestor <tag#id>`, `visibility: hidden`, `zero size <w>×<h>`, `not visible`; if the block has `t-screenmin-*` or `t-screenmax-*` classes, they follow in parentheses. A hidden width does not count in `total issues` and does not change the exit code. If the block is hidden at every requested width, the table ends with `block hidden at every requested width`, the total is `total issues: 0` and the code is `0`: nothing was measured. Choose widths where the block is shown.
+
+**Result** (in `--out`): `<width>.png` for every width where the block is shown — the block only, and `report.json`:
 
 | Field | Contents |
 | --- | --- |
@@ -184,8 +188,10 @@ The script does not read `--lang`; its messages are in English.
 | `results[].boxes` | visible elements, shapes included: `id`, `type`, `left`, `top`, `width`, `height` in whole px from the top-left corner of the block |
 | `results[].gaps` | vertical gaps: for each visible element (shapes excluded) `elem`, `above` — the nearest element above it that shares a horizontal span with it — and `gap = elem.top − above.bottom`; a negative `gap` means an overlap; an element with nothing above it has no entry |
 | `results[].issues`, `file` | the violations of the checks above and the PNG path |
+| `results[].notes` | notes on a measured width: a list of strings, empty (`[]`) when there is nothing to note; for a block without Zero Block elements — the text from the paragraph above |
+| `results[].hidden`, `reason` | only on a hidden width: `hidden: true` and the reason. Such an entry has just `width`, `hidden` and `reason` — no `blockHeight`, `elems`, `boxes`, `gaps`, `issues`, `notes` or `file`, so a reader of `results[]` checks `hidden` first |
 
-The console gets a table by width and the last line `total issues: <N>; screenshots and report.json — <folder>`.
+The console gets a table by width and the last line `total issues: <N>; screenshots and report.json — <folder>`. Under a width the table lists the violations, then the notes; a hidden width shows `hidden` and the reason.
 
 **Exit codes** differ from the table above (a configuration error here is `1`, not `2`):
 
@@ -195,7 +201,7 @@ The console gets a table by width and the last line `total issues: <N>; screensh
 | `1` | There are violations, or any failure: no browser, a lost Tilda session, an unknown flag, a refusal of `--site` or its `.env`. A failure has no `total issues` line. |
 | `2` | `--page` or `--block` is missing. |
 
-There is no code `3`. A refusal of the site folder prints one of these messages (`<…>` stands for the value):
+A hidden width is not a violation and changes neither the code nor `total issues`. There is no code `3`. A refusal of the site folder prints one of these messages (`<…>` stands for the value):
 
 | Reason | Message |
 | --- | --- |
